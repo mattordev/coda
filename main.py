@@ -1,8 +1,9 @@
 #import and other stuff
-import cmd
-import os, sys
+import os
+import sys
 from importlib.machinery import SourceFileLoader
 import speech_recognition as sr
+import pyttsx3 as tts
 Clear = lambda: os.system('cls')
 
 
@@ -47,15 +48,13 @@ def on_command(msg):
 ## This loops, asking users to input a command here ##
 
 wakeword = "coda"
-
 i=0
-n=0
+
 while True:
    while (i<1):
         r = sr.Recognizer()
         with sr.Microphone() as source:
-            audio = r.adjust_for_ambient_noise(source)
-            n=(n+1)     
+            audio = r.adjust_for_ambient_noise(source, duration=0.2)   
             print('Ready to accept commands')
             audio = r.listen(source)
     #find out whats been said(Google Speech Recognition)
