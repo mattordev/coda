@@ -1,6 +1,7 @@
 import webbrowser
 import random
 
+# need to rewrite this so it asks for where to search on google maps
 def run(message):
     query = message
     stopwords = ['google', 'maps']

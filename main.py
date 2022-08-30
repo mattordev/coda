@@ -1,13 +1,14 @@
-#import and other stuff
+# Imports
 import os
 import sys
 from importlib.machinery import SourceFileLoader
+from turtle import clear
 import speech_recognition as sr
 import pyttsx3 as tts
+
+
+
 Clear = lambda: os.system('cls')
-
-
-
 command_file_location = os.getcwd()+ "\Commands\\"
 sys.path.append(command_file_location)
 
@@ -20,7 +21,7 @@ for cmdFile in os.listdir(command_file_location):
 
 
 ### THIS FUNCTION PROCESSES COMMANDS FROM INPUTS PASSED INTO IT ###
-def on_command(msg):
+def on_command_old(msg):
     if(len(msg) <= 0): return
 
     msg = msg.lower().split() # LOWERS AND SEPERATES EACH WORD INTO AN INDEXED ARRAY
@@ -39,7 +40,26 @@ def on_command(msg):
     else:
         Clear()
         print("Command does not exist... Please try again!")
+
+def on_command(msg):
+    # Guard clause to stop empty messages.
+    if (len(msg) <= 0): return 
     
+    # Make the message lowercase, split it into an array.
+    msg = msg.lower().split()
+    
+    for i in range(1, len(msg)):
+        if (msg[i] in commands):
+            args = [] # This holds any params of the command
+            cmd = msg[i]
+            if (not commands[cmd].run(args)):
+                Clear()
+                print("Command failed to execute... Please try again!")
+        else:
+            Clear()
+            #print("Command does not exist... Please try again!")
+            print ("Checking rest of messasge for command")
+            Clear()
 
 def display_message(message):
     print(message)
@@ -54,10 +74,9 @@ def speak_response(response):
 
 
 ### MAIN ###
-## This loops, asking users to input a command here ##
+## This loops, asking users to input a command here after saying the keyword. ##
 
 wakeword = "coda"
-
 
 while True:
     r = sr.Recognizer()
@@ -70,9 +89,10 @@ while True:
         speech = (r.recognize_google(audio))
         message = (speech.lower())
         
+        
         if (wakeword) in message:
-            display_message(message)
-            on_command(str(message))
+           display_message(message)
+           on_command(str(message)) 
 
 
     # exceptions
