@@ -41,6 +41,15 @@ def on_command(msg):
         print("Command does not exist... Please try again!")
     
 
+def display_message(message):
+    print(message)
+
+def speak_response(response):
+    # Initialize text-to-speech
+    speaker = tts.init
+    # Set how fast it will talk.
+    speaker.setProperty('rate', 200)
+    speaker.say(response)
 
 
 
@@ -48,27 +57,26 @@ def on_command(msg):
 ## This loops, asking users to input a command here ##
 
 wakeword = "coda"
-i=0
+
 
 while True:
-   while (i<1):
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            audio = r.adjust_for_ambient_noise(source, duration=0.2)   
-            print('Ready to accept commands')
-            audio = r.listen(source)
-    #find out whats been said(Google Speech Recognition)
-        try:
-            s = (r.recognize_google(audio))
-            message = (s.lower())
-            
-            if ('coda') in message:
-                print(message)
-                on_command(str(message))
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        audio = r.adjust_for_ambient_noise(source)   
+        print('Ready to accept commands')
+        audio = r.listen(source)
+#find out whats been said(Google Speech Recognition)
+    try:
+        speech = (r.recognize_google(audio))
+        message = (speech.lower())
+        
+        if (wakeword) in message:
+            display_message(message)
+            on_command(str(message))
 
 
-        # exceptions
-        except sr.UnknownValueError:
-            print("Could not understand audio")
-        except sr.RequestError as e:
-            print("Could not request results; {0}".format(e))
+    # exceptions
+    except sr.UnknownValueError:
+        print("Could not understand audio")
+    except sr.RequestError as e:
+        print("Could not request results; {0}".format(e))
