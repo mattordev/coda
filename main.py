@@ -3,7 +3,8 @@ import os
 import sys
 from importlib.machinery import SourceFileLoader
 import speech_recognition as sr
-import utils.speak_response as speak
+
+import utils.voice_recognizer as voice_recognizer
 
 
 def clear_terminal():
@@ -11,16 +12,17 @@ def clear_terminal():
     return os.system('cls')
 
 
-command_file_location = os.getcwd() + "\commands\\"
-sys.path.append(command_file_location)
+def setup_commands():
+    command_file_location = os.getcwd() + "\commands\\"
+    sys.path.append(command_file_location)
 
-commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
-for cmdFile in os.listdir(command_file_location):
-    name = os.fsdecode(cmdFile)
-    if(name.endswith(".py")):
-        module = SourceFileLoader(
-            cmdFile, command_file_location+cmdFile).load_module()
-        commands[name.split(".py")[0].lower()] = module
+    commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
+    for cmdFile in os.listdir(command_file_location):
+        name = os.fsdecode(cmdFile)
+        if(name.endswith(".py")):
+            module = SourceFileLoader(
+                cmdFile, command_file_location+cmdFile).load_module()
+            commands[name.split(".py")[0].lower()] = module
 
 
 def on_command(msg):
@@ -44,36 +46,8 @@ def on_command(msg):
             clear_terminal()
 
 
-def display_message(message):
-    print(message, flush=True)
-
-
 ### MAIN ###
-## This loops, asking users to input a command here after saying the keyword. ##
 wakeword = {"coda", "kodak", "coder", "skoda"}
 
-while True:
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        #r.adjust_for_ambient_noise(source, duration=0.5)
-        print('Ready to accept commands')
-        try:
-            audio = r.listen(source, timeout=0.1)
-            speech = (r.recognize_google(audio, language="en-GB"))
-            message = (speech.lower())
-            display_message(message)
-
-            if not wakeword.isdisjoint(message.lower().split()):
-                on_command(str(message))
-
-        # exceptions
-        except sr.UnknownValueError:
-            print("ERROR: Audio not understandable")
-            continue
-        except sr.RequestError as e:
-            speak.speak_response(
-                "There was an issue with that request. Please try again later.")
-        except sr.WaitTimeoutError:
-            continue
-
-    # find out whats been said(Google Speech Recognition)
+# Calls the voice recognizer to listen to the microphone
+voice_recognizer.run(wakeword)
