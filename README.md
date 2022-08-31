@@ -25,7 +25,13 @@ Finished:
   
 ---
   
-### Licence
+ ### Installation
+ 
+ To install move to the download directory and run `pip install -r requirements.txt`
+  
+---
+  
+#### Licence
 
 MIT License
 
