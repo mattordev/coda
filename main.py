@@ -47,7 +47,7 @@ def on_command(msg):
 
 
 ### MAIN ###
-wakeword = {"coda", "kodak", "coder", "skoda"}
+wakeword = {"coda", "kodak", "coder", "skoda", "system"}
 
 # Calls the voice recognizer to listen to the microphone
 voice_recognizer.run(wakeword)

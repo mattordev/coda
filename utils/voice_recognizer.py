@@ -11,7 +11,7 @@ def run(wakeword):
             #r.adjust_for_ambient_noise(source, duration=0.5)
             print('Ready to accept commands')
             try:
-                audio = r.listen(source, timeout=0.1)
+                audio = r.listen(source, timeout=0.25)
 
                 speech = (r.recognize_google(audio))
                 message = (speech.lower())
