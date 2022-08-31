@@ -23,6 +23,8 @@ Planned:
 Finished:
   - Check for an internet connection
   
+---
+  
 ### Licence
 
 MIT License
