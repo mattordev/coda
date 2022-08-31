@@ -2,101 +2,78 @@
 import os
 import sys
 from importlib.machinery import SourceFileLoader
-from turtle import clear
 import speech_recognition as sr
-import pyttsx3 as tts
+import utils.speak_response as speak
 
 
+def clear_terminal():
+    return
+    return os.system('cls')
 
-Clear = lambda: os.system('cls')
-command_file_location = os.getcwd()+ "\Commands\\"
+
+command_file_location = os.getcwd() + "\commands\\"
 sys.path.append(command_file_location)
 
-commands = {} # ALL COMMANDS TO BE USED BY OPERATOR
+commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 for cmdFile in os.listdir(command_file_location):
-    name = os.fsdecode(cmdFile)       
+    name = os.fsdecode(cmdFile)
     if(name.endswith(".py")):
-        module = SourceFileLoader(cmdFile, command_file_location+cmdFile).load_module()
+        module = SourceFileLoader(
+            cmdFile, command_file_location+cmdFile).load_module()
         commands[name.split(".py")[0].lower()] = module
 
 
-### THIS FUNCTION PROCESSES COMMANDS FROM INPUTS PASSED INTO IT ###
-def on_command_old(msg):
-    if(len(msg) <= 0): return
-
-    msg = msg.lower().split() # LOWERS AND SEPERATES EACH WORD INTO AN INDEXED ARRAY
-
-    cmd = msg[0]    
-    if(cmd in commands):
-        args = [] # HOLDS THE PARAMETERS OF A COMMAND
-
-        for i in range(1, len(msg)): # ITERATE THROUGH THE MESSAGE, IGNORING THE COMMAND INDEX
-            args.append(msg[i])
-        
-        if(not commands[cmd].run(args)): # CALLS THE FUNCTION AND SIMULTANEOUSLY CHECKS TO SEE IF IT FAILED
-            Clear()
-            print("Command failed to execute... Please try again!")
-            return                
-    else:
-        Clear()
-        print("Command does not exist... Please try again!")
-
 def on_command(msg):
-    # Guard clause to stop empty messages.
-    if (len(msg) <= 0): return 
-    
-    # Make the message lowercase, split it into an array.
     msg = msg.lower().split()
-    
+    if not any(s in msg for s in commands):
+        print("No command found in string")
+
+    # Make the message lowercase, split it into an array.
+
     for i in range(1, len(msg)):
         if (msg[i] in commands):
-            args = [] # This holds any params of the command
+            args = []  # This holds any params of the command
             cmd = msg[i]
             if (not commands[cmd].run(args)):
-                Clear()
+                clear_terminal()
                 print("Command failed to execute... Please try again!")
         else:
-            Clear()
+            # clear_terminal()
             #print("Command does not exist... Please try again!")
-            print ("Checking rest of messasge for command")
-            Clear()
+            print("Checking rest of messasge for command")
+            clear_terminal()
+
 
 def display_message(message):
-    print(message)
-
-def speak_response(response):
-    # Initialize text-to-speech
-    speaker = tts.init
-    # Set how fast it will talk.
-    speaker.setProperty('rate', 200)
-    speaker.say(response)
-
+    print(message, flush=True)
 
 
 ### MAIN ###
 ## This loops, asking users to input a command here after saying the keyword. ##
-
-wakeword = "coda"
+wakeword = {"coda", "kodak", "coder", "skoda"}
 
 while True:
     r = sr.Recognizer()
     with sr.Microphone() as source:
-        audio = r.adjust_for_ambient_noise(source)   
+        #r.adjust_for_ambient_noise(source, duration=0.5)
         print('Ready to accept commands')
-        audio = r.listen(source)
-#find out whats been said(Google Speech Recognition)
-    try:
-        speech = (r.recognize_google(audio))
-        message = (speech.lower())
-        
-        
-        if (wakeword) in message:
-           display_message(message)
-           on_command(str(message)) 
+        try:
+            audio = r.listen(source, timeout=0.1)
+            speech = (r.recognize_google(audio, language="en-GB"))
+            message = (speech.lower())
+            display_message(message)
 
+            if not wakeword.isdisjoint(message.lower().split()):
+                on_command(str(message))
 
-    # exceptions
-    except sr.UnknownValueError:
-        print("Could not understand audio")
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
+        # exceptions
+        except sr.UnknownValueError:
+            print("ERROR: Audio not understandable")
+            continue
+        except sr.RequestError as e:
+            speak.speak_response(
+                "There was an issue with that request. Please try again later.")
+        except sr.WaitTimeoutError:
+            continue
+
+    # find out whats been said(Google Speech Recognition)
