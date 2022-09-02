@@ -26,7 +26,12 @@ Finished:
   
  ### Installation
  
- To install move to the download directory and run `pip install -r requirements.txt`
+Get the prerequisits first by doing the following:
+
+Prereqs for pyaudio and speech recognition:
+```sudo apt-get install libportaudio0 libportaudio2 libportaudiocpp0 portaudio19-dev flac```
+ 
+then, finally, after cloning move to the download directory and run `pip install -r requirements.txt`
   
 ---
   
