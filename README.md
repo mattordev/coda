@@ -12,6 +12,7 @@ C.O.D.A stands for **Cognitive Operational Data Assistant**, but this project wa
 As you may of figured, there's not much thats "cognitive" about a basic smart asisstant. But later down the line, depening on the completion of the first prototype and what I manage to get done I also want to look at Machine Learning for more accurate wakeword detection and speech synthesis.
 
 C.O.D.A has several planned commands and features, the planned commands and finished commands are here:
+
 Planned:
   - Check system status (Temperature, storage, etc)
   - Create "project" folders & files
