@@ -6,9 +6,9 @@ import os
 import utils.speak_response as speak
 
 
-def run(args):
+def run():
     REMOTE_SERVER = "www.google.com"
-
+    
     def is_connected():
         try:
             host = socket.gethostbyname(REMOTE_SERVER)
@@ -22,8 +22,8 @@ def run(args):
         response = random.choice(
             ['We are connected', 'There is an established data connection'])
         print(response)
-        args = []  # This holds any params of the command
         speak.speak_response(response)
         return True
     else:
         return False
+

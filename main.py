@@ -2,8 +2,6 @@
 import os
 import sys
 from importlib.machinery import SourceFileLoader
-import speech_recognition as sr
-
 import utils.voice_recognizer as voice_recognizer
 
 
