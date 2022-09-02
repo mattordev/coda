@@ -17,11 +17,15 @@ Planned:
   - Check system status (Temperature, storage, etc)
   - Create "project" folders & files
   - Spotify integration (so you can play your best tunes, whilst you do your best work)
-  - Search the systems default browser for a query.
+  - Search the systems default browser for a query
   - Home automation (Change thermostat, lock doors, manage other home based sensors)
   
 Finished:
   - Check for an internet connection
+
+Other features (subject to change):
+  - Flask integration with a webserver for showing what is happening system wide
+  - System logging features for gathering information about the current platform
   
 ---
   
@@ -40,6 +44,6 @@ then, finally, after cloning move to the download directory and run `pip install
 
 GNU AGPLv3
 
-Copyright (c) 2022 Matthew Roberts
+Copyright (C) 2022 Matthew Roberts
 
 To view the full license, please view `LICENCE.md`
