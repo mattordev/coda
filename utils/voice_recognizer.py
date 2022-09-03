@@ -14,18 +14,21 @@ def run(wakeword):
             print('Ready to accept commands')
             try:
                 audio = r.listen(source, timeout=0.25)
-                if (connected.run() == True):
-                    print ("LOG: Using online voice API")
-                    speech = (r.recognize_google(audio))
-                else:
-                    print ("LOG: Using offline voice API")
-                    speech = (r.recognize_sphinx(audio_data=audio))
+                
+                speech = (r.recognize_google(audio))
+                # Needs editing
+                # if (connected.run() == True):
+                #     print ("LOG: Using online voice API")
+                #     speech = (r.recognize_google(audio))
+                # else:
+                #     print ("LOG: Using offline voice API")
+                #     speech = (r.recognize_sphinx(audio_data=audio))
                 
                 message = (speech.lower())
                 display_message(message)
 
                 if not wakeword.isdisjoint(message.lower().split()):
-                    on_command(str(message)) # Errors because code for this is still in main
+                    main.on_command(str(message)) # Errors because code for this is still in main
 
             # exceptions
             except sr.UnknownValueError:
