@@ -6,7 +6,7 @@ import os
 import utils.speak_response as speak
 
 
-def run():
+def run(args):
     REMOTE_SERVER = "www.google.com"
     
     def is_connected():
@@ -20,7 +20,7 @@ def run():
 
     if(is_connected()):
         response = random.choice(
-            ['We are connected', 'There is an established data connection'])
+            ['We are connected', 'There is an established data connection', 'We are online', 'We are up and running, with consistent data streams'])
         print(response)
         speak.speak_response(response)
         return True

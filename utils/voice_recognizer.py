@@ -4,9 +4,9 @@ import speech_recognition as sr
 import pocketsphinx5 as ps5
 import utils.speak_response as speak
 import commands.connected as connected
+import utils.on_command as command
 
-
-def run(wakeword):
+def run(wakeword, commands):
     while True:
         r = sr.Recognizer()
         with sr.Microphone() as source:
@@ -28,7 +28,7 @@ def run(wakeword):
                 display_message(message)
 
                 if not wakeword.isdisjoint(message.lower().split()):
-                    main.on_command(str(message)) # Errors because code for this is still in main
+                    command.run(str(message), commands) # Errors because code for this is still in main
 
             # exceptions
             except sr.UnknownValueError:
