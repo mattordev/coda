@@ -6,12 +6,18 @@ import utils.speak_response as speak
 import commands.connected as connected
 import utils.on_command as command
 
-def run(wakeword, commands):
+# Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
+# Currently not using `wakewords.json` or `commands.json` but will be in the future
+def run(wakeword, commands, type):
     while True:
         r = sr.Recognizer()
         with sr.Microphone() as source:
             #r.adjust_for_ambient_noise(source, duration=0.5)
-            print('Ready to accept commands')
+            
+            if(type == "normal"):
+                print('Ready to accept commands')
+            elif(type == 'response'):
+                print('waiting for response')
             try:
                 audio = r.listen(source, timeout=0.25)
                 
