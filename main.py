@@ -5,7 +5,6 @@ import json
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
 
-
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 
 def setup_commands():
@@ -16,18 +15,18 @@ def setup_commands():
     for cmdFile in os.listdir(command_file_location):
         name = os.fsdecode(cmdFile)
         if(name.endswith(".py")):
+            commands[name.split(".py")[0].lower()] = command_file_location+cmdFile
             module = SourceFileLoader(
                 cmdFile, command_file_location+cmdFile).load_module()
-            commands[name.split(".py")[0].lower()] = module
-            print(commands)
-            # after setup we save the commands to a JSON file
-            #save_commands()
+            commands[name.split(".py")[0].lower()] = command_file_location+cmdFile
             
-# def save_commands(): 
-#     jsonCommands = json.dumps(commands)
-#     jsonCommandsFile = open("commands.json", "w")
-#     jsonCommandsFile.write(jsonCommands)
-#     jsonCommandsFile.close()
+            # after setup we save the commands to a JSON file
+            save_commands()
+            
+def save_commands():
+    print(commands)
+    with open("commands.json", "w") as outfile:
+        jsonCommands = json.dump(commands, outfile)
     
 def save_wakewords(wakewords):
     jsonWakewords = json.dumps(wakewords)
@@ -41,4 +40,4 @@ wakewords = ["coda", "kodak", "coder", "skoda", "powder"]
 # Calls the voice recognizer to listen to the microphone
 setup_commands()
 save_wakewords(wakewords)
-voice_recognizer.run(wakewords, commands, type='normal')
+voice_recognizer.run(wakewords,commands, type='normal')
