@@ -19,7 +19,7 @@ def run(wakeword, commands, type):
             elif(type == 'response'):
                 print('waiting for response')
             try:
-                audio = r.listen(source, timeout=0.25)
+                audio = r.listen(source)
                 
                 speech = (r.recognize_google(audio))
                 # Needs editing
@@ -35,6 +35,7 @@ def run(wakeword, commands, type):
 
                 if not set(wakeword).isdisjoint(message.lower().split()):
                     command.run(str(message), commands)
+
 
 
             # exceptions
