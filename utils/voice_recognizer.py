@@ -1,7 +1,7 @@
 # TODO: Implement PocketSphinx for offline voice recognition and use google's API for when there is a connection
 
 import speech_recognition as sr
-import pocketsphinx5 as ps5
+#import pocketsphinx5 as ps5
 import utils.speak_response as speak
 import commands.connected as connected
 import utils.on_command as command
