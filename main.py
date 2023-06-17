@@ -11,20 +11,25 @@ def setup_commands():
     command_file_location = os.getcwd() + "\commands\\"
     sys.path.append(command_file_location)
 
-    
+    # Clear the existing commands dictionary
+    commands.clear()
+
     for cmdFile in os.listdir(command_file_location):
         name = os.fsdecode(cmdFile)
-        if(name.endswith(".py")):
-            commands[name.split(".py")[0].lower()] = command_file_location+cmdFile
-            module = SourceFileLoader(
-                cmdFile, command_file_location+cmdFile).load_module()
-            commands[name.split(".py")[0].lower()] = command_file_location+cmdFile
-            
-            # after setup we save the commands to a JSON file
-            save_commands()
+        if name.endswith(".py"):
+            command_path = os.path.join(command_file_location, cmdFile)
+            commands[name.split(".py")[0].lower()] = command_path
+            module = SourceFileLoader(name, command_path).load_module()
+
+    # Save the commands to a JSON file after the setup is complete
+    save_commands()
             
 def save_commands():
+    print("----------------------------------------", flush=True)
+    print("PRINTING FOUND COMMANDS:")
     print(commands)
+    print("----------------------------------------")
+    
     with open("commands.json", "w") as outfile:
         jsonCommands = json.dump(commands, outfile)
     
