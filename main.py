@@ -18,7 +18,8 @@ def setup_commands():
         name = os.fsdecode(cmdFile)
         if name.endswith(".py"):
             command_path = os.path.join(command_file_location, cmdFile)
-            commands[name.split(".py")[0].lower()] = command_path
+            module = SourceFileLoader(name.split(".py")[0].lower(), command_path).load_module()
+            commands[name.split(".py")[0].lower()] = module
 
     # Save the commands to a JSON file after the setup is complete
     save_commands()
@@ -29,8 +30,15 @@ def save_commands():
     print(commands)
     print("----------------------------------------")
     
+    serialized_commands = {}
+    for cmd_name, cmd_module in commands.items():
+        serialized_commands[cmd_name] = {
+            'module': cmd_module.__name__,
+            # Add any other relevant information from the module if needed
+        }
+
     with open("commands.json", "w") as outfile:
-        jsonCommands = json.dump(commands, outfile)
+        json.dump(serialized_commands, outfile)
     
 def save_wakewords(wakewords):
     jsonWakewords = json.dumps(wakewords)
