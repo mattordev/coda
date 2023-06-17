@@ -19,7 +19,6 @@ def setup_commands():
         if name.endswith(".py"):
             command_path = os.path.join(command_file_location, cmdFile)
             commands[name.split(".py")[0].lower()] = command_path
-            module = SourceFileLoader(name, command_path).load_module()
 
     # Save the commands to a JSON file after the setup is complete
     save_commands()
