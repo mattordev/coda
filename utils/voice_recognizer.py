@@ -15,7 +15,7 @@ def run(wakeword, commands, type):
             #r.adjust_for_ambient_noise(source, duration=0.5)
             
             if(type == "normal"):
-                print('Ready to accept commands')
+                print('Ready to accept commands', flush=True)
             elif(type == 'response'):
                 print('waiting for response')
             try:
@@ -33,8 +33,9 @@ def run(wakeword, commands, type):
                 message = (speech.lower())
                 display_message(message)
 
-                if not wakeword.isdisjoint(message.lower().split()):
-                    command.run(str(message), commands) # Errors because code for this is still in main
+                if not set(wakeword).isdisjoint(message.lower().split()):
+                    command.run(str(message), commands)
+
 
             # exceptions
             except sr.UnknownValueError:
