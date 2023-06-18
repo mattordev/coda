@@ -1,102 +1,55 @@
 # Imports
 import os
 import sys
+import json
 from importlib.machinery import SourceFileLoader
-from turtle import clear
-import speech_recognition as sr
-import pyttsx3 as tts
+import utils.voice_recognizer as voice_recognizer
 
+commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 
+def setup_commands():
+    command_file_location = os.getcwd() + "\commands\\"
+    sys.path.append(command_file_location)
 
-Clear = lambda: os.system('cls')
-command_file_location = os.getcwd()+ "\Commands\\"
-sys.path.append(command_file_location)
+    # Clear the existing commands dictionary
+    commands.clear()
 
-commands = {} # ALL COMMANDS TO BE USED BY OPERATOR
-for cmdFile in os.listdir(command_file_location):
-    name = os.fsdecode(cmdFile)       
-    if(name.endswith(".py")):
-        module = SourceFileLoader(cmdFile, command_file_location+cmdFile).load_module()
-        commands[name.split(".py")[0].lower()] = module
+    for cmdFile in os.listdir(command_file_location):
+        name = os.fsdecode(cmdFile)
+        if name.endswith(".py"):
+            command_path = os.path.join(command_file_location, cmdFile)
+            module = SourceFileLoader(name.split(".py")[0].lower(), command_path).load_module()
+            commands[name.split(".py")[0].lower()] = module
 
-
-### THIS FUNCTION PROCESSES COMMANDS FROM INPUTS PASSED INTO IT ###
-def on_command_old(msg):
-    if(len(msg) <= 0): return
-
-    msg = msg.lower().split() # LOWERS AND SEPERATES EACH WORD INTO AN INDEXED ARRAY
-
-    cmd = msg[0]    
-    if(cmd in commands):
-        args = [] # HOLDS THE PARAMETERS OF A COMMAND
-
-        for i in range(1, len(msg)): # ITERATE THROUGH THE MESSAGE, IGNORING THE COMMAND INDEX
-            args.append(msg[i])
-        
-        if(not commands[cmd].run(args)): # CALLS THE FUNCTION AND SIMULTANEOUSLY CHECKS TO SEE IF IT FAILED
-            Clear()
-            print("Command failed to execute... Please try again!")
-            return                
-    else:
-        Clear()
-        print("Command does not exist... Please try again!")
-
-def on_command(msg):
-    # Guard clause to stop empty messages.
-    if (len(msg) <= 0): return 
+    # Save the commands to a JSON file after the setup is complete
+    save_commands()
+            
+def save_commands():
+    print("----------------------------------------", flush=True)
+    print("PRINTING FOUND COMMANDS:")
+    print(commands)
+    print("----------------------------------------")
     
-    # Make the message lowercase, split it into an array.
-    msg = msg.lower().split()
+    serialized_commands = {}
+    for cmd_name, cmd_module in commands.items():
+        serialized_commands[cmd_name] = {
+            'module': cmd_module.__name__,
+            # Add any other relevant information from the module if needed
+        }
+
+    with open("commands.json", "w") as outfile:
+        json.dump(serialized_commands, outfile)
     
-    for i in range(1, len(msg)):
-        if (msg[i] in commands):
-            args = [] # This holds any params of the command
-            cmd = msg[i]
-            if (not commands[cmd].run(args)):
-                Clear()
-                print("Command failed to execute... Please try again!")
-        else:
-            Clear()
-            #print("Command does not exist... Please try again!")
-            print ("Checking rest of messasge for command")
-            Clear()
-
-def display_message(message):
-    print(message)
-
-def speak_response(response):
-    # Initialize text-to-speech
-    speaker = tts.init
-    # Set how fast it will talk.
-    speaker.setProperty('rate', 200)
-    speaker.say(response)
-
-
+def save_wakewords(wakewords):
+    jsonWakewords = json.dumps(wakewords)
+    jsonWakewordsFile = open("wakewords.json", "w")
+    jsonWakewordsFile.write(jsonWakewords)
+    jsonWakewordsFile.close()
 
 ### MAIN ###
-## This loops, asking users to input a command here after saying the keyword. ##
+wakewords = ["coda", "kodak", "coder", "skoda", "powder"]
 
-wakeword = "coda"
-
-while True:
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        audio = r.adjust_for_ambient_noise(source)   
-        print('Ready to accept commands')
-        audio = r.listen(source)
-#find out whats been said(Google Speech Recognition)
-    try:
-        speech = (r.recognize_google(audio))
-        message = (speech.lower())
-        
-        
-        if (wakeword) in message:
-           display_message(message)
-           on_command(str(message)) 
-
-
-    # exceptions
-    except sr.UnknownValueError:
-        print("Could not understand audio")
-    except sr.RequestError as e:
-        print("Could not request results; {0}".format(e))
+# Calls the voice recognizer to listen to the microphone
+setup_commands()
+save_wakewords(wakewords)
+voice_recognizer.run(wakewords,commands, type='normal')
