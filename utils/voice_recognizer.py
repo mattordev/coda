@@ -21,7 +21,7 @@ def run(wakeword, commands, type):
             elif (type == 'response'):
                 print('waiting for response')
             try:
-                audio = r.listen(source, timeout=5)
+                audio = r.listen(source, timeout=.25)
 
                 speech = (r.recognize_google(audio))
                 # Needs editing
