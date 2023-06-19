@@ -7,14 +7,14 @@ import random
 
 def extract_query_from_command(command):
     excluded_words = ['google', 'maps', 'search', 'find', 'look', 'up', 'show', 'display', 'navigate',
-                      'to', 'directions', 'route', 'get', 'take', 'me', 'on', 'in', 'near', 'around', 'nearby']
+                      'to', 'directions', 'route', 'get', 'take', 'me', 'on', 'in', 'near', 'around', 'nearby', 'open']
     querywords = [word for word in command if word.lower()
                   not in excluded_words]
     query = ' '.join(querywords)
     return query.strip()
 
 
-def run(message, wakewords):
+def run(message):
     query = extract_query_from_command(message)
     if query:
         chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
