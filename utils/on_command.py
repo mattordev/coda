@@ -15,19 +15,21 @@ def on_command(msg, commands):
     if not any(s in msg for s in commands):
         print("No command found in string")
 
-    for i in range(1, len(msg)):
-        if (msg[i] in commands):
+    # Find the intersection between the message words and the command words
+    matched_commands = set(msg) & set(commands.keys())
+
+    if len(matched_commands) > 0:
+        # If there are matched commands, iterate over them
+        for cmd in matched_commands:
             args = []  # This holds any params of the command
-            cmd = msg[i]
-            if (not commands[cmd].run(args)):
+            if not commands[cmd].run(args):
                 clear_terminal()
                 print("Command failed to execute... Please try again!")
-        else:
-            clear_terminal()
-            # print("Command does not exist... Please try again!")
-            print("Checking rest of messasge for command")
-            time.sleep(1)
-            clear_terminal()
+    else:
+        clear_terminal()
+        print("Checking rest of message for command")
+        time.sleep(1)
+        clear_terminal()
 
 
 def clear_terminal():
