@@ -21,15 +21,15 @@ def on_command(msg, commands):
     if len(matched_commands) > 0:
         # If there are matched commands, iterate over them
         for cmd in matched_commands:
-            args = msg[1:]  # Pass the message content as arguments
+            args = ' '.join(msg[1:]).split()  # Convert list to string and then split
             if not commands[cmd].run(args):
-                clear_terminal()
+                # clear_terminal()
                 print("Command failed to execute... Please try again!")
     else:
-        clear_terminal()
+        # clear_terminal()
         print("Checking rest of message for command")
         time.sleep(1)
-        clear_terminal()
+        # clear_terminal()
 
 
 def clear_terminal():
