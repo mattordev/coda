@@ -1,5 +1,5 @@
 import pyttsx3 as tts
-from elevenlabs import generate, play, stream, set_api_key
+from elevenlabs import generate, play, set_api_key
 import commands.connected as connected
 
 elevenLabsAPIKey = 'abe3e7684e46c45769406e9f76f5f936'
