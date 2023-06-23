@@ -12,6 +12,7 @@ import requests
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 
+
 def setup_commands():
     command_file_location = os.getcwd() + "\commands\\"
     sys.path.append(command_file_location)
@@ -30,6 +31,7 @@ def setup_commands():
     # Save the commands to a JSON file after the setup is complete
     save_commands()
 
+
 def save_commands():
     print("----------------------------------------", flush=True)
     print("PRINTING FOUND COMMANDS:")
@@ -46,11 +48,13 @@ def save_commands():
     with open("commands.json", "w") as outfile:
         json.dump(serialized_commands, outfile)
 
+
 def save_wakewords(wakewords):
     jsonWakewords = json.dumps(wakewords)
     jsonWakewordsFile = open("wakewords.json", "w")
     jsonWakewordsFile.write(jsonWakewords)
     jsonWakewordsFile.close()
+
 
 def check_update_available(version_url):
     try:
@@ -70,29 +74,31 @@ def check_update_available(version_url):
 
     return False
 
+
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
     setup_commands()
     save_wakewords(wakewords)
 
+
 ### MAIN ###
 wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system"]
 
-if check_update_available(version_url):
-    # if there's an update available, re-find the commands
-    setup_commands()
-    print("Setting up commands as a new version was found...")
-else:
-    try:
-        # load the commands from JSON.
-        with open("commands.json", "r") as command_file:
-            print("Loading commands from JSON")
+# if check_update_available(version_url):
+#     # if there's an update available, re-find the commands
+#     setup_commands()
+#     print("Setting up commands as a new version was found...")
+# else:
+#     try:
+#         # load the commands from JSON.
+#         with open("commands.json", "r") as command_file:
+#             print("Loading commands from JSON")
 
-            print(commands)
-    except FileNotFoundError:
-        run_first_time_setup()
+#             print(commands)
+#     except FileNotFoundError:
+#         run_first_time_setup()
 
-#run_first_time_setup()
+run_first_time_setup()
 save_wakewords(wakewords)
 # Calls the voice recognizer to listen to the microphone
 voice_recognizer.run(wakewords, commands, type='normal')
