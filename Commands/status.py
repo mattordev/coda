@@ -24,7 +24,7 @@ def get_running_on_system_status():
     time.sleep(.5)
 
     print("This system has a: " + platform.processor() + " processor.")
-    speak.speak_response("This system has a: " +
+    speak.speak_response("This system has an: " +
                          platform.processor() + " processor.")
 
     time.sleep(.5)
