@@ -41,12 +41,46 @@ def save_commands():
     serialized_commands = {}
     for cmd_name, cmd_module in commands.items():
         serialized_commands[cmd_name] = {
-            'module': cmd_module.__name__,
+            'module': cmd_module.__file__,
             # Add any other relevant information from the module if needed
         }
 
     with open("commands.json", "w") as outfile:
         json.dump(serialized_commands, outfile)
+
+
+def load_commands():
+    try:
+        # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
+        sys.path.append('G:\\GitRepos\\coda\\commands')
+
+        with open("commands.json", "r") as infile:
+            serialized_commands = json.load(infile)
+
+        commands = {}
+        for cmd_name, cmd_data in serialized_commands.items():
+            module_path = cmd_data["module"]
+            # Add any other relevant information from the JSON if needed
+
+            # Get the module name from the file path
+            module_name = module_path.split("\\")[-1].split(".")[0]
+
+            # Dynamically import the module
+            try:
+                module = importlib.import_module(module_name)
+            except ImportError as e:
+                print(f"Error importing module: {module_name}")
+                print(f"ImportError: {str(e)}")
+                continue
+
+            # Add the command to the dictionary
+            commands[cmd_name] = module
+
+        print("commands loaded successfully.")
+        return commands
+    except FileNotFoundError:
+        print("Commands file not found. Assuming first-time setup...")
+        return {}
 
 
 def save_wakewords(wakewords):
@@ -84,21 +118,20 @@ def run_first_time_setup():
 ### MAIN ###
 wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system"]
 
-# if check_update_available(version_url):
-#     # if there's an update available, re-find the commands
-#     setup_commands()
-#     print("Setting up commands as a new version was found...")
-# else:
-#     try:
-#         # load the commands from JSON.
-#         with open("commands.json", "r") as command_file:
-#             print("Loading commands from JSON")
+if check_update_available(version_url):
+    # if there's an update available, re-find the commands
+    setup_commands()
+    print("Setting up commands as a new version was found...")
+else:
+    try:
+        # load the commands from JSON.
+        commands = load_commands()
+        print(commands)
+    except FileNotFoundError:
+        print("Commands file not found. Assuming first-time setup...")
+        run_first_time_setup()
 
-#             print(commands)
-#     except FileNotFoundError:
-#         run_first_time_setup()
 
-run_first_time_setup()
 save_wakewords(wakewords)
 # Calls the voice recognizer to listen to the microphone
 voice_recognizer.run(wakewords, commands, type='normal')
