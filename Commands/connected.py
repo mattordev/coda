@@ -21,7 +21,7 @@ def is_connected():
 def run(args):
     if (is_connected()):
         response = random.choice(
-            ['We are connected', 'There is an established data connection', 'We are online and ready to go boss', 'We are up and running, with consistent data streams', 'Things are looking good here.', 'We\'re online and ready to go sir'])
+            ['We are connected.', 'There is an established data connection.', 'We are online and ready to go boss!', 'We are up and running, with consistent data streams.', 'Things are looking good here.', 'We\'re online and ready to go sir.'])
         print(response)
         speak.speak_response(response)
         return True
