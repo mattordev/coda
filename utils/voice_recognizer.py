@@ -1,5 +1,6 @@
 # TODO: Implement PocketSphinx for offline voice recognition and use google's API for when there is a connection
 
+import os
 import speech_recognition as sr
 # import pocketsphinx5 as ps5
 import utils.speak_response as speak
@@ -17,6 +18,7 @@ def run(wakeword, commands, type):
             # r.adjust_for_ambient_noise(source, duration=0.5)
 
             if (type == "normal"):
+                # clear_terminal
                 print('Ready to accept commands', flush=True)
             elif (type == 'response'):
                 print('waiting for response')
@@ -51,3 +53,6 @@ def run(wakeword, commands, type):
 
 def display_message(message):
     print(message, flush=True)
+
+def clear_terminal():
+    return os.system('cls')
