@@ -29,6 +29,7 @@ def setup_commands():
             commands[name.split(".py")[0].lower()] = module
 
     # Save the commands to a JSON file after the setup is complete
+    print("Saving commands...")
     save_commands()
 
 
@@ -50,6 +51,7 @@ def save_commands():
 
 
 def load_commands():
+    commands = {}
     try:
         # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
         sys.path.append('G:\\GitRepos\\coda\\commands')
@@ -57,7 +59,6 @@ def load_commands():
         with open("commands.json", "r") as infile:
             serialized_commands = json.load(infile)
 
-        commands = {}
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
             # Add any other relevant information from the JSON if needed
@@ -76,11 +77,11 @@ def load_commands():
             # Add the command to the dictionary
             commands[cmd_name] = module
 
-        print("commands loaded successfully.")
-        return commands
-    except FileNotFoundError:
-        print("Commands file not found. Assuming first-time setup...")
-        return {}
+        print("Commands loaded successfully.")
+    except FileNotFoundError as e:
+        raise e
+
+    return commands
 
 
 def save_wakewords(wakewords):
@@ -128,7 +129,6 @@ else:
         commands = load_commands()
         print(commands)
     except FileNotFoundError:
-        print("Commands file not found. Assuming first-time setup...")
         run_first_time_setup()
 
 
