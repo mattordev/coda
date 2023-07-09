@@ -1,3 +1,4 @@
+elevenlabs==0.2.18
 Flask==2.3.2
 pyttsx3==2.90
 Requests==2.31.0
