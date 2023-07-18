@@ -8,9 +8,12 @@ import utils.voice_recognizer as voice_recognizer
 
 import semantic_version
 import requests
+from pynput import keyboard
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
+wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
+manual_assisstant_input = True
 
 
 def setup_commands():
@@ -29,6 +32,7 @@ def setup_commands():
             commands[name.split(".py")[0].lower()] = module
 
     # Save the commands to a JSON file after the setup is complete
+    print("Saving commands...")
     save_commands()
 
 
@@ -50,6 +54,7 @@ def save_commands():
 
 
 def load_commands():
+    commands = {}
     try:
         # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
         sys.path.append('G:\\GitRepos\\coda\\commands')
@@ -57,7 +62,6 @@ def load_commands():
         with open("commands.json", "r") as infile:
             serialized_commands = json.load(infile)
 
-        commands = {}
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
             # Add any other relevant information from the JSON if needed
@@ -65,29 +69,43 @@ def load_commands():
             # Get the module name from the file path
             module_name = module_path.split("\\")[-1].split(".")[0]
 
-            # Dynamically import the module
-            try:
-                module = importlib.import_module(module_name)
-            except ImportError as e:
-                print(f"Error importing module: {module_name}")
-                print(f"ImportError: {str(e)}")
-                continue
+            # Load the module using spec_from_file_location
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
 
             # Add the command to the dictionary
             commands[cmd_name] = module
 
-        print("commands loaded successfully.")
-        return commands
-    except FileNotFoundError:
-        print("Commands file not found. Assuming first-time setup...")
-        return {}
+        print("Commands loaded successfully.")
+    except FileNotFoundError as e:
+        raise e
+
+    return commands
 
 
 def save_wakewords(wakewords):
+    print("Saving wakewords...")
     jsonWakewords = json.dumps(wakewords)
     jsonWakewordsFile = open("wakewords.json", "w")
     jsonWakewordsFile.write(jsonWakewords)
     jsonWakewordsFile.close()
+    print("Wakewords saved!")
+    
+def load_wakewords():
+    wakewords = ()
+    
+    try:
+        with open("wakewords.json", "r") as infile:
+            # Store the loaded wakewords for string manipulation
+            serialized_wakewords = json.load(infile)
+            
+            wakewords = json_dict_to_string_array(serialized_wakewords)
+            # print(wakewords)
+    except FileNotFoundError as e:
+        raise e
+    
+    return wakewords
 
 
 def check_update_available(version_url):
@@ -113,6 +131,29 @@ def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
     setup_commands()
     save_wakewords(wakewords)
+    
+    
+### UTIL FUNCTIONS ##
+
+# These should probably be moved to a seperate .py file
+def json_dict_to_string_array(jsonData):
+    string_array = []
+    for item in jsonData:
+        # Assuming the strings are at the top level of the json structure
+        if isinstance(item, str):
+            string_array.append(item)
+    return string_array
+    
+def handle_keypress(key):
+    global manual_assistant_input
+
+    # Check for the correct key combination to toggle manual mode
+    if key == keyboard.Key.shift and key.char == 'm':
+        # Toggle the boolean flag
+        manual_assistant_input = not manual_assistant_input
+        print(f"Manual input mode {'enabled' if manual_assistant_input else 'disabled'}")
+
+#####################
 
 
 ### MAIN ###
@@ -126,12 +167,17 @@ else:
     try:
         # load the commands from JSON.
         commands = load_commands()
-        print(commands)
+        wakewords = load_wakewords()
+        # print(commands)
     except FileNotFoundError:
-        print("Commands file not found. Assuming first-time setup...")
         run_first_time_setup()
 
+# # Create a listener for key events
+# listener = keyboard.Listener(on_press=handle_keypress)
+# listener.start()
 
-save_wakewords(wakewords)
+# # Keep the main thread running
+# listener.join()
+
 # Calls the voice recognizer to listen to the microphone
 voice_recognizer.run(wakewords, commands, type='normal')
