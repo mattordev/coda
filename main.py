@@ -66,13 +66,10 @@ def load_commands():
             # Get the module name from the file path
             module_name = module_path.split("\\")[-1].split(".")[0]
 
-            # Dynamically import the module
-            try:
-                module = importlib.import_module(module_name)
-            except ImportError as e:
-                print(f"Error importing module: {module_name}")
-                print(f"ImportError: {str(e)}")
-                continue
+            # Load the module using spec_from_file_location
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
 
             # Add the command to the dictionary
             commands[cmd_name] = module
