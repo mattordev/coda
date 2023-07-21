@@ -14,6 +14,10 @@ commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 manual_assisstant_input = True
+KEY_COMBINATIONS = [
+    {keyboard.Key.shift, keyboard.KeyCode(char='a')},
+    {keyboard.Key.shift, keyboard.KeyCode(char='A')}
+]
 
 
 def setup_commands():
@@ -143,15 +147,14 @@ def json_dict_to_string_array(jsonData):
         if isinstance(item, str):
             string_array.append(item)
     return string_array
-    
-def handle_keypress(key):
-    global manual_assistant_input
 
-    # Check for the correct key combination to toggle manual mode
-    if key == keyboard.Key.shift and key.char == 'm':
-        # Toggle the boolean flag
-        manual_assistant_input = not manual_assistant_input
-        print(f"Manual input mode {'enabled' if manual_assistant_input else 'disabled'}")
+def toggle_input():
+    global manual_assisstant_input
+    
+    manual_assisstant_input = not manual_assisstant_input
+    print(f"Manual input mode {'enabled' if manual_assisstant_input else 'disabled'}")
+    
+    
 
 #####################
 
@@ -172,12 +175,9 @@ else:
     except FileNotFoundError:
         run_first_time_setup()
 
-# # Create a listener for key events
-# listener = keyboard.Listener(on_press=handle_keypress)
-# listener.start()
 
-# # Keep the main thread running
-# listener.join()
-
+    
 # Calls the voice recognizer to listen to the microphone
 voice_recognizer.run(wakewords, commands, type='normal')
+
+
