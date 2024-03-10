@@ -10,6 +10,7 @@ import utils.on_command as command
 import semantic_version
 import requests
 import keyboard
+import time
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
@@ -161,6 +162,9 @@ def toggle_input():
 
 
 ### MAIN ###
+
+startTimer = time.perf_counter()
+
 wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system"]
 
 if check_update_available(version_url):
@@ -175,6 +179,9 @@ else:
         # print(commands)
     except FileNotFoundError:
         run_first_time_setup()
+        
+loadTime = time.perf_counter()
+print (f"C.O.D.A loaded in {round(loadTime-startTimer, 2)} second(s)")
 
 
 
