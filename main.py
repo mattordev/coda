@@ -11,6 +11,7 @@ import semantic_version
 import requests
 import keyboard
 import time
+import threading
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
@@ -180,14 +181,22 @@ else:
     except FileNotFoundError:
         run_first_time_setup()
         
-loadTime = time.perf_counter()
-print (f"C.O.D.A loaded in {round(loadTime-startTimer, 2)} second(s)")
+load_time = time.perf_counter()
+print (f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
-
+# Create thread variable for calling the voice recog
+# Create the thread with keyword arguments using kwargs
+voice_thread = threading.Thread(
+    target=voice_recognizer.run, 
+    daemon=False, 
+    args=(wakewords, commands), 
+    kwargs={'type': 'normal'}
+)
 
 if (manual_assisstant_input == False):
     # Calls the voice recognizer to listen to the microphone
-    voice_recognizer.run(wakewords, commands, type='normal')
+    # voice_recognizer.run(wakewords, commands, type='normal')
+    voice_thread.start()
     if keyboard.is_pressed('ctrl+b'):
         toggle_input()
 else:
