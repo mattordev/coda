@@ -133,6 +133,8 @@ def check_update_available(version_url):
 
     return False
 
+def start_voice_recognition():
+    voice_recognizer.run(wakewords, commands, type='normal')
 
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
@@ -185,23 +187,25 @@ load_time = time.perf_counter()
 print (f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
 # Create thread variable for calling the voice recog
-# Create the thread with keyword arguments using kwargs
-voice_thread = threading.Thread(
-    target=voice_recognizer.run, 
-    daemon=False, 
-    args=(wakewords, commands), 
-    kwargs={'type': 'normal'}
-)
+voice_thread = threading.Thread(target=start_voice_recognition)
 
-if (manual_assisstant_input == False):
-    # Calls the voice recognizer to listen to the microphone
-    # voice_recognizer.run(wakewords, commands, type='normal')
+# Start the voice recognition thread
+if not manual_assisstant_input:
     voice_thread.start()
-    if keyboard.is_pressed('ctrl+b'):
-        toggle_input()
-else:
-    print("MANUAL MODE ENABLED")
-    manualmessage = input("Please enter a command: ")
-    # This needs to ignore the wakeword still
-    command.run(manualmessage, commands)
-    # Check for keyboard input, call function to disable listening if manual input is enabled. 
+
+# Main loop
+while True:
+    if manual_assisstant_input:
+        print("MANUAL MODE ENABLED")
+        manual_message = input("Please enter a command: ")
+        # This needs to ignore the wakeword still
+        command.run(manual_message, commands)
+        # Check for keyboard input to toggle back to voice input mode
+        if keyboard.is_pressed('ctrl+b'):
+            manual_assisstant_input = False
+            voice_thread.start()  # Start voice recognition thread again
+    else:
+        if keyboard.is_pressed('ctrl+b'):
+            manual_assisstant_input = True
+            voice_thread.join()  # Stop voice recognition thread
+            print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
