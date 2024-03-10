@@ -5,19 +5,20 @@ import json
 import importlib
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
+import utils.on_command as command
 
 import semantic_version
 import requests
-from pynput import keyboard
+import keyboard
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
-manual_assisstant_input = True
-KEY_COMBINATIONS = [
-    {keyboard.Key.shift, keyboard.KeyCode(char='a')},
-    {keyboard.Key.shift, keyboard.KeyCode(char='A')}
-]
+manual_assisstant_input = False
+# KEY_COMBINATIONS = [
+#     {keyboard.Key.shift, keyboard.KeyCode(char='a')},
+#     {keyboard.Key.shift, keyboard.KeyCode(char='A')}
+# ]
 
 
 def setup_commands():
@@ -176,8 +177,15 @@ else:
         run_first_time_setup()
 
 
-    
-# Calls the voice recognizer to listen to the microphone
-voice_recognizer.run(wakewords, commands, type='normal')
 
-
+if (manual_assisstant_input == False):
+    # Calls the voice recognizer to listen to the microphone
+    voice_recognizer.run(wakewords, commands, type='normal')
+    if keyboard.is_pressed('ctrl+b'):
+        toggle_input()
+else:
+    print("MANUAL MODE ENABLED")
+    manualmessage = input("Please enter a command: ")
+    # This needs to ignore the wakeword still
+    command.run(manualmessage, commands)
+    # Check for keyboard input, call function to disable listening if manual input is enabled. 
