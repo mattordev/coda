@@ -17,10 +17,6 @@ commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 manual_assisstant_input = False
-# KEY_COMBINATIONS = [
-#     {keyboard.Key.shift, keyboard.KeyCode(char='a')},
-#     {keyboard.Key.shift, keyboard.KeyCode(char='A')}
-# ]
 
 
 def setup_commands():
@@ -77,7 +73,8 @@ def load_commands():
             module_name = module_path.split("\\")[-1].split(".")[0]
 
             # Load the module using spec_from_file_location
-            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            spec = importlib.util.spec_from_file_location(
+                module_name, module_path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
 
@@ -98,20 +95,21 @@ def save_wakewords(wakewords):
     jsonWakewordsFile.write(jsonWakewords)
     jsonWakewordsFile.close()
     print("Wakewords saved!")
-    
+
+
 def load_wakewords():
     wakewords = ()
-    
+
     try:
         with open("wakewords.json", "r") as infile:
             # Store the loaded wakewords for string manipulation
             serialized_wakewords = json.load(infile)
-            
+
             wakewords = json_dict_to_string_array(serialized_wakewords)
             # print(wakewords)
     except FileNotFoundError as e:
         raise e
-    
+
     return wakewords
 
 
@@ -133,15 +131,17 @@ def check_update_available(version_url):
 
     return False
 
+
 def start_voice_recognition():
     voice_recognizer.run(wakewords, commands, type='normal')
+
 
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
     setup_commands()
     save_wakewords(wakewords)
-    
-    
+
+
 ### UTIL FUNCTIONS ##
 
 # These should probably be moved to a seperate .py file
@@ -153,19 +153,19 @@ def json_dict_to_string_array(jsonData):
             string_array.append(item)
     return string_array
 
+
 def toggle_input():
     global manual_assisstant_input
-    
+
     manual_assisstant_input = not manual_assisstant_input
-    print(f"Manual input mode {'enabled' if manual_assisstant_input else 'disabled'}")
-    
-    
+    print(
+        f"Manual input mode {'enabled' if manual_assisstant_input else 'disabled'}")
+
 
 #####################
 
 
 ### MAIN ###
-
 startTimer = time.perf_counter()
 
 wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system"]
@@ -182,9 +182,9 @@ else:
         # print(commands)
     except FileNotFoundError:
         run_first_time_setup()
-        
+
 load_time = time.perf_counter()
-print (f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
+print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
 # Create thread variable for calling the voice recog
 voice_thread = threading.Thread(target=start_voice_recognition)
@@ -201,11 +201,12 @@ while True:
         # This needs to ignore the wakeword still
         command.run(manual_message, commands)
         # Check for keyboard input to toggle back to voice input mode
-        if keyboard.is_pressed('ctrl+b'):
-            manual_assisstant_input = False
-            voice_thread.start()  # Start voice recognition thread again
+        # if keyboard.is_pressed('ctrl+b'):
+        #     manual_assisstant_input = False
+        #     voice_thread.start()  # Start voice recognition thread again
     else:
         if keyboard.is_pressed('ctrl+b'):
             manual_assisstant_input = True
-            voice_thread.join()  # Stop voice recognition thread
             print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
+            voice_thread.join(timeout=0.1)
+            # Stop voice recognition thread
