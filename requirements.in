@@ -1,5 +1,6 @@
 elevenlabs==0.2.18
 Flask==2.3.2
+keyboard==0.13.5
 pyttsx3==2.90
 Requests==2.31.0
 semantic_version==2.10.0
