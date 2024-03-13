@@ -25,6 +25,7 @@ if __name__ == "__main__":
     else:
         manual_assisstant_input = False
 
+
 def setup_commands():
     command_file_location = os.getcwd() + "\commands\\"
     sys.path.append(command_file_location)
@@ -180,7 +181,8 @@ def toggle_input():
 ### MAIN ###
 startTimer = time.perf_counter()
 
-wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system", "jeff"]
+wakewords = ["coda", "kodak", "coder", "skoda",
+             "powder", "kodi", "system", "jeff"]
 
 if check_update_available(version_url):
     # if there's an update available, re-find the commands

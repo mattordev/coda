@@ -1,3 +1,4 @@
 ﻿*.pyc
 commands.json
 .vscode
+version.json
