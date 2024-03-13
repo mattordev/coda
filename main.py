@@ -70,7 +70,14 @@ def load_commands():
         sys.path.append('G:\\GitRepos\\coda\\commands')
 
         with open("commands.json", "r") as infile:
-            serialized_commands = json.load(infile)
+            try:
+                serialized_commands = json.load(infile)
+            except json.JSONDecodeError as e:
+                print(
+                    "Error loading commands from JSON. Attempting to re-setup the commands...")
+                setup_commands()
+                # Try loading the commands again.
+                serialized_commands = json.load(infile)
 
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
