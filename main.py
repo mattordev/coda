@@ -19,6 +19,12 @@ version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.jso
 manual_assisstant_input = False
 
 
+if __name__ == "__main__":
+    if "-m" in sys.argv:
+        manual_assisstant_input = True
+    else:
+        manual_assisstant_input = False
+
 def setup_commands():
     command_file_location = os.getcwd() + "\commands\\"
     sys.path.append(command_file_location)
@@ -124,7 +130,13 @@ def check_update_available(version_url):
             response_json = version_response.json()
             latest_version = response_json['version']
             latest_semantic_version = semantic_version.Version(latest_version)
-            return latest_semantic_version > saved_version  # Compare the versions
+
+            if latest_semantic_version > saved_version:
+                # Update the version file
+                json_data['version'] = latest_version
+                with open("version.json", "w") as json_file:
+                    json.dump(json_data, json_file, indent=4)
+                return True  # Updated successfully
 
     except (IOError, KeyError, requests.RequestException, ValueError):
         pass
@@ -168,7 +180,7 @@ def toggle_input():
 ### MAIN ###
 startTimer = time.perf_counter()
 
-wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system"]
+wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system", "jeff"]
 
 if check_update_available(version_url):
     # if there's an update available, re-find the commands
