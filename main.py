@@ -65,6 +65,8 @@ def save_commands():
 
 def load_commands():
     commands = {}
+    serialized_commands = {}  # Initialize to an empty dictionary
+
     try:
         # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
         sys.path.append('G:\\GitRepos\\coda\\commands')
@@ -76,8 +78,8 @@ def load_commands():
                 print(
                     "Error loading commands from JSON. Attempting to re-setup the commands...")
                 setup_commands()
-                # Try loading the commands again.
-                serialized_commands = json.load(infile)
+                # These commands won't load even though the commands.json file is present
+                commands = load_commands()
 
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
