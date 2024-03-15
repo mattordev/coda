@@ -142,11 +142,16 @@ def check_update_available(version_url):
             latest_semantic_version = semantic_version.Version(latest_version)
 
             if latest_semantic_version > saved_version:
+                # Update the program using the update_manager
+                import utils.update_manager as update_manager
+                update_manager.main()
+
+                # old VVVVV
                 # Update the version file
-                json_data['version'] = latest_version
-                with open("version.json", "w") as json_file:
-                    json.dump(json_data, json_file, indent=4)
-                return True  # Updated successfully
+                # json_data['version'] = latest_version
+                # with open("version.json", "w") as json_file:
+                #     json.dump(json_data, json_file, indent=4)
+                # return True  # Updated successfully
 
     except (IOError, KeyError, requests.RequestException, ValueError):
         pass
