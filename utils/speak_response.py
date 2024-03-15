@@ -1,17 +1,27 @@
 import pyttsx3 as tts
+import os
 from elevenlabs import voices, generate, play, set_api_key
 import commands.connected as connected
 
 
-def load_api_key(file_path):
+def load_elevenlabs_api_key(file_path):
+    if not os.path.exists(file_path):
+        with open(file_path, 'w'):  # Create the file if it doesn't exist
+            pass
+
     with open(file_path, 'r') as file:
         api_key = file.read().strip()
+
+    if not api_key:
+        raise ValueError(
+            f"API key file '{file_path}' is empty. Please add your ElevenLabs API key to the file.")
+
     return api_key
 
 
 # Load the API key from the file
-api_key_file = 'ELapikey.txt'
-elevenLabsAPIKey = load_api_key(api_key_file)
+api_key_file = 'ELapi_key.txt'
+elevenLabsAPIKey = load_elevenlabs_api_key(api_key_file)
 
 # Set the API key
 user = set_api_key(elevenLabsAPIKey)
