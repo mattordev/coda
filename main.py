@@ -6,6 +6,7 @@ import importlib
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
+from colorama import Fore, init
 
 import semantic_version
 import requests
@@ -142,16 +143,18 @@ def check_update_available(version_url):
             latest_semantic_version = semantic_version.Version(latest_version)
 
             if latest_semantic_version > saved_version:
-                # Update the program using the update_manager
-                import utils.update_manager as update_manager
-                update_manager.main()
-
-                # old VVVVV
-                # Update the version file
-                # json_data['version'] = latest_version
-                # with open("version.json", "w") as json_file:
-                #     json.dump(json_data, json_file, indent=4)
-                # return True  # Updated successfully
+                prompt = input(
+                    "An update is available. Would you like to update? (y/n): ")
+                if prompt.lower() == "y":
+                    # Update the program using the update_manager
+                    import utils.update_manager as update_manager
+                    update_manager.main()
+                    return True  # Updated successfully
+                else:
+                    init(autoreset=True)
+                    print(
+                        Fore.RED + "Update aborted. Continuing with current version..")
+                    return False  # User chose not to update
 
     except (IOError, KeyError, requests.RequestException, ValueError):
         pass

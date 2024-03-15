@@ -4,7 +4,7 @@ import zipfile
 import os
 import shutil
 import json
-import semantic_version
+from colorama import Fore, init
 import pyuac
 
 # Updates CODA to the latest version, if available, directly from the GitHub repository. Only runs manually OR if a new version is detected
@@ -57,7 +57,8 @@ def fix_version_names():
         old_version = json_data['version']
         print(f"Old version: {old_version}")
     # Rename the old version folder to the old version number
-    os.rename(f'coda', f'coda-{old_version}')
+    cwd = os.getcwd()
+    os.rename(cwd, f'coda-{old_version}')
 
 
 def fix_folder_structure():
@@ -87,6 +88,11 @@ def main():
     except Exception as e:
         print(f"Error setting up the updated program: {e}")
         return
+    fix_version_names()
+    # fix_folder_structure() # needs more work. Not currently working.
+    # Automatically reset the color to the default after each print statement
+    init(autoreset=True)
+    print(Fore.GREEN + "Update complete!")
 
 
 if __name__ == "__main__":
