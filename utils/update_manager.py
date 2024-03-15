@@ -87,6 +87,8 @@ def main():
     except Exception as e:
         print(f"Error setting up the updated program: {e}")
         return
+    fix_version_names()
+    fix_folder_structure()
 
 
 if __name__ == "__main__":
