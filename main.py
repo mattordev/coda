@@ -6,6 +6,7 @@ import importlib
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
+from colorama import Fore, init
 
 import semantic_version
 import requests
@@ -24,6 +25,7 @@ if __name__ == "__main__":
         manual_assisstant_input = True
     else:
         manual_assisstant_input = False
+
 
 def setup_commands():
     command_file_location = os.getcwd() + "\commands\\"
@@ -64,12 +66,21 @@ def save_commands():
 
 def load_commands():
     commands = {}
+    serialized_commands = {}  # Initialize to an empty dictionary
+
     try:
         # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
         sys.path.append('G:\\GitRepos\\coda\\commands')
 
         with open("commands.json", "r") as infile:
-            serialized_commands = json.load(infile)
+            try:
+                serialized_commands = json.load(infile)
+            except json.JSONDecodeError as e:
+                print(
+                    "Error loading commands from JSON. Attempting to re-setup the commands...")
+                setup_commands()
+                # These commands won't load even though the commands.json file is present
+                commands = load_commands()
 
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
@@ -132,11 +143,18 @@ def check_update_available(version_url):
             latest_semantic_version = semantic_version.Version(latest_version)
 
             if latest_semantic_version > saved_version:
-                # Update the version file
-                json_data['version'] = latest_version
-                with open("version.json", "w") as json_file:
-                    json.dump(json_data, json_file, indent=4)
-                return True  # Updated successfully
+                prompt = input(
+                    "An update is available. Would you like to update? (y/n): ")
+                if prompt.lower() == "y":
+                    # Update the program using the update_manager
+                    import utils.update_manager as update_manager
+                    update_manager.main()
+                    return True  # Updated successfully
+                else:
+                    init(autoreset=True)
+                    print(
+                        Fore.RED + "Update aborted. Continuing with current version..")
+                    return False  # User chose not to update
 
     except (IOError, KeyError, requests.RequestException, ValueError):
         pass
@@ -180,7 +198,8 @@ def toggle_input():
 ### MAIN ###
 startTimer = time.perf_counter()
 
-wakewords = ["coda", "kodak", "coder", "skoda", "powder", "kodi", "system", "jeff"]
+wakewords = ["coda", "kodak", "coder", "skoda",
+             "powder", "kodi", "system", "jeff"]
 
 if check_update_available(version_url):
     # if there's an update available, re-find the commands
