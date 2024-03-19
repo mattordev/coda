@@ -93,6 +93,9 @@ def main():
     # Automatically reset the color to the default after each print statement
     init(autoreset=True)
     print(Fore.GREEN + "Update complete!")
+    print(Fore.BLUE + "Cleaning up the old version...")
+    # call cleanup.py with the arg "-update"
+    
 
 
 if __name__ == "__main__":
