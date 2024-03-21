@@ -4,6 +4,13 @@ import sys
 
 def clean_up_after_update():
     print("Starting cleanup...")
+    # Delete the old version
+    print("Deleting the old version...")
+    try:
+        import shutil
+        shutil.rmtree("coda-old-version")
+    except Exception as e:
+        print(f"Error deleting the old version: {e}")
     
     pass
         
