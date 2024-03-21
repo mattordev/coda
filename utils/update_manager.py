@@ -6,10 +6,12 @@ import shutil
 import json
 from colorama import Fore, init
 import pyuac
+import sys
 
 # Updates CODA to the latest version, if available, directly from the GitHub repository. Only runs manually OR if a new version is detected
 # in the start up process.
 
+new_version_path = "coda-version-new"
 
 def update_program():
     repo_url = "https://github.com/mattordev/coda/archive/main.zip"
@@ -93,6 +95,12 @@ def main():
     # Automatically reset the color to the default after each print statement
     init(autoreset=True)
     print(Fore.GREEN + "Update complete!")
+    print(Fore.BLUE + "Cleaning up the old version...")
+    # call cleanup.py with the arg "-update", import the one from the NEW version
+    sys.path.insert(0, "coda-version-new/coda/utils")  # Insert the new version folder at the start of the path, might need some error checking regarding the name of the files
+    import cleanup  # Import the new cleanup module
+    print(cleanup.__file__)
+    cleanup.clean_up_after_update()
 
 
 if __name__ == "__main__":
