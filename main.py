@@ -13,6 +13,7 @@ import requests
 import keyboard
 import time
 import threading
+from pathlib import Path
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
@@ -27,9 +28,16 @@ if __name__ == "__main__":
         manual_assisstant_input = False
 
 
+def _get_commands_dir():
+    cwd = Path.cwd()
+    if (cwd / "Commands").exists():
+        return cwd / "Commands"
+    return cwd / "commands"
+
+
 def setup_commands():
-    command_file_location = os.getcwd() + "\\commands\\"
-    sys.path.append(command_file_location)
+    command_file_location = _get_commands_dir()
+    sys.path.append(str(command_file_location))
 
     # Clear the existing commands dictionary
     commands.clear()
@@ -37,7 +45,7 @@ def setup_commands():
     for cmdFile in os.listdir(command_file_location):
         name = os.fsdecode(cmdFile)
         if name.endswith(".py"):
-            command_path = os.path.join(command_file_location, cmdFile)
+            command_path = os.path.join(str(command_file_location), cmdFile)
             module = SourceFileLoader(name.split(
                 ".py")[0].lower(), command_path).load_module()
             commands[name.split(".py")[0].lower()] = module
@@ -69,8 +77,8 @@ def load_commands():
     serialized_commands = {}  # Initialize to an empty dictionary
 
     try:
-        # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
-        sys.path.append('G:\\GitRepos\\coda\\commands')
+        # Add the command directory to module search path in a portable way.
+        sys.path.append(str(_get_commands_dir()))
 
         with open("commands.json", "r") as infile:
             try:
@@ -87,7 +95,7 @@ def load_commands():
             # Add any other relevant information from the JSON if needed
 
             # Get the module name from the file path
-            module_name = module_path.split("\\")[-1].split(".")[0]
+            module_name = Path(module_path).stem
 
             # Load the module using spec_from_file_location
             spec = importlib.util.spec_from_file_location(
