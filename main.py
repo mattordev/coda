@@ -13,23 +13,56 @@ import requests
 import keyboard
 import time
 import threading
+from pathlib import Path
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 manual_assisstant_input = False
+voice_stop_event = threading.Event()
+voice_thread = None
+
+
+def _get_flag_value(flag_name):
+    for idx, arg in enumerate(sys.argv):
+        if arg == flag_name and idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+        if arg.startswith(f"{flag_name}="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _is_manual_mode_requested():
+    return "-m" in sys.argv or "--manual" in sys.argv
 
 
 if __name__ == "__main__":
-    if "-m" in sys.argv:
-        manual_assisstant_input = True
-    else:
-        manual_assisstant_input = False
+    mic_name_arg = _get_flag_value("--mic")
+    mic_index_arg = _get_flag_value("--mic-index")
+
+    if mic_name_arg:
+        os.environ["CODA_MIC_NAME"] = mic_name_arg
+
+    if mic_index_arg:
+        os.environ["CODA_MIC_INDEX"] = mic_index_arg
+
+    if "--list-mics" in sys.argv:
+        voice_recognizer.print_microphones()
+        sys.exit(0)
+
+    manual_assisstant_input = _is_manual_mode_requested()
+
+
+def _get_commands_dir():
+    cwd = Path.cwd()
+    if (cwd / "Commands").exists():
+        return cwd / "Commands"
+    return cwd / "commands"
 
 
 def setup_commands():
-    command_file_location = os.getcwd() + "\\commands\\"
-    sys.path.append(command_file_location)
+    command_file_location = _get_commands_dir()
+    sys.path.append(str(command_file_location))
 
     # Clear the existing commands dictionary
     commands.clear()
@@ -37,7 +70,7 @@ def setup_commands():
     for cmdFile in os.listdir(command_file_location):
         name = os.fsdecode(cmdFile)
         if name.endswith(".py"):
-            command_path = os.path.join(command_file_location, cmdFile)
+            command_path = os.path.join(str(command_file_location), cmdFile)
             module = SourceFileLoader(name.split(
                 ".py")[0].lower(), command_path).load_module()
             commands[name.split(".py")[0].lower()] = module
@@ -69,8 +102,8 @@ def load_commands():
     serialized_commands = {}  # Initialize to an empty dictionary
 
     try:
-        # Add the directory to the module search path, without this, the commands won't load - need to make this universal across different machines.
-        sys.path.append('G:\\GitRepos\\coda\\commands')
+        # Add the command directory to module search path in a portable way.
+        sys.path.append(str(_get_commands_dir()))
 
         with open("commands.json", "r") as infile:
             try:
@@ -87,7 +120,7 @@ def load_commands():
             # Add any other relevant information from the JSON if needed
 
             # Get the module name from the file path
-            module_name = module_path.split("\\")[-1].split(".")[0]
+            module_name = Path(module_path).stem
 
             # Load the module using spec_from_file_location
             spec = importlib.util.spec_from_file_location(
@@ -171,7 +204,26 @@ def check_update_available(version_url):
 
 
 def start_voice_recognition():
-    voice_recognizer.run(wakewords, commands, type='normal')
+    voice_recognizer.run(wakewords, commands, type='normal',
+                         stop_event=voice_stop_event)
+
+
+def start_voice_thread():
+    global voice_thread
+
+    if voice_thread is not None and voice_thread.is_alive():
+        return
+
+    voice_stop_event.clear()
+    voice_thread = threading.Thread(target=start_voice_recognition, daemon=True)
+    voice_thread.start()
+
+
+def stop_voice_thread(timeout_seconds=4.0):
+    voice_stop_event.set()
+
+    if voice_thread is not None and voice_thread.is_alive():
+        voice_thread.join(timeout=timeout_seconds)
 
 
 def run_first_time_setup():
@@ -196,6 +248,12 @@ def toggle_input():
     global manual_assisstant_input
 
     manual_assisstant_input = not manual_assisstant_input
+
+    if manual_assisstant_input:
+        stop_voice_thread()
+    else:
+        start_voice_thread()
+
     print(
         f"Manual input mode {'enabled' if manual_assisstant_input else 'disabled'}")
 
@@ -225,27 +283,51 @@ else:
 load_time = time.perf_counter()
 print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
-# Create thread variable for calling the voice recog
-voice_thread = threading.Thread(target=start_voice_recognition)
+if manual_assisstant_input:
+    print("MANUAL MODE ENABLED")
+    print("Type commands directly. Type 'voice' to switch to voice mode or 'quit' to exit.")
+else:
+    print("VOICE MODE ENABLED")
+    print("Press Ctrl+B to switch to manual mode, or restart with -m / --manual.")
+    start_voice_thread()
 
-# Start the voice recognition thread
-if not manual_assisstant_input:
-    voice_thread.start()
+keyboard_toggle_available = True
 
 # Main loop
 while True:
     if manual_assisstant_input:
-        print("MANUAL MODE ENABLED")
-        manual_message = input("Please enter a command: ")
-        # This needs to ignore the wakeword still
-        command.run(manual_message, commands)
-        # Check for keyboard input to toggle back to voice input mode
-        # if keyboard.is_pressed('ctrl+b'):
-        #     manual_assisstant_input = False
-        #     voice_thread.start()  # Start voice recognition thread again
+        manual_message = input("manual> ").strip()
+
+        if not manual_message:
+            continue
+
+        normalized_manual_message = manual_message.lower()
+
+        if normalized_manual_message in ("quit", "exit"):
+            stop_voice_thread()
+            print("Exiting C.O.D.A")
+            break
+
+        if normalized_manual_message in ("voice", "/voice"):
+            manual_assisstant_input = False
+            print("VOICE MODE ENABLED")
+            start_voice_thread()
+            continue
+
+        # Debug output enabled in manual mode so command matching is visible.
+        command.run(manual_message, commands, debug=True)
     else:
-        if keyboard.is_pressed('ctrl+b'):
-            manual_assisstant_input = True
-            print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
-            voice_thread.join(timeout=0.1)
-            # Stop voice recognition thread
+        if keyboard_toggle_available:
+            try:
+                if keyboard.is_pressed('ctrl+b'):
+                    manual_assisstant_input = True
+                    stop_voice_thread()
+                    print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
+                    print("Type commands directly. Type 'voice' to switch back or 'quit' to exit.")
+                    time.sleep(0.3)
+            except Exception as keyboard_error:
+                keyboard_toggle_available = False
+                print(f"Keyboard toggle unavailable: {keyboard_error}")
+                print("Restart with -m or --manual to use manual mode.")
+
+        time.sleep(0.05)

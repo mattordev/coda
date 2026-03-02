@@ -1,58 +1,156 @@
 # TODO: Implement PocketSphinx for offline voice recognition and use google's API for when there is a connection
 
 import os
+import re
 import speech_recognition as sr
 # import pocketsphinx5 as ps5
-import utils.speak_response as speak
-import commands.connected as connected
 import utils.on_command as command
 
 # Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
 # Currently not using `wakewords.json` or `commands.json` but will be in the future
 
+LISTEN_TIMEOUT_SECONDS = float(os.getenv("CODA_LISTEN_TIMEOUT", "3.0"))
+PHRASE_TIME_LIMIT_SECONDS = float(os.getenv("CODA_PHRASE_TIME_LIMIT", "8.0"))
+CALIBRATION_SECONDS = float(os.getenv("CODA_CALIBRATION_SECONDS", "0.8"))
+VOICE_COMMAND_DEBUG = os.getenv("CODA_VOICE_COMMAND_DEBUG", "1").lower() in (
+    "1", "true", "yes")
+LIST_MICS_ON_START = os.getenv("CODA_LIST_MICS_ON_START", "0").lower() in (
+    "1", "true", "yes")
 
-def run(wakeword, commands, type):
+
+def _tokenize_text(message):
+    return re.findall(r"[a-z0-9']+", message.lower())
+
+
+def _has_wakeword(message, wakewords):
+    message_words = set(_tokenize_text(message))
+    wakeword_set = {w.lower() for w in wakewords}
+    return not wakeword_set.isdisjoint(message_words)
+
+
+def _get_microphone():
+    names = sr.Microphone.list_microphone_names()
+    mic_index = os.getenv("CODA_MIC_INDEX")
+    mic_name = os.getenv("CODA_MIC_NAME", "").strip().lower()
+
+    if LIST_MICS_ON_START:
+        print_microphones()
+
+    if mic_index is not None:
+        try:
+            mic_index = int(mic_index)
+            if 0 <= mic_index < len(names):
+                print(f"Using microphone index {mic_index}: {names[mic_index]}")
+                return sr.Microphone(device_index=mic_index)
+            print(
+                f"CODA_MIC_INDEX '{mic_index}' out of range. Using system default microphone.")
+            return sr.Microphone()
+        except ValueError:
+            print(f"Invalid CODA_MIC_INDEX '{mic_index}'. Using system default microphone.")
+            return sr.Microphone()
+
+    if mic_name:
+        matches = [(i, name) for i, name in enumerate(
+            names) if mic_name in name.lower()]
+        if matches:
+            match_index, match_name = matches[0]
+            if len(matches) > 1:
+                print(
+                    f"Multiple mics matched '{mic_name}'. Using first match: [{match_index}] {match_name}")
+            else:
+                print(f"Using microphone by name match: [{match_index}] {match_name}")
+            return sr.Microphone(device_index=match_index)
+
+        print(
+            f"No microphone matched CODA_MIC_NAME '{mic_name}'. Using system default microphone.")
+
+    print("Using system default microphone.")
+    return sr.Microphone()
+
+
+def print_microphones():
+    names = sr.Microphone.list_microphone_names()
+    print("Available microphones:")
+    for i, name in enumerate(names):
+        print(f"[{i}] {name}")
+
+
+def run(wakeword, commands, type, stop_event=None):
+    recognizer = sr.Recognizer()
+    recognizer.dynamic_energy_threshold = True
+    recognizer.pause_threshold = 0.8
+
+    try:
+        microphone = _get_microphone()
+    except OSError as e:
+        print(f"Microphone setup failed: {e}")
+        return
+
+    try:
+        with microphone as source:
+            print("Calibrating microphone for ambient noise...")
+            recognizer.adjust_for_ambient_noise(source, duration=CALIBRATION_SECONDS)
+            print(
+                f"Microphone ready (energy threshold: {int(recognizer.energy_threshold)})")
+    except OSError as e:
+        print(f"Microphone calibration failed: {e}")
+        return
+
     while True:
-        r = sr.Recognizer()
-        with sr.Microphone() as source:
-            # r.adjust_for_ambient_noise(source, duration=0.5)
+        if stop_event is not None and stop_event.is_set():
+            return
 
-            if (type == "normal"):
-                # clear_terminal
-                print('Ready to accept commands', flush=True)
-            elif (type == 'response'):
-                print('waiting for response')
-            try:
-                audio = r.listen(source, timeout=.25)
+        if (type == "normal"):
+            print('Ready to accept commands', flush=True)
+        elif (type == 'response'):
+            print('Waiting for response', flush=True)
 
-                speech = (r.recognize_google(audio))
-                # Needs editing
-                # if (connected.run() == True):
-                #     print ("LOG: Using online voice API")
-                #     speech = (r.recognize_google(audio))
-                # else:
-                #     print ("LOG: Using offline voice API")
-                #     speech = (r.recognize_sphinx(audio_data=audio))
+        try:
+            with microphone as source:
+                audio = recognizer.listen(
+                    source,
+                    timeout=LISTEN_TIMEOUT_SECONDS,
+                    phrase_time_limit=PHRASE_TIME_LIMIT_SECONDS,
+                )
 
-                message = (speech.lower())
-                display_message(message)
+            if stop_event is not None and stop_event.is_set():
+                return
 
-                if not set(wakeword).isdisjoint(message.lower().split()):
-                    command.run(str(message), commands)
-
-            # exceptions
-            except sr.UnknownValueError:
-                print("ERROR: Audio not understandable")
+            speech = recognizer.recognize_google(audio).strip()
+            if not speech:
                 continue
-            except sr.RequestError as e:
-                speak.speak_response(
-                    "There was an issue with that request. Please try again later.")
-            except sr.WaitTimeoutError:
-                continue
+
+            message = speech.lower()
+            display_message(f"Heard: {message}")
+
+            if _has_wakeword(message, wakeword):
+                print("[VOICE] Wakeword detected. Running command parser.")
+                command.run(message, commands, debug=VOICE_COMMAND_DEBUG)
+            else:
+                print("[VOICE] Wakeword not detected. Ignoring phrase.")
+
+        except sr.UnknownValueError:
+            if stop_event is not None and stop_event.is_set():
+                return
+            print("Heard audio but could not understand speech.")
+            continue
+        except sr.RequestError as e:
+            if stop_event is not None and stop_event.is_set():
+                return
+            print(f"Speech recognition request failed: {e}")
+            continue
+        except sr.WaitTimeoutError:
+            if stop_event is not None and stop_event.is_set():
+                return
+            continue
+        except OSError as e:
+            print(f"Microphone runtime error: {e}")
+            return
 
 
 def display_message(message):
     print(message, flush=True)
+
 
 def clear_terminal():
     return os.system('cls')
