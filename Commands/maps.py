@@ -1,4 +1,3 @@
-
 import webbrowser
 import random
 

@@ -1,7 +1,7 @@
 import socket
-from elevenlabs import generate, play, set_api_key
 from pathlib import Path
 
+from elevenlabs import generate, play, set_api_key
 
 _api_key_loaded = False
 _eleven_labs_disabled = False
@@ -10,10 +10,8 @@ _eleven_labs_disabled = False
 def _candidate_key_paths():
     repo_root = Path(__file__).resolve().parent.parent
     return [
-        repo_root / "ELapikey.txt",
         repo_root / "ELapi_key.txt",
-        repo_root / "coda-1.0.5" / "ELapikey.txt",
-        repo_root / "coda-1.0.5" / "ELapi_key.txt",
+        repo_root / "ELapikey.txt",
     ]
 
 
@@ -68,7 +66,7 @@ def speak_response(response):
             audio = generate(
                 text=response,
                 voice="9MHPRsXjcQrLl0zd1ZLU",
-                model="eleven_monolingual_v1"
+                model="eleven_monolingual_v1",
             )
             play(audio)
             return True
@@ -89,14 +87,12 @@ def use_pyttsx3(message):
     try:
         import pyttsx3 as tts
 
-        # Initialize text-to-speech
         speaker = tts.init()
-        available_voices = speaker.getProperty('voices')
-        # Set how fast it will talk.
+        available_voices = speaker.getProperty("voices")
         speaker.setProperty("rate", 175)
 
         if available_voices:
-            speaker.setProperty('voice', available_voices[0].id)
+            speaker.setProperty("voice", available_voices[0].id)
 
         speaker.say(message)
         speaker.runAndWait()
