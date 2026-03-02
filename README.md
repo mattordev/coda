@@ -37,6 +37,21 @@ Prereqs for pyaudio and speech recognition:
 ```sudo apt-get install libportaudio0 libportaudio2 libportaudiocpp0 portaudio19-dev flac```
  
 then, finally, after cloning move to the download directory and run `pip install -r requirements.txt`
+
+### Environment Variables
+
+Create a `.env` file in the project root with:
+
+```text
+OPENAI_API_KEY=your-openai-key
+ELEVENLABS_API_KEY=your-elevenlabs-key
+CODA_OPENAI_MODEL=gpt-4o-mini
+CODA_GPT_FALLBACK=1
+```
+
+Notes:
+- `ELEVENLABS_API_KEY` is now the preferred source for TTS auth.
+- Legacy `ELapi_key.txt` / `ELapikey.txt` files are still supported as fallback.
   
 ---
   

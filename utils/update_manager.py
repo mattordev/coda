@@ -23,7 +23,7 @@ NEW_VERSION_DIR = "coda-version-new"
 # Where we park the old install before switching over.
 BACKUP_DIR = "coda-old-version"
 # User/local runtime files we do not want to blow away on update.
-PRESERVED_FILES = ("ELapi_key.txt", "wakewords.json", "commands.json")
+PRESERVED_FILES = (".env", "ELapi_key.txt", "wakewords.json", "commands.json")
 
 
 def update_program():

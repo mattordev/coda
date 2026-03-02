@@ -1,6 +1,7 @@
-﻿*.pyc
+*.pyc
 commands.json
 .vscode
 version.json
+.env
 ELapi_key.txt
 ELapikey.txt

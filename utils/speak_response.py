@@ -1,10 +1,19 @@
 import socket
+import os
 from pathlib import Path
 
 from elevenlabs import generate, play, set_api_key
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
 _api_key_loaded = False
 _eleven_labs_disabled = False
+
+if load_dotenv is not None:
+    load_dotenv()
 
 
 def _candidate_key_paths():
@@ -16,11 +25,17 @@ def _candidate_key_paths():
 
 
 def load_api_key():
+    # Preferred source is .env for local secret management.
+    env_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    if env_key:
+        return env_key
+
     for path in _candidate_key_paths():
         if path.exists():
             return path.read_text(encoding="utf-8").strip()
     raise FileNotFoundError(
-        "Could not find ElevenLabs API key file. Expected one of: "
+        "Could not find ELEVENLABS_API_KEY in environment or key file. "
+        "Expected one of: "
         + ", ".join(str(p) for p in _candidate_key_paths())
     )
 
