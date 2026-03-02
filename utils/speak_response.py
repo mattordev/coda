@@ -1,24 +1,68 @@
-import pyttsx3 as tts
-from elevenlabs import voices, generate, play, set_api_key
-import commands.connected as connected
+import socket
+from elevenlabs import generate, play, set_api_key
+from pathlib import Path
 
 
-def load_api_key(file_path):
-    with open(file_path, 'r') as file:
-        api_key = file.read().strip()
-    return api_key
+_api_key_loaded = False
+_eleven_labs_disabled = False
 
 
-# Load the API key from the file
-api_key_file = 'ELapikey.txt'
-elevenLabsAPIKey = load_api_key(api_key_file)
+def _candidate_key_paths():
+    repo_root = Path(__file__).resolve().parent.parent
+    return [
+        repo_root / "ELapikey.txt",
+        repo_root / "ELapi_key.txt",
+        repo_root / "coda-1.0.5" / "ELapikey.txt",
+        repo_root / "coda-1.0.5" / "ELapi_key.txt",
+    ]
 
-# Set the API key
-user = set_api_key(elevenLabsAPIKey)
+
+def load_api_key():
+    for path in _candidate_key_paths():
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+    raise FileNotFoundError(
+        "Could not find ElevenLabs API key file. Expected one of: "
+        + ", ".join(str(p) for p in _candidate_key_paths())
+    )
+
+
+def ensure_api_key_loaded():
+    global _api_key_loaded
+    global _eleven_labs_disabled
+
+    if _eleven_labs_disabled:
+        return False
+
+    if _api_key_loaded:
+        return True
+
+    try:
+        eleven_labs_api_key = load_api_key()
+        set_api_key(eleven_labs_api_key)
+        _api_key_loaded = True
+        return True
+    except Exception as error:
+        print(f"Unable to initialize ElevenLabs API key: {error}")
+        _eleven_labs_disabled = True
+        return False
+
+
+def is_connected():
+    remote_server = "www.google.com"
+
+    try:
+        host = socket.gethostbyname(remote_server)
+        with socket.create_connection((host, 80), 2):
+            return True
+    except OSError:
+        return False
 
 
 def speak_response(response):
-    if connected.is_connected():
+    global _eleven_labs_disabled
+
+    if is_connected() and ensure_api_key_loaded():
         try:
             print("Using Eleven labs for speech")
             audio = generate(
@@ -27,20 +71,37 @@ def speak_response(response):
                 model="eleven_monolingual_v1"
             )
             play(audio)
+            return True
         except Exception as e:
             print(f"Error using Eleven Labs: {e}")
-            use_pyttsx3(response)
-    else:
-        use_pyttsx3(response)
+
+            if "invalid api key" in str(e).lower():
+                _eleven_labs_disabled = True
+
+            return use_pyttsx3(response)
+
+    return use_pyttsx3(response)
 
 
 def use_pyttsx3(message):
     print("Using pyttsx3 for speech as a fallback")
-    # Initialize text-to-speech
-    speaker = tts.init()
-    voices = speaker.getProperty('voices')
-    # Set how fast it will talk.
-    speaker.setProperty("rate", 175)
-    speaker.setProperty('voice', voices[0].id)
-    speaker.say(message)
-    speaker.runAndWait()
+
+    try:
+        import pyttsx3 as tts
+
+        # Initialize text-to-speech
+        speaker = tts.init()
+        available_voices = speaker.getProperty('voices')
+        # Set how fast it will talk.
+        speaker.setProperty("rate", 175)
+
+        if available_voices:
+            speaker.setProperty('voice', available_voices[0].id)
+
+        speaker.say(message)
+        speaker.runAndWait()
+        return True
+    except Exception as error:
+        print(f"Error using pyttsx3 fallback: {error}")
+        print(f"TTS disabled, response text: {message}")
+        return False
