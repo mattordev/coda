@@ -47,6 +47,17 @@ def ensure_api_key_loaded():
     if _eleven_labs_disabled:
         return False
 
+
+def reload_config():
+    global _api_key_loaded
+    global _eleven_labs_disabled
+
+    if load_dotenv is not None:
+        load_dotenv(override=True)
+
+    _api_key_loaded = False
+    _eleven_labs_disabled = False
+
     if _api_key_loaded:
         return True
 

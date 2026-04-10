@@ -5,17 +5,47 @@ import re
 import speech_recognition as sr
 # import pocketsphinx5 as ps5
 import utils.on_command as command
+import utils.runtime_state as runtime_state
 
 # Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
 # Currently not using `wakewords.json` or `commands.json` but will be in the future
 
-LISTEN_TIMEOUT_SECONDS = float(os.getenv("CODA_LISTEN_TIMEOUT", "3.0"))
-PHRASE_TIME_LIMIT_SECONDS = float(os.getenv("CODA_PHRASE_TIME_LIMIT", "8.0"))
-CALIBRATION_SECONDS = float(os.getenv("CODA_CALIBRATION_SECONDS", "0.8"))
-VOICE_COMMAND_DEBUG = os.getenv("CODA_VOICE_COMMAND_DEBUG", "1").lower() in (
-    "1", "true", "yes")
-LIST_MICS_ON_START = os.getenv("CODA_LIST_MICS_ON_START", "0").lower() in (
-    "1", "true", "yes")
+def _get_float_env(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _get_bool_env(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+def _get_listen_timeout_seconds():
+    return _get_float_env("CODA_LISTEN_TIMEOUT", 3.0)
+
+
+def _get_phrase_time_limit_seconds():
+    return _get_float_env("CODA_PHRASE_TIME_LIMIT", 8.0)
+
+
+def _get_calibration_seconds():
+    return _get_float_env("CODA_CALIBRATION_SECONDS", 0.8)
+
+
+def _voice_command_debug_enabled():
+    return _get_bool_env("CODA_VOICE_COMMAND_DEBUG", True)
+
+
+def _list_mics_on_start():
+    return _get_bool_env("CODA_LIST_MICS_ON_START", False)
 
 
 def _tokenize_text(message):
@@ -50,7 +80,7 @@ def _get_microphone():
     mic_index = os.getenv("CODA_MIC_INDEX")
     mic_name = os.getenv("CODA_MIC_NAME", "").strip().lower()
 
-    if LIST_MICS_ON_START:
+    if _list_mics_on_start():
         print_microphones()
 
     if mic_index is not None:
@@ -106,7 +136,8 @@ def run(wakeword, commands, type, stop_event=None):
     try:
         with microphone as source:
             print("Calibrating microphone for ambient noise...")
-            recognizer.adjust_for_ambient_noise(source, duration=CALIBRATION_SECONDS)
+            recognizer.adjust_for_ambient_noise(
+                source, duration=_get_calibration_seconds())
             print(
                 f"Microphone ready (energy threshold: {int(recognizer.energy_threshold)})")
     except OSError as e:
@@ -126,8 +157,8 @@ def run(wakeword, commands, type, stop_event=None):
             with microphone as source:
                 audio = recognizer.listen(
                     source,
-                    timeout=LISTEN_TIMEOUT_SECONDS,
-                    phrase_time_limit=PHRASE_TIME_LIMIT_SECONDS,
+                    timeout=_get_listen_timeout_seconds(),
+                    phrase_time_limit=_get_phrase_time_limit_seconds(),
                 )
 
             if stop_event is not None and stop_event.is_set():
@@ -142,16 +173,18 @@ def run(wakeword, commands, type, stop_event=None):
 
             if _has_wakeword(message, wakeword):
                 command_message = _strip_text_before_wakeword(message, wakeword)
+                debug_enabled = runtime_state.is_debug_enabled(
+                    default=_voice_command_debug_enabled())
 
                 if not command_message:
-                    if VOICE_COMMAND_DEBUG:
+                    if debug_enabled:
                         print("[VOICE] Wakeword detected without follow-up speech.")
                     continue
 
-                if VOICE_COMMAND_DEBUG:
+                if debug_enabled:
                     print(f"[VOICE] Wakeword detected. Parsed message: {command_message}")
 
-                command.run(command_message, commands, debug=VOICE_COMMAND_DEBUG)
+                command.run(command_message, commands, debug=debug_enabled)
             else:
                 print("[VOICE] Wakeword not detected. Ignoring phrase.")
 

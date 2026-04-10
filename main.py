@@ -6,6 +6,7 @@ import importlib
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
+import utils.runtime_state as runtime_state
 from colorama import Fore, init
 
 import semantic_version
@@ -69,7 +70,7 @@ def setup_commands():
 
     for cmdFile in os.listdir(command_file_location):
         name = os.fsdecode(cmdFile)
-        if name.endswith(".py"):
+        if name.endswith(".py") and not name.startswith("__"):
             command_path = os.path.join(str(command_file_location), cmdFile)
             module = SourceFileLoader(name.split(
                 ".py")[0].lower(), command_path).load_module()
@@ -114,6 +115,18 @@ def load_commands():
                 setup_commands()
                 # These commands won't load even though the commands.json file is present
                 commands = load_commands()
+
+        expected_command_names = {
+            path.stem.lower()
+            for path in _get_commands_dir().glob("*.py")
+            if not path.name.startswith("__")
+        }
+        serialized_command_names = set(serialized_commands.keys())
+
+        if expected_command_names != serialized_command_names:
+            print("Command files changed. Rebuilding command cache...")
+            setup_commands()
+            return load_commands()
 
         for cmd_name, cmd_data in serialized_commands.items():
             module_path = cmd_data["module"]
@@ -315,7 +328,11 @@ while True:
             continue
 
         # Debug output enabled in manual mode so command matching is visible.
-        command.run(manual_message, commands, debug=True)
+        command.run(
+            manual_message,
+            commands,
+            debug=runtime_state.is_debug_enabled(default=True),
+        )
     else:
         if keyboard_toggle_available:
             try:

@@ -17,13 +17,6 @@ except ImportError:
 if load_dotenv is not None:
     load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("CODA_OPENAI_MODEL", "gpt-3.5-turbo")
-LLM_TIMEOUT_SECONDS = float(os.getenv("CODA_LLM_TIMEOUT", "45"))
-
-if openai is not None and OPENAI_API_KEY and hasattr(openai, "api_key"):
-    openai.api_key = OPENAI_API_KEY
-
 conversation = [
     {
         "role": "system",
@@ -42,6 +35,42 @@ preferred_ollama_models = (
 
 def run(message, commands, debug=False):
     return on_command(message, commands, debug=debug)
+
+
+def _get_float_env(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _get_openai_api_key():
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+def _get_openai_model():
+    return os.getenv("CODA_OPENAI_MODEL", "gpt-3.5-turbo").strip() or "gpt-3.5-turbo"
+
+
+def _get_llm_timeout_seconds():
+    return _get_float_env("CODA_LLM_TIMEOUT", 45.0)
+
+
+def reload_config():
+    global ollama_model_cache
+
+    if load_dotenv is not None:
+        load_dotenv(override=True)
+
+    ollama_model_cache = None
+
+    openai_api_key = _get_openai_api_key()
+    if openai is not None and hasattr(openai, "api_key"):
+        openai.api_key = openai_api_key or None
 
 
 def _tokenize_message(message):
@@ -100,7 +129,7 @@ def _get_ollama_model():
     try:
         response = requests.get(
             f"{ollama_base_url}/api/tags",
-            timeout=min(LLM_TIMEOUT_SECONDS, 10),
+            timeout=min(_get_llm_timeout_seconds(), 10),
         )
         response.raise_for_status()
         models = response.json().get("models", [])
@@ -141,27 +170,33 @@ def _get_ollama_model():
 
 
 def _generate_openai_response(user_text):
+    openai_api_key = _get_openai_api_key()
+    openai_model = _get_openai_model()
+
     if openai is None:
         return None, "openai package is not installed"
 
-    if not OPENAI_API_KEY:
+    if not openai_api_key:
         return None, "OPENAI_API_KEY is not set"
+
+    if hasattr(openai, "api_key"):
+        openai.api_key = openai_api_key
 
     conversation.append({"role": "user", "content": user_text})
 
     try:
         # openai>=1.x client API
         if hasattr(openai, "OpenAI"):
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            client = openai.OpenAI(api_key=openai_api_key)
             response = client.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=openai_model,
                 messages=conversation,
             )
             assistant_message = response.choices[0].message.content
         else:
             # openai<=0.x legacy API
             response = openai.ChatCompletion.create(
-                model=OPENAI_MODEL,
+                model=openai_model,
                 messages=conversation,
             )
             assistant_message = response["choices"][0]["message"]["content"]
@@ -192,7 +227,7 @@ def _generate_ollama_response(user_text):
                 "messages": conversation,
                 "stream": False,
             },
-            timeout=LLM_TIMEOUT_SECONDS,
+            timeout=_get_llm_timeout_seconds(),
         )
         response.raise_for_status()
         response_json = response.json()
@@ -228,7 +263,7 @@ def _describe_llm_fallback():
     provider = _get_llm_provider()
 
     if provider == "openai":
-        return f"openai (model: {OPENAI_MODEL})"
+        return f"openai (model: {_get_openai_model()})"
 
     if provider == "ollama":
         model_name, error = _get_ollama_model()
