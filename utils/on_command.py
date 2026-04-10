@@ -1,4 +1,7 @@
 import os
+import re
+
+import requests
 
 try:
     from dotenv import load_dotenv
@@ -16,6 +19,7 @@ if load_dotenv is not None:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("CODA_OPENAI_MODEL", "gpt-3.5-turbo")
+LLM_TIMEOUT_SECONDS = float(os.getenv("CODA_LLM_TIMEOUT", "45"))
 
 if openai is not None and OPENAI_API_KEY and hasattr(openai, "api_key"):
     openai.api_key = OPENAI_API_KEY
@@ -30,10 +34,18 @@ conversation = [
         ),
     },
 ]
+ollama_model_cache = None
+preferred_ollama_models = (
+    "lfm2:24b",
+)
 
 
 def run(message, commands, debug=False):
     return on_command(message, commands, debug=debug)
+
+
+def _tokenize_message(message):
+    return re.findall(r"[a-z0-9']+", message.lower())
 
 
 def _ordered_matches(tokens, commands):
@@ -44,11 +56,91 @@ def _ordered_matches(tokens, commands):
     return matched
 
 
-def _gpt_fallback_enabled():
-    return os.getenv("CODA_GPT_FALLBACK", "1").lower() in ("1", "true", "yes")
+def _llm_fallback_enabled():
+    configured_value = os.getenv("CODA_LLM_FALLBACK")
+    if configured_value is None:
+        configured_value = os.getenv("CODA_GPT_FALLBACK", "1")
+    return configured_value.lower() in ("1", "true", "yes")
 
 
-def _generate_gpt_response(user_text):
+def _get_ollama_base_url():
+    return os.getenv("CODA_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+
+def _get_configured_ollama_model():
+    return os.getenv("CODA_OLLAMA_MODEL", "").strip()
+
+
+def _get_llm_provider():
+    provider = os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
+
+    if provider == "gpt":
+        return "openai"
+
+    if provider in ("", "auto"):
+        if _get_configured_ollama_model() or os.getenv("CODA_OLLAMA_BASE_URL"):
+            return "ollama"
+        return "openai"
+
+    return provider
+
+
+def _get_ollama_model():
+    global ollama_model_cache
+
+    configured_model = _get_configured_ollama_model()
+    if configured_model:
+        return configured_model, None
+
+    if ollama_model_cache:
+        return ollama_model_cache, None
+
+    ollama_base_url = _get_ollama_base_url()
+
+    try:
+        response = requests.get(
+            f"{ollama_base_url}/api/tags",
+            timeout=min(LLM_TIMEOUT_SECONDS, 10),
+        )
+        response.raise_for_status()
+        models = response.json().get("models", [])
+    except Exception as exc:
+        return None, (
+            "could not fetch Ollama models automatically. "
+            "Set CODA_OLLAMA_MODEL explicitly. "
+            f"Details: {exc}"
+        )
+
+    if not models:
+        return None, (
+            "no Ollama models were found at the configured host. "
+            "Set CODA_OLLAMA_MODEL after pulling a model."
+        )
+
+    model_names = []
+    for model in models:
+        model_name = model.get("name") or model.get("model")
+        if model_name:
+            model_names.append(model_name)
+
+    selected_model = None
+
+    for preferred_model in preferred_ollama_models:
+        if preferred_model in model_names:
+            selected_model = preferred_model
+            break
+
+    if selected_model is None:
+        selected_model = model_names[0] if model_names else None
+
+    if not selected_model:
+        return None, "Ollama returned models but none included a usable name"
+
+    ollama_model_cache = selected_model
+    return ollama_model_cache, None
+
+
+def _generate_openai_response(user_text):
     if openai is None:
         return None, "openai package is not installed"
 
@@ -84,9 +176,72 @@ def _generate_gpt_response(user_text):
     return assistant_message, None
 
 
+def _generate_ollama_response(user_text):
+    model_name, error = _get_ollama_model()
+    if error:
+        return None, error
+
+    ollama_base_url = _get_ollama_base_url()
+    conversation.append({"role": "user", "content": user_text})
+
+    try:
+        response = requests.post(
+            f"{ollama_base_url}/api/chat",
+            json={
+                "model": model_name,
+                "messages": conversation,
+                "stream": False,
+            },
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        response_json = response.json()
+        message = response_json.get("message", {})
+        assistant_message = message.get("content") or response_json.get("response")
+    except Exception as exc:
+        conversation.pop()
+        return None, str(exc)
+
+    assistant_message = (assistant_message or "").strip()
+    if assistant_message:
+        conversation.append({"role": "assistant", "content": assistant_message})
+
+    return assistant_message, None
+
+
+def _generate_llm_response(user_text):
+    provider = _get_llm_provider()
+
+    if provider == "openai":
+        return _generate_openai_response(user_text)
+
+    if provider == "ollama":
+        return _generate_ollama_response(user_text)
+
+    return None, (
+        f"unsupported CODA_LLM_PROVIDER '{provider}'. "
+        "Expected 'openai' or 'ollama'."
+    )
+
+
+def _describe_llm_fallback():
+    provider = _get_llm_provider()
+
+    if provider == "openai":
+        return f"openai (model: {OPENAI_MODEL})"
+
+    if provider == "ollama":
+        model_name, error = _get_ollama_model()
+        if error:
+            return f"ollama (model resolution failed: {error})"
+        return f"ollama (model: {model_name})"
+
+    return provider
+
+
 def on_command(msg, commands, debug=False):
-    # Lowercase and split into command tokens.
-    tokens = msg.lower().split()
+    normalized_message = msg.strip()
+    tokens = _tokenize_message(normalized_message)
 
     if debug:
         print(f"[DEBUG] Raw message: {msg}")
@@ -99,15 +254,24 @@ def on_command(msg, commands, debug=False):
         print(f"[DEBUG] Matched commands: {matched_commands}")
 
     if not matched_commands:
-        print("No command found in string")
-
-        if not _gpt_fallback_enabled():
+        if not normalized_message:
+            if debug:
+                print("[DEBUG] No command content remained after normalization.")
             return False
 
-        response_text, error = _generate_gpt_response(msg.strip())
+        if debug:
+            print("[DEBUG] No command found. Routing message to LLM fallback.")
+
+        if not _llm_fallback_enabled():
+            return False
+
+        provider = _get_llm_provider()
+        if debug:
+            print(f"[DEBUG] Using LLM fallback: {_describe_llm_fallback()}")
+        response_text, error = _generate_llm_response(normalized_message)
         if error:
             if debug:
-                print(f"[DEBUG] GPT fallback unavailable: {error}")
+                print(f"[DEBUG] LLM fallback unavailable ({provider}): {error}")
             return False
 
         if not response_text:
@@ -119,7 +283,7 @@ def on_command(msg, commands, debug=False):
             speak.speak_response(response_text)
         except Exception as exc:
             if debug:
-                print(f"[DEBUG] Could not speak GPT response: {exc}")
+                print(f"[DEBUG] Could not speak LLM response: {exc}")
         return True
 
     command_executed = False

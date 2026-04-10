@@ -28,6 +28,23 @@ def _has_wakeword(message, wakewords):
     return not wakeword_set.isdisjoint(message_words)
 
 
+def _strip_text_before_wakeword(message, wakewords):
+    first_match = None
+
+    for wakeword in wakewords:
+        match = re.search(rf"\b{re.escape(wakeword.lower())}\b", message.lower())
+        if match is None:
+            continue
+
+        if first_match is None or match.start() < first_match.start():
+            first_match = match
+
+    if first_match is None:
+        return message.strip()
+
+    return message[first_match.end():].strip(" ,.!?-")
+
+
 def _get_microphone():
     names = sr.Microphone.list_microphone_names()
     mic_index = os.getenv("CODA_MIC_INDEX")
@@ -124,8 +141,17 @@ def run(wakeword, commands, type, stop_event=None):
             display_message(f"Heard: {message}")
 
             if _has_wakeword(message, wakeword):
-                print("[VOICE] Wakeword detected. Running command parser.")
-                command.run(message, commands, debug=VOICE_COMMAND_DEBUG)
+                command_message = _strip_text_before_wakeword(message, wakeword)
+
+                if not command_message:
+                    if VOICE_COMMAND_DEBUG:
+                        print("[VOICE] Wakeword detected without follow-up speech.")
+                    continue
+
+                if VOICE_COMMAND_DEBUG:
+                    print(f"[VOICE] Wakeword detected. Parsed message: {command_message}")
+
+                command.run(command_message, commands, debug=VOICE_COMMAND_DEBUG)
             else:
                 print("[VOICE] Wakeword not detected. Ignoring phrase.")
 

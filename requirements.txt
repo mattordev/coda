@@ -80,6 +80,8 @@ numpy==1.25.0
     #   blis
     #   spacy
     #   thinc
+openai==0.27.8
+    # via -r requirements.in
 packaging==23.1
     # via
     #   spacy
