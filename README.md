@@ -9,7 +9,7 @@ C.O.D.A is a smart assistant that I've began to rewrite as the original code was
 
 C.O.D.A stands for **Cognitive Operational Data Assistant**, but this project was originally called H.A.D.E.S, aka Home And Data... something or other. This project started in 2016, but was forgotten and not worked on for many years. The initial concept was for this system/asisstant to act as a user interface and aid in general purpose tasks.
 
-As you may of figured, there's not much thats "cognitive" about a basic smart asisstant. But later down the line, depening on the completion of the first prototype and what I manage to get done I also want to look at Machine Learning for more accurate wakeword detection and speech synthesis.
+As you may of figured, there's not much thats "cognitive" about a basic smart asisstant. But later down the line, depending on the completion of the first prototype and what I manage to get done I also want to look at Machine Learning for more accurate wakeword detection and speech synthesis.
 
 C.O.D.A has several planned commands and features, the planned commands and finished commands are here:
 
