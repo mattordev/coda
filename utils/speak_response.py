@@ -47,17 +47,6 @@ def ensure_api_key_loaded():
     if _eleven_labs_disabled:
         return False
 
-
-def reload_config():
-    global _api_key_loaded
-    global _eleven_labs_disabled
-
-    if load_dotenv is not None:
-        load_dotenv(override=True)
-
-    _api_key_loaded = False
-    _eleven_labs_disabled = False
-
     if _api_key_loaded:
         return True
 
@@ -70,6 +59,19 @@ def reload_config():
         print(f"Unable to initialize ElevenLabs API key: {error}")
         _eleven_labs_disabled = True
         return False
+
+
+def reload_config():
+    global _api_key_loaded
+    global _eleven_labs_disabled
+
+    if load_dotenv is not None:
+        load_dotenv(override=True)
+
+    _api_key_loaded = False
+    _eleven_labs_disabled = False
+
+    return ensure_api_key_loaded()
 
 
 def is_connected():
@@ -91,8 +93,8 @@ def speak_response(response):
             print("Using Eleven labs for speech")
             audio = generate(
                 text=response,
-                voice="9MHPRsXjcQrLl0zd1ZLU",
-                model="eleven_monolingual_v1",
+                voice="N2lVS1w4EtoT3dr4eOWO",
+                model="eleven_flash_v2_5",
             )
             play(audio)
             return True

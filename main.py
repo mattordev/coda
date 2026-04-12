@@ -14,6 +14,7 @@ import requests
 import keyboard
 import time
 import threading
+import re
 from pathlib import Path
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
@@ -35,6 +36,33 @@ def _get_flag_value(flag_name):
 
 def _is_manual_mode_requested():
     return "-m" in sys.argv or "--manual" in sys.argv
+
+
+def _tokenize_text(message):
+    return re.findall(r"[a-z0-9']+", message.lower())
+
+
+def _has_wakeword(message, wakeword_list):
+    message_words = set(_tokenize_text(message))
+    wakeword_set = {w.lower() for w in wakeword_list}
+    return not wakeword_set.isdisjoint(message_words)
+
+
+def _strip_text_before_wakeword(message, wakeword_list):
+    first_match = None
+
+    for wakeword in wakeword_list:
+        match = re.search(rf"\b{re.escape(wakeword.lower())}\b", message.lower())
+        if match is None:
+            continue
+
+        if first_match is None or match.start() < first_match.start():
+            first_match = match
+
+    if first_match is None:
+        return message.strip()
+
+    return message[first_match.end():].strip(" ,.!?-")
 
 
 if __name__ == "__main__":
@@ -327,9 +355,22 @@ while True:
             start_voice_thread()
             continue
 
+        if not _has_wakeword(normalized_manual_message, wakewords):
+            print("[MANUAL] Wakeword not detected. Prefix your request with a wakeword.")
+            continue
+
+        command_message = _strip_text_before_wakeword(
+            normalized_manual_message,
+            wakewords,
+        )
+
+        if not command_message:
+            print("[MANUAL] Wakeword detected without follow-up text.")
+            continue
+
         # Debug output enabled in manual mode so command matching is visible.
         command.run(
-            manual_message,
+            command_message,
             commands,
             debug=runtime_state.is_debug_enabled(default=True),
         )

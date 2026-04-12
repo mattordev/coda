@@ -44,6 +44,8 @@ decorator==5.1.1
     # via ipython
 elevenlabs==0.2.18
     # via -r requirements.in
+faster-whisper==1.2.1
+    # via -r requirements.in
 executing==1.2.0
     # via stack-data
 flask==2.3.2
