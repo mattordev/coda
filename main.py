@@ -257,7 +257,7 @@ def check_update_available(version_url):
 
 # calls voice recog run loop using wakewords, commands and a stop event.
 def start_voice_recognition():
-    voice_recognizer.run(wakewords, commands, type='normal',
+    voice_recognizer.run(wakewords, commands, mode='normal',
                          stop_event=voice_stop_event)
 
 # Starts daemon thread for voice loop if not already alive.
