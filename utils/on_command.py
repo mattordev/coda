@@ -79,13 +79,24 @@ def on_command(msg, commands, debug=False):
         if debug:
             print(f"[DEBUG] Using LLM fallback: {_describe_llm_fallback()}")
         response_text, error = _generate_llm_response(normalized_message)
+        if not error and not response_text:
+            if debug:
+                print("[DEBUG] LLM returned an empty response. Retrying once.")
+            response_text, error = _generate_llm_response(normalized_message)
+
         if error:
             if debug:
                 print(f"[DEBUG] LLM fallback unavailable ({provider}): {error}")
             return CommandResult(handled=False)
 
         if not response_text:
-            return CommandResult(handled=False)
+            if debug:
+                print("[DEBUG] LLM returned empty response twice. Keeping follow-up window open.")
+            return CommandResult(
+                handled=True,
+                used_llm=True,
+                open_follow_up=True,
+            )
 
         print(f"CODA: {response_text}")
         try:
