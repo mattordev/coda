@@ -6,6 +6,7 @@ import time
 import http.client
 import speech_recognition as sr
 # import pocketsphinx5 as ps5
+import utils.dashboard_state as dashboard_state
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.stt_service as stt_service
@@ -212,7 +213,32 @@ def run(wakeword, commands, type, stop_event=None):
             if not speech:
                 continue
 
+            speech_text = speech.strip()
             message = speech.lower()
+            has_wakeword = _has_wakeword(message, wakeword)
+            wakeword_command_message = _strip_text_before_wakeword(
+                message,
+                wakeword,
+            ) if has_wakeword else ""
+
+            event_tags = []
+            if follow_up_active:
+                event_tags.append("follow_up")
+                if _is_follow_up_stop_phrase(message):
+                    event_tags.append("follow_up_stop")
+            elif has_wakeword:
+                event_tags.append("wakeword_detected")
+                if not wakeword_command_message:
+                    event_tags.append("wakeword_only")
+            else:
+                event_tags.append("unrelated_speech")
+
+            dashboard_state.record_user_message(
+                speech_text,
+                source=provider_used,
+                tags=event_tags,
+            )
+
             display_message(f"Heard: {message}")
             if debug_enabled:
                 print(f"[VOICE] Speech provider used: {provider_used}")
@@ -227,8 +253,8 @@ def run(wakeword, commands, type, stop_event=None):
                 command_message = message.strip()
                 if debug_enabled:
                     print("[VOICE] Follow-up mode active. Processing without wakeword.")
-            elif _has_wakeword(message, wakeword):
-                command_message = _strip_text_before_wakeword(message, wakeword)
+            elif has_wakeword:
+                command_message = wakeword_command_message
 
                 if not command_message:
                     if debug_enabled:

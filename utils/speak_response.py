@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from elevenlabs import generate, play, set_api_key
+import utils.dashboard_state as dashboard_state
 
 try:
     from dotenv import load_dotenv
@@ -87,6 +88,8 @@ def is_connected():
 
 def speak_response(response):
     global _eleven_labs_disabled
+
+    dashboard_state.record_ai_response(response, source="tts")
 
     if is_connected() and ensure_api_key_loaded():
         try:

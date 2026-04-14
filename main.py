@@ -7,6 +7,7 @@ from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
 import utils.runtime_state as runtime_state
+import utils.dashboard_state as dashboard_state
 from colorama import Fore, init
 
 import semantic_version
@@ -23,6 +24,8 @@ version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.jso
 manual_assisstant_input = False
 voice_stop_event = threading.Event()
 voice_thread = None
+heartbeat_stop_event = threading.Event()
+heartbeat_thread = None
 
 
 def _get_flag_value(flag_name):
@@ -267,6 +270,34 @@ def stop_voice_thread(timeout_seconds=4.0):
         voice_thread.join(timeout=timeout_seconds)
 
 
+def _heartbeat_loop(interval_seconds=1.5):
+    while not heartbeat_stop_event.is_set():
+        try:
+            dashboard_state.touch_heartbeat(source="main")
+        except Exception as heartbeat_error:
+            print(f"Heartbeat update failed: {heartbeat_error}")
+
+        heartbeat_stop_event.wait(interval_seconds)
+
+
+def start_heartbeat_thread():
+    global heartbeat_thread
+
+    if heartbeat_thread is not None and heartbeat_thread.is_alive():
+        return
+
+    heartbeat_stop_event.clear()
+    heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+
+
+def stop_heartbeat_thread(timeout_seconds=2.0):
+    heartbeat_stop_event.set()
+
+    if heartbeat_thread is not None and heartbeat_thread.is_alive():
+        heartbeat_thread.join(timeout=timeout_seconds)
+
+
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
     setup_commands()
@@ -323,6 +354,7 @@ else:
 
 load_time = time.perf_counter()
 print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
+start_heartbeat_thread()
 
 if manual_assisstant_input:
     print("MANUAL MODE ENABLED")
@@ -346,6 +378,7 @@ while True:
 
         if normalized_manual_message in ("quit", "exit"):
             stop_voice_thread()
+            stop_heartbeat_thread()
             print("Exiting C.O.D.A")
             break
 
