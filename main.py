@@ -27,7 +27,7 @@ voice_thread = None
 heartbeat_stop_event = threading.Event()
 heartbeat_thread = None
 
-
+# scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
 def _get_flag_value(flag_name):
     for idx, arg in enumerate(sys.argv):
         if arg == flag_name and idx + 1 < len(sys.argv):
@@ -36,21 +36,22 @@ def _get_flag_value(flag_name):
             return arg.split("=", 1)[1]
     return None
 
-
+# checks to see if manual mode should be enabled based on flag
 def _is_manual_mode_requested():
     return "-m" in sys.argv or "--manual" in sys.argv
 
-
+# turns text into lowercase and tokenizes it, uses regex. Used for wakeword detection to filter punctuation and ensure consistent matching.
 def _tokenize_text(message):
     return re.findall(r"[a-z0-9']+", message.lower())
 
-
+# checks for wakewords in the message by comparing against the wakeword list, returns true if any wakeword is found. Uses set intersection for efficient matching.
 def _has_wakeword(message, wakeword_list):
     message_words = set(_tokenize_text(message))
     wakeword_set = {w.lower() for w in wakeword_list}
     return not wakeword_set.isdisjoint(message_words)
 
-
+# finds the earliest mention of the wakeword in the in the message, strips it and removes punctuation. 
+# eg. "Hey Coda, what's the weather?" -> "what's the weather?" If no wakeword is found, returns the original message.
 def _strip_text_before_wakeword(message, wakeword_list):
     first_match = None
 
@@ -68,6 +69,7 @@ def _strip_text_before_wakeword(message, wakeword_list):
     return message[first_match.end():].strip(" ,.!?-")
 
 
+# sets up microphone configuration based on cli args, also handles --list-mics which prints the available microphones and exits
 if __name__ == "__main__":
     mic_name_arg = _get_flag_value("--mic")
     mic_index_arg = _get_flag_value("--mic-index")
@@ -84,14 +86,14 @@ if __name__ == "__main__":
 
     manual_assisstant_input = _is_manual_mode_requested()
 
-
+# gets the commands directory in a portable way, checks both "Commands" and "commands" to account for different naming conventions
 def _get_commands_dir():
     cwd = Path.cwd()
     if (cwd / "Commands").exists():
         return cwd / "Commands"
     return cwd / "commands"
 
-
+# loads the command modules from the commands dir, fills the global commands dict and writes to json via save_commands.
 def setup_commands():
     command_file_location = _get_commands_dir()
     sys.path.append(str(command_file_location))
@@ -111,7 +113,9 @@ def setup_commands():
     print("Saving commands...")
     save_commands()
 
-
+# serializes the commands dict to a json file, names and file paths are saved for each command module. 
+# This allows for faster loading on subsequent runs by avoiding the need to scan the commands directory again.
+# If the commands.json file is missing or corrupted, it will be re-created on the next run.
 def save_commands():
     print("----------------------------------------", flush=True)
     print("PRINTING FOUND COMMANDS:")
@@ -128,7 +132,8 @@ def save_commands():
     with open("commands.json", "w") as outfile:
         json.dump(serialized_commands, outfile)
 
-
+# reads the commands json, validates it against actual command files in the command dir
+# if the json is corrupted or stale it rebuilds it via rerunning setup_commands and then tries again.
 def load_commands():
     commands = {}
     serialized_commands = {}  # Initialize to an empty dictionary
@@ -181,7 +186,7 @@ def load_commands():
 
     return commands
 
-
+# writes wakeword list to JSON.
 def save_wakewords(wakewords):
     print("Saving wakewords...")
     jsonWakewords = json.dumps(wakewords)
@@ -190,7 +195,8 @@ def save_wakewords(wakewords):
     jsonWakewordsFile.close()
     print("Wakewords saved!")
 
-
+# loads wakewords from json, converts to a list of strings via helper json_dict_to_string_array. 
+# If the file is missing, it raises a FileNotFoundError which is caught in main to trigger first time setup.
 def load_wakewords():
     wakewords = []
 
@@ -206,7 +212,10 @@ def load_wakewords():
 
     return wakewords
 
-
+# compares local version.json with remote version on github.
+# - if remote newer, prompts user for an update.
+# - if user accepts, runs the update_manager which handles the update process and restarts the program.
+# - returns true if an update was performed, false otherwise
 def check_update_available(version_url):
     try:
         # Try to load the local version file
@@ -246,12 +255,12 @@ def check_update_available(version_url):
 
     return False
 
-
+# calls voice recog run loop using wakewords, commands and a stop event.
 def start_voice_recognition():
     voice_recognizer.run(wakewords, commands, type='normal',
                          stop_event=voice_stop_event)
 
-
+# Starts daemon thread for voice loop if not already alive.
 def start_voice_thread():
     global voice_thread
 
@@ -262,14 +271,14 @@ def start_voice_thread():
     voice_thread = threading.Thread(target=start_voice_recognition, daemon=True)
     voice_thread.start()
 
-
+# signals the voice thread to stop and waits for it to finish.
 def stop_voice_thread(timeout_seconds=4.0):
     voice_stop_event.set()
 
     if voice_thread is not None and voice_thread.is_alive():
         voice_thread.join(timeout=timeout_seconds)
 
-
+# calls dashboard_state with a delay, this is used to feed the connection pill on the dashboard.
 def _heartbeat_loop(interval_seconds=1.5):
     while not heartbeat_stop_event.is_set():
         try:
@@ -279,7 +288,7 @@ def _heartbeat_loop(interval_seconds=1.5):
 
         heartbeat_stop_event.wait(interval_seconds)
 
-
+# starts the heartbeat daemon if not already alive.
 def start_heartbeat_thread():
     global heartbeat_thread
 
@@ -290,14 +299,14 @@ def start_heartbeat_thread():
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
     heartbeat_thread.start()
 
-
+# stops and joins the heartbeat thread
 def stop_heartbeat_thread(timeout_seconds=2.0):
     heartbeat_stop_event.set()
 
     if heartbeat_thread is not None and heartbeat_thread.is_alive():
         heartbeat_thread.join(timeout=timeout_seconds)
 
-
+# runs first time setup if command/wakeword files are missing. can be called whenever safely as resets program flow.
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
     setup_commands()
@@ -305,8 +314,9 @@ def run_first_time_setup():
 
 
 ### UTIL FUNCTIONS ##
-
 # These should probably be moved to a seperate .py file
+
+# filters a json-loaded dict down to string entries
 def json_dict_to_string_array(jsonData):
     string_array = []
     for item in jsonData:
@@ -314,21 +324,6 @@ def json_dict_to_string_array(jsonData):
         if isinstance(item, str):
             string_array.append(item)
     return string_array
-
-
-def toggle_input():
-    global manual_assisstant_input
-
-    manual_assisstant_input = not manual_assisstant_input
-
-    if manual_assisstant_input:
-        stop_voice_thread()
-    else:
-        start_voice_thread()
-
-    print(
-        f"Manual input mode {'enabled' if manual_assisstant_input else 'disabled'}")
-
 
 #####################
 
@@ -354,7 +349,8 @@ else:
 
 load_time = time.perf_counter()
 print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
-start_heartbeat_thread()
+
+start_heartbeat_thread() # start heartbeat daemon for dashboard connection status
 
 if manual_assisstant_input:
     print("MANUAL MODE ENABLED")
