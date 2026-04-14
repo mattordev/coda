@@ -195,12 +195,13 @@ def run(wakeword, commands, mode=None, stop_event=None, **kwargs):
                 print("[VOICE] Follow-up window expired.")
 
         follow_up_active = time.monotonic() < follow_up_active_until
+        current_mode = mode or "normal"
 
-        if type == "normal" and follow_up_active:
+        if current_mode == "normal" and follow_up_active:
             print('Waiting for follow-up', flush=True)
-        elif (type == "normal"):
+        elif current_mode == "normal":
             print('Ready to accept commands', flush=True)
-        elif (type == 'response'):
+        elif current_mode == 'response':
             print('Waiting for response', flush=True)
 
         try:
