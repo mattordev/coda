@@ -3,12 +3,20 @@ import threading
 import time
 from pathlib import Path
 
+## program flow example:
+# User speaks -> record_user_message
+# AI replies -> record_ai_response
+# Main loop alive -> touch_heartbeat
+# Browser polls /api/state -> snapshot output rendered in UI
+##
 
+# dash json, a threading lock and total messages to keep in json
 _STATE_FILE = Path(__file__).resolve().parent.parent / "dashboard_state.json"
 _STATE_LOCK = threading.Lock()
 _MAX_MESSAGES = 12
 
 
+# every read starts from this format, prevents corruption
 def _default_state():
     return {
         "updated_at": 0.0,
@@ -23,19 +31,19 @@ def _default_state():
         "ai_messages": [],
     }
 
-
+# enforces _MAX_MESSAGES limit by keeping only the most recent messages in the list
 def _clamp_messages(messages):
     if len(messages) <= _MAX_MESSAGES:
         return messages
     return messages[-_MAX_MESSAGES:]
 
-
+# normalizes text by stripping whitespace and converting to string, returns empty string for None - error catcher
 def _normalize_text(text):
     if text is None:
         return ""
     return str(text).strip()
 
-
+# normalizes tags by ensuring it's a list of unique, non-empty strings with spaces replaced by underscores, returns empty list for None - error catcher
 def _normalize_tags(tags):
     if tags is None:
         return []
@@ -54,7 +62,7 @@ def _normalize_tags(tags):
 
     return normalized
 
-
+# defines a set of motions to cycle through for AI responses, uses an event counter - needs some more variety but good enough for now
 def _motion_for_event(event_counter):
     motions = [
         {"x": 0, "y": -18, "scale": 1.05, "rotation": -2},
@@ -66,7 +74,7 @@ def _motion_for_event(event_counter):
     ]
     return motions[event_counter % len(motions)]
 
-
+# reads the dash state from disk, returns a safe state if error happens
 def _read_state_from_disk():
     if not _STATE_FILE.exists():
         return _default_state()
@@ -84,7 +92,7 @@ def _read_state_from_disk():
     state["last_ai_motion"] = loaded_state.get("last_ai_motion", state["last_ai_motion"])
     return state
 
-
+# write the dash state to json, makes a temp file and then replaces the main file when safe to prevent corruption.
 def _write_state_to_disk(state):
     _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     temp_path = _STATE_FILE.with_suffix(".json.tmp")
@@ -92,7 +100,7 @@ def _write_state_to_disk(state):
         json.dump(state, temp_file, indent=2)
     temp_path.replace(_STATE_FILE)
 
-
+# shared helper to append a message to the state, used by both user messages and AI responses, also clamps the message list to prevent it from growing indefinitely.
 def _append_message(state, key, text, source):
     message = {
         "text": text,
@@ -104,7 +112,7 @@ def _append_message(state, key, text, source):
     state[key] = _clamp_messages(state[key])
     return message
 
-
+# core transaction wrapper, returns the updated state after applying the mutator function, ensures that all state updates are atomic and thread-safe by using a lock, also updates the "updated_at" timestamp on every change.
 def _update_state(mutator):
     with _STATE_LOCK:
         state = _read_state_from_disk()
@@ -113,7 +121,7 @@ def _update_state(mutator):
         _write_state_to_disk(state)
         return state
 
-
+# called from voice_recognition.py when a new user message is captured, normalizes the text and tags, updates the state with the new message and increments the event counter, if the text is empty after normalization it simply returns the current state without making changnes
 def record_user_message(text, source="voice", tags=None):
     message_text = _normalize_text(text)
     if not message_text:
@@ -129,7 +137,7 @@ def record_user_message(text, source="voice", tags=None):
 
     return _update_state(mutator)
 
-
+# called before TTS in speak_response.py. Increments the event counter, updates the last AI message and motion, and appends the message to the list of AI messages. If the text is empty after normalization, it simply returns the current state without making any changes
 def record_ai_response(text, source="assistant"):
     message_text = _normalize_text(text)
     if not message_text:
@@ -144,12 +152,12 @@ def record_ai_response(text, source="assistant"):
 
     return _update_state(mutator)
 
-
+# lcok protected read-only accessor. Returns lastest full state from the json file.
 def snapshot():
     with _STATE_LOCK:
         return _read_state_from_disk()
 
-
+# called from the heartbeat loop in main.py - used for connection status pill
 def touch_heartbeat(source="main"):
     heartbeat_source = _normalize_text(source) or "main"
 
