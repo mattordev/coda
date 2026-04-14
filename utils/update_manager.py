@@ -23,7 +23,28 @@ NEW_VERSION_DIR = "coda-version-new"
 # Where we park the old install before switching over.
 BACKUP_DIR = "coda-old-version"
 # User/local runtime files we do not want to blow away on update.
-PRESERVED_FILES = (".env", "ELapi_key.txt", "wakewords.json", "commands.json")
+PRESERVED_FILES = (
+    ".env",
+    "ELapi_key.txt",
+    "ELapikey.txt",
+    "wakewords.json",
+    "commands.json",
+)
+# Local-only directories that should never be moved into the backup (e.g.
+# virtualenvs, byte-code caches). Backing these up is slow and serves no purpose
+# since they are always recreated from scratch.
+EXCLUDED_FROM_BACKUP = frozenset({
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "node_modules",
+    "dist",
+    "build",
+})
 
 
 def update_program():
@@ -39,8 +60,20 @@ def update_program():
 
 def extract_download():
     # Extract into a temp directory first, never directly into root.
+    # Validate every member path to prevent Zip Slip directory traversal.
+    extract_path = Path(EXTRACT_DIR).resolve()
+    extract_path.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(ZIP_NAME, "r") as zip_ref:
-        zip_ref.extractall(EXTRACT_DIR)
+        for member in zip_ref.infolist():
+            member_path = (extract_path / member.filename).resolve()
+            try:
+                member_path.relative_to(extract_path)
+            except ValueError:
+                raise ValueError(
+                    f"Unsafe zip entry rejected: {member.filename!r} "
+                    f"(resolved to {member_path})"
+                )
+            zip_ref.extract(member, extract_path)
 
 
 def setup_updated_program():
@@ -95,7 +128,8 @@ def activate_updated_program():
         shutil.rmtree(backup)
 
     old_items = [
-        p for p in root.iterdir() if p.name not in {".git", BACKUP_DIR, NEW_VERSION_DIR}
+        p for p in root.iterdir()
+        if p.name not in {".git", BACKUP_DIR, NEW_VERSION_DIR} | EXCLUDED_FROM_BACKUP
     ]
 
     backup.mkdir(parents=True, exist_ok=True)

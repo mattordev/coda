@@ -74,6 +74,36 @@ def _get_llm_timeout_seconds():
     return _get_float_env("CODA_LLM_TIMEOUT", 45.0)
 
 
+def _get_max_conversation_turns():
+    value = os.getenv("CODA_CONVERSATION_MAX_TURNS")
+    if value is None:
+        return 20
+    try:
+        turns = int(value)
+        return turns if turns > 0 else 20
+    except ValueError:
+        return 20
+
+
+def _trim_conversation():
+    """Keep the system prompt and at most the last max_turns user/assistant exchanges.
+
+    Assumes each exchange is exactly one user message followed by one assistant
+    message (which is how the callers always build the history).
+    """
+    max_turns = _get_max_conversation_turns()
+    max_messages = max_turns * 2  # each turn = 1 user + 1 assistant message
+    system_messages = []
+    non_system = []
+    for m in conversation:
+        if m["role"] == "system":
+            system_messages.append(m)
+        else:
+            non_system.append(m)
+    if len(non_system) > max_messages:
+        conversation[:] = system_messages + non_system[-max_messages:]
+
+
 def reload_config():
     global ollama_model_cache
 
@@ -210,6 +240,7 @@ def _generate_openai_response(user_text):
     assistant_message = (assistant_message or "").strip()
     if assistant_message:
         conversation.append({"role": "assistant", "content": assistant_message})
+        _trim_conversation()
 
     return assistant_message, None
 
@@ -243,6 +274,7 @@ def _generate_ollama_response(user_text):
     assistant_message = (assistant_message or "").strip()
     if assistant_message:
         conversation.append({"role": "assistant", "content": assistant_message})
+        _trim_conversation()
 
     return assistant_message, None
 

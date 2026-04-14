@@ -152,7 +152,13 @@ def print_microphones():
         print(f"[{i}] {name}")
 
 
-def run(wakeword, commands, type, stop_event=None):
+def run(wakeword, commands, mode=None, stop_event=None, **kwargs):
+    legacy_mode = kwargs.pop("type", None)
+    if legacy_mode is not None and mode is None:
+        mode = legacy_mode
+    if kwargs:
+        unexpected = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(f"run() got unexpected keyword argument(s): {unexpected}")
     recognizer = sr.Recognizer()
     recognizer.dynamic_energy_threshold = True
     recognizer.pause_threshold = _get_pause_threshold_seconds()
@@ -189,12 +195,13 @@ def run(wakeword, commands, type, stop_event=None):
                 print("[VOICE] Follow-up window expired.")
 
         follow_up_active = time.monotonic() < follow_up_active_until
+        current_mode = mode or "normal"
 
-        if type == "normal" and follow_up_active:
+        if current_mode == "normal" and follow_up_active:
             print('Waiting for follow-up', flush=True)
-        elif (type == "normal"):
+        elif current_mode == "normal":
             print('Ready to accept commands', flush=True)
-        elif (type == 'response'):
+        elif current_mode == 'response':
             print('Waiting for response', flush=True)
 
         try:

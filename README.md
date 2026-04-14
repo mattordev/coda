@@ -97,7 +97,7 @@ Notes:
 - `ELEVENLABS_API_KEY` is now the preferred source for TTS auth.
 - Legacy `ELapi_key.txt` / `ELapikey.txt` files are still supported as fallback.
 - `CODA_GPT_FALLBACK` is still accepted as a legacy alias for `CODA_LLM_FALLBACK`.
-- If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `lfm2:24b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
+- If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `nemotron-3-nano:4b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
 - If no command word is detected after the wakeword, CODA falls back to the configured LLM so you can ask questions and continue the conversation naturally.
 - `CODA_STT_PROVIDER=auto` prefers local Whisper via `faster-whisper`, then falls back to Google recognition.
 - In `auto` mode, CODA will also step down to a more compatible local Whisper setup before using Google, for example when CUDA is detected but the local CUDA runtime is not actually usable.
