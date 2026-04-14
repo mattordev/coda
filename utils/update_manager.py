@@ -69,7 +69,10 @@ def extract_download():
             try:
                 member_path.relative_to(extract_path)
             except ValueError:
-                raise ValueError(f"Unsafe zip entry rejected: {member.filename}")
+                raise ValueError(
+                    f"Unsafe zip entry rejected: {member.filename!r} "
+                    f"(resolved to {member_path})"
+                )
             zip_ref.extract(member, extract_path)
 
 
