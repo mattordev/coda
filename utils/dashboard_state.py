@@ -43,7 +43,8 @@ def _normalize_text(text):
         return ""
     return str(text).strip()
 
-# normalizes tags by ensuring it's a list of unique, non-empty strings with spaces replaced by underscores, returns empty list for None - error catcher
+# normalizes tags by ensuring it's a list of unique, non-empty strings with spaces replaced by underscores, 
+# returns empty list for None - error catcher
 def _normalize_tags(tags):
     if tags is None:
         return []
@@ -100,7 +101,8 @@ def _write_state_to_disk(state):
         json.dump(state, temp_file, indent=2)
     temp_path.replace(_STATE_FILE)
 
-# shared helper to append a message to the state, used by both user messages and AI responses, also clamps the message list to prevent it from growing indefinitely.
+# shared helper to append a message to the state, used by both user messages and AI responses, 
+# also clamps the message list to prevent it from growing indefinitely.
 def _append_message(state, key, text, source):
     message = {
         "text": text,
@@ -112,7 +114,8 @@ def _append_message(state, key, text, source):
     state[key] = _clamp_messages(state[key])
     return message
 
-# core transaction wrapper, returns the updated state after applying the mutator function, ensures that all state updates are atomic and thread-safe by using a lock, also updates the "updated_at" timestamp on every change.
+# core transaction wrapper, returns the updated state after applying the mutator function, 
+# ensures that all state updates are atomic and thread-safe by using a lock, also updates the "updated_at" timestamp on every change.
 def _update_state(mutator):
     with _STATE_LOCK:
         state = _read_state_from_disk()
@@ -121,7 +124,9 @@ def _update_state(mutator):
         _write_state_to_disk(state)
         return state
 
-# called from voice_recognition.py when a new user message is captured, normalizes the text and tags, updates the state with the new message and increments the event counter, if the text is empty after normalization it simply returns the current state without making changnes
+# called from voice_recognition.py when a new user message is captured, normalizes the text and tags, 
+# updates the state with the new message and increments the event counter, 
+# if the text is empty after normalization it simply returns the current state without making changes
 def record_user_message(text, source="voice", tags=None):
     message_text = _normalize_text(text)
     if not message_text:
@@ -137,7 +142,9 @@ def record_user_message(text, source="voice", tags=None):
 
     return _update_state(mutator)
 
-# called before TTS in speak_response.py. Increments the event counter, updates the last AI message and motion, and appends the message to the list of AI messages. If the text is empty after normalization, it simply returns the current state without making any changes
+# called before TTS in speak_response.py. Increments the event counter, updates the last AI message and motion, 
+# and appends the message to the list of AI messages. If the text is empty after normalization, 
+# it simply returns the current state without making any changes
 def record_ai_response(text, source="assistant"):
     message_text = _normalize_text(text)
     if not message_text:
@@ -152,7 +159,7 @@ def record_ai_response(text, source="assistant"):
 
     return _update_state(mutator)
 
-# lcok protected read-only accessor. Returns lastest full state from the json file.
+# lock protected read-only accessor. Returns latest full state from the json file.
 def snapshot():
     with _STATE_LOCK:
         return _read_state_from_disk()
