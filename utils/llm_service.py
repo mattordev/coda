@@ -86,14 +86,22 @@ def _get_max_conversation_turns():
 
 
 def _trim_conversation():
-    """Keep the system prompt and at most the last max_turns user/assistant exchanges."""
+    """Keep the system prompt and at most the last max_turns user/assistant exchanges.
+
+    Assumes each exchange is exactly one user message followed by one assistant
+    message (which is how the callers always build the history).
+    """
     max_turns = _get_max_conversation_turns()
     max_messages = max_turns * 2  # each turn = 1 user + 1 assistant message
-    system_messages = [m for m in conversation if m["role"] == "system"]
-    non_system = [m for m in conversation if m["role"] != "system"]
+    system_messages = []
+    non_system = []
+    for m in conversation:
+        if m["role"] == "system":
+            system_messages.append(m)
+        else:
+            non_system.append(m)
     if len(non_system) > max_messages:
-        trimmed = non_system[-max_messages:]
-        conversation[:] = system_messages + trimmed
+        conversation[:] = system_messages + non_system[-max_messages:]
 
 
 def reload_config():
