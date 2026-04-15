@@ -1,4 +1,3 @@
-import spacy
 import webbrowser
 import random
 

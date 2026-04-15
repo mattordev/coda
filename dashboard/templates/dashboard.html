@@ -1,7 +1,74 @@
-<html>
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>C.O.D.A Dashboard</title>
+		<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+	</head>
 
-<body>
-    <h1>Dashboard</h1>
-</body>
+	<body>
+		<main class="dashboard-shell">
+			<section class="hero-panel">
+				<header class="control-bar">
+					<div class="connection-pill" id="connection-pill" data-state="connecting">
+						<span class="dot" aria-hidden="true"></span>
+						<span id="connection-text">Connecting...</span>
+					</div>
+					<div class="toolbar-group">
+						<label class="toggle-wrap" for="autorefresh-toggle">
+							<input id="autorefresh-toggle" type="checkbox" checked />
+							<span>Auto refresh</span>
+						</label>
+						<button type="button" class="ghost-btn" id="refresh-button">Refresh now</button>
+					</div>
+				</header>
 
+				<div class="hero-copy">
+					<div class="status-row">
+						<div class="status-chip">
+							<span class="status-label">Last user</span>
+							<strong id="last-user-text" aria-live="polite">Waiting for speech...</strong>
+						</div>
+						<div class="status-chip">
+							<span class="status-label">Last AI</span>
+							<strong id="last-ai-text" aria-live="polite">No response yet</strong>
+						</div>
+					</div>
+				</div>
+
+				<div class="stage-card">
+					<div class="bubble-field">
+						<div class="bubble-halo"></div>
+						<div class="bubble" id="ai-bubble" aria-label="AI response bubble">
+							<span class="bubble-core"></span>
+							<span class="bubble-glow"></span>
+						</div>
+						<div class="bubble-caption">AI response pulse</div>
+					</div>
+
+					<aside class="transcript-window">
+						<div class="transcript-header">
+							<span>Last user input</span>
+							<span id="event-counter">0 events</span>
+						</div>
+						<div class="transcript-tools">
+							<input
+								type="search"
+								id="transcript-filter"
+								placeholder="Filter transcript"
+								aria-label="Filter transcript entries"
+							/>
+							<span class="timestamp" id="last-updated">Never updated</span>
+						</div>
+						<div class="transcript-body" id="transcript-body">
+							<div class="empty-state">No speech captured yet.</div>
+						</div>
+					</aside>
+				</div>
+			</section>
+		</main>
+
+		<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+	</body>
 </html>

@@ -45,6 +45,8 @@ decorator==5.1.1
     #   pyuac
 elevenlabs==0.2.18
     # via -r requirements.in
+faster-whisper==1.2.1
+    # via -r requirements.in
 executing==2.0.1
     # via stack-data
 flask==2.3.2
@@ -81,6 +83,8 @@ numpy==1.26.4
     #   blis
     #   spacy
     #   thinc
+openai==0.27.8
+    # via -r requirements.in
 packaging==24.0
     # via
     #   spacy
