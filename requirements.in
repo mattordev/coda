@@ -1,13 +1,13 @@
 colorama==0.4.6
 elevenlabs==0.2.18
+faster_whisper==1.2.1
 Flask==2.3.2
-faster-whisper==1.2.1
 keyboard==0.13.5
-openai==0.27.8
+openai==2.32.0
+python-dotenv==1.2.2
 pyttsx3==2.90
 pyuac==0.0.3
-Requests==2.31.0
+Requests==2.33.1
 semantic_version==2.10.0
-spacy==3.5.3
 SpeechRecognition==3.8.1
 tqdm==4.65.0
