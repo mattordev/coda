@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 
 import utils.llm_service as llm_service
+from ai.router.core import route_request
 
 
 @dataclass
@@ -78,11 +79,11 @@ def on_command(msg, commands, debug=False):
         provider = llm_service.get_llm_provider()
         if debug:
             print(f"[DEBUG] Using LLM fallback: {_describe_llm_fallback()}")
-        response_text, error = _generate_llm_response(normalized_message)
+        response_text, error = route_request(normalized_message)
         if not error and not response_text:
             if debug:
                 print("[DEBUG] LLM returned an empty response. Retrying once.")
-            response_text, error = _generate_llm_response(normalized_message)
+            response_text, error = route_request(normalized_message)
 
         if error:
             if debug:
