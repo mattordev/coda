@@ -245,7 +245,7 @@ def _generate_openai_response(user_text):
     return assistant_message, None
 
 
-def _generate_ollama_response(user_text):
+def _generate_local_response(user_text):
     model_name, error = _get_ollama_model()
     if error:
         return None, error
@@ -286,7 +286,7 @@ def generate_llm_response(user_text):
         return _generate_openai_response(user_text)
 
     if provider == "ollama":
-        return _generate_ollama_response(user_text)
+        return _generate_local_response(user_text)
 
     return None, (
         f"unsupported CODA_LLM_PROVIDER '{provider}'. "
