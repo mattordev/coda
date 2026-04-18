@@ -53,7 +53,7 @@ def _get_follow_up_timeout_seconds():
 
 
 def _voice_command_debug_enabled():
-    return _get_bool_env("CODA_VOICE_COMMAND_DEBUG", True)
+    return runtime_state.is_debug_enabled(default=False)
 
 
 def _list_mics_on_start():
