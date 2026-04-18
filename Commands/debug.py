@@ -20,7 +20,7 @@ def _get_action(args):
 
 
 def _print_status():
-    debug_enabled = runtime_state.is_debug_enabled(default=True)
+    debug_enabled = runtime_state.is_debug_enabled(default=False)
     print(f"Debug mode is {'enabled' if debug_enabled else 'disabled'}.")
     print(f"LLM fallback is {command._describe_llm_fallback()}.")
     print(f"Speech-to-text is {stt_service.describe_stt_provider()}.")

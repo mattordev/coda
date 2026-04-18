@@ -22,6 +22,11 @@ def set_debug_enabled(enabled):
     os.environ["CODA_DEBUG"] = "1" if enabled else "0"
 
 
+def debug_print(*args, **kwargs):
+    if is_debug_enabled(default=False):
+        print(*args, **kwargs)
+
+
 def reload_dotenv():
     if load_dotenv is None:
         return False, "python-dotenv is not installed"

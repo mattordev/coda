@@ -4,6 +4,7 @@ import shutil
 import tempfile
 
 import speech_recognition as sr
+import utils.runtime_state as runtime_state
 
 try:
     from dotenv import load_dotenv
@@ -264,7 +265,7 @@ def _transcribe_with_faster_whisper(audio):
                 _remember_failed_whisper_attempt(current_attempt, exc)
                 if index + 1 < len(attempts):
                     next_model, next_device, _ = attempts[index + 1]
-                    print(
+                    runtime_state.debug_print(
                         "[VOICE] faster-whisper attempt failed "
                         f"({model_name} on {device}/{compute_type}). "
                         f"Trying {next_model} on {next_device}: {exc}"
@@ -351,7 +352,7 @@ def transcribe_audio(recognizer, audio):
             last_error = exc
             if index + 1 < len(provider_chain):
                 next_provider = provider_chain[index + 1]
-                print(
+                runtime_state.debug_print(
                     f"[VOICE] {current_provider} recognition failed. "
                     f"Falling back to {next_provider}: {exc}"
                 )
@@ -359,7 +360,7 @@ def transcribe_audio(recognizer, audio):
             last_error = SpeechToTextError(str(exc))
             if index + 1 < len(provider_chain):
                 next_provider = provider_chain[index + 1]
-                print(
+                runtime_state.debug_print(
                     f"[VOICE] {current_provider} recognition failed. "
                     f"Falling back to {next_provider}: {exc}"
                 )

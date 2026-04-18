@@ -401,7 +401,7 @@ while True:
         command.run(
             command_message,
             commands,
-            debug=runtime_state.is_debug_enabled(default=True),
+            debug=runtime_state.is_debug_enabled(default=False),
         )
     else:
         if keyboard_toggle_available:
