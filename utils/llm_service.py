@@ -16,6 +16,22 @@ except ImportError:
 if load_dotenv is not None:
     load_dotenv()
 
+PROVIDERS = {
+    "openai": {
+        "fn": lambda prompt: _generate_openai_response(prompt),
+        "type": "cloud",
+        "describe": lambda: f"openai (model: {_get_openai_model()})",
+    },
+    "ollama": {
+        "fn": lambda prompt: _generate_local_response(prompt),
+        "type": "local",
+        "describe": lambda: (
+            f"ollama (model: {_get_ollama_model()[0]})"
+            if not _get_ollama_model()[1]
+            else f"ollama (model resolution failed: {_get_ollama_model()[1]})"
+        ),
+    },
+}
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are CODA, the user's personal voice assistant. "
@@ -26,6 +42,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "For broad or research-style questions, give a short spoken summary first, then offer to go deeper into one area. "
     "Be helpful and informative without sounding robotic, corporate, or overly formal."
 )
+
+
 conversation = []
 ollama_model_cache = None
 preferred_ollama_models = (
@@ -284,35 +302,43 @@ def _generate_local_response(user_text):
 def _generate_llm_response(user_text):
     provider = _get_llm_provider()
 
-    if provider == "openai":
-        return _generate_openai_response(user_text)
+    provider_info = PROVIDERS.get(provider)
+    if not provider_info:
+        return None, (
+            f"unsupported CODA_LLM_PROVIDER '{provider}'. "
+            f"Available: {', '.join(PROVIDERS.keys())}"
+        )
 
-    if provider == "ollama":
-        return _generate_local_response(user_text)
-
-    return None, (
-        f"unsupported CODA_LLM_PROVIDER '{provider}'. "
-        "Expected 'openai' or 'ollama'."
-    )
+    return provider_info["fn"](user_text)
 
 
 def describe_llm_fallback():
     provider = _get_llm_provider()
+    provider_info = PROVIDERS.get(provider)
 
-    if provider == "openai":
-        return f"openai (model: {_get_openai_model()})"
+    if not provider_info:
+        return provider
 
-    if provider == "ollama":
-        model_name, error = _get_ollama_model()
-        if error:
-            return f"ollama (model resolution failed: {error})"
-        return f"ollama (model: {model_name})"
-
-    return provider
+    return provider_info["describe"]()
 
 
 def get_llm_provider():
     return _get_llm_provider()
+
+def call_provider(provider_name, prompt):
+    provider_info = PROVIDERS.get(provider_name)
+
+    if not provider_info:
+        return None, f"Unknown provider: {provider_name}"
+
+    return provider_info["fn"](prompt)
+
+
+def get_provider_type(provider_name):
+    provider_info = PROVIDERS.get(provider_name)
+    if not provider_info:
+        return None
+    return provider_info.get("type")
 
 
 _reset_conversation()
