@@ -43,7 +43,7 @@ def _llm_fallback_enabled():
 
 
 def _generate_llm_response(user_text):
-    return llm_service.generate_llm_response(user_text)
+    return llm_service._generate_llm_response(user_text)
 
 
 def _describe_llm_fallback():
