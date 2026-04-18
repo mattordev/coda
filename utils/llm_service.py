@@ -136,6 +136,8 @@ def _get_configured_ollama_model():
 def _get_llm_provider():
     provider = os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
 
+    
+
     if provider == "gpt":
         return "openai"
 
@@ -279,7 +281,7 @@ def _generate_local_response(user_text):
     return assistant_message, None
 
 
-def generate_llm_response(user_text):
+def _generate_llm_response(user_text):
     provider = _get_llm_provider()
 
     if provider == "openai":
