@@ -77,8 +77,6 @@ def on_command(msg, commands, debug=False):
             return CommandResult(handled=False)
 
         provider = llm_service.get_llm_provider()
-        if debug:
-            print(f"[DEBUG] Using LLM fallback: {_describe_llm_fallback()}")
         response_text, error = route_request(normalized_message)
         if not error and not response_text:
             if debug:

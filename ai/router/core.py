@@ -2,7 +2,6 @@ import utils.llm_service as llm_service
 from ai.privacy.detector import detect_privacy
 
 
-
 def route_request(prompt: str):
     risk = detect_privacy(prompt)
 
@@ -12,7 +11,7 @@ def route_request(prompt: str):
     if risk > 0.7:
         print("[ROUTER] Using LOCAL model (ollama) due to high privacy risk")
 
-        response, error = llm_service._generate_local_response(prompt)
+        response, error = llm_service.call_provider("ollama", prompt)
 
         if error or not response:
             return (
@@ -26,7 +25,7 @@ def route_request(prompt: str):
     if risk > 0.3:
         print("[ROUTER] Medium risk → trying LOCAL (ollama) first")
 
-        response, error = llm_service._generate_local_response(prompt)
+        response, error = llm_service.call_provider("ollama", prompt)
 
         if not error and response:
             return response, None
@@ -52,7 +51,7 @@ def route_request(prompt: str):
     if error or not response:
         print("[ROUTER] Cloud failed → falling back to LOCAL (ollama)")
 
-        fallback_response, fallback_error = llm_service._generate_local_response(prompt)
+        fallback_response, fallback_error = llm_service.call_provider("ollama", prompt)
 
         if not fallback_error and fallback_response:
             return fallback_response, None
