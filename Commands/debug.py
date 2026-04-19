@@ -2,6 +2,7 @@ import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.speak_response as speak_response
 import utils.stt_service as stt_service
+import utils.llm_service as llm_service
 
 
 def _get_action(args):
@@ -22,7 +23,7 @@ def _get_action(args):
 def _print_status():
     debug_enabled = runtime_state.is_debug_enabled(default=False)
     print(f"Debug mode is {'enabled' if debug_enabled else 'disabled'}.")
-    print(f"LLM fallback is {command._describe_llm_fallback()}.")
+    print(f"LLM fallback is {llm_service.describe_llm_fallback()}.")
     print(f"Speech-to-text is {stt_service.describe_stt_provider()}.")
 
 
