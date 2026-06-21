@@ -1,0 +1,14 @@
+[MASTER]
+# A basic configuration for Pylint
+
+# Disable the message, report, category or checker with the following
+# Disable the message 'invalid-name' (check for names that don't conform to naming style)
+disable=invalid-name
+
+[MESSAGES CONTROL]
+# Enable the following message codes (uncomment to enable)
+#enable=all
+
+[FORMAT]
+# Control the output format
+output-format=json
