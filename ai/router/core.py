@@ -8,6 +8,30 @@ def _debug_print(*args, **kwargs):
     runtime_state.debug_print(*args, **kwargs)
 
 
+def _call_provider_with_health(provider: str, prompt: str):
+    if logger.should_skip_provider(provider):
+        print(f"[ROUTER] Skipping {provider} due to recent failure; using fallback.")
+        return None, f"{provider} is temporarily unavailable after a recent failure.", True
+
+    logger.log_attempt(provider)
+    response, error = llm_service.call_provider(provider, prompt)
+    return response, error, False
+
+
+def _high_risk_unavailable_message():
+    return (
+        "I'm unable to process that request right now because my local AI provider is "
+        "unavailable and the request appears to contain sensitive information."
+    )
+
+
+def _provider_unavailable_message():
+    return (
+        "I'm unable to process that request right now because my AI providers are "
+        "unavailable."
+    )
+
+
 def route_request(prompt: str):
     risk = detect_privacy(prompt)
 
@@ -17,14 +41,15 @@ def route_request(prompt: str):
     if risk > 0.7:
         print("[ROUTER] Using LOCAL model (ollama) due to high privacy risk")
 
-        response, error = llm_service.call_provider("ollama", prompt)
+        response, error, skipped = _call_provider_with_health("ollama", prompt)
 
-        if error or not response:
-            logger.log_failure("ollama")
-            print(f"[ROUTER] ollama failed: {error}")
+        if skipped or error or not response:
+            if not skipped:
+                logger.log_failure("ollama")
+                _debug_print(f"[ROUTER] ollama failed: {error}")
             return (
-                "I'm unable to process that request locally right now and cannot process it online due to privacy concerns.",
-                error,
+                _high_risk_unavailable_message(),
+                None,
             )
 
         return response, None
@@ -33,29 +58,31 @@ def route_request(prompt: str):
     if risk > 0.3:
         print("[ROUTER] Medium risk → trying LOCAL (ollama) first")
 
-        response, error = llm_service.call_provider("ollama", prompt)
+        response, error, skipped = _call_provider_with_health("ollama", prompt)
 
-        if not error and response:
+        if not skipped and not error and response:
             return response, None
 
-        logger.log_failure("ollama")
-        print(f"[ROUTER] ollama failed: {error}")
+        if not skipped:
+            logger.log_failure("ollama")
+            _debug_print(f"[ROUTER] ollama failed: {error}")
+        else:
+            print("[ROUTER] Ollama skipped due to recent failure; trying CLOUD (openai)")
 
         print("[ROUTER] Local failed → trying CLOUD (openai)")
 
         provider = llm_service.get_llm_provider()
         
-        logger.log_attempt(provider) # log attempt BEFORE calling
-        
-        response, error = llm_service._generate_llm_response(prompt)
+        response, error, skipped = _call_provider_with_health(provider, prompt)
 
-        if error or not response:
-            logger.log_failure(provider)
-            print(f"[ROUTER] {provider} failed: {error}")
+        if skipped or error or not response:
+            if not skipped:
+                logger.log_failure(provider)
+                _debug_print(f"[ROUTER] {provider} failed: {error}")
             print("[ROUTER] Cloud also failed → giving up")
             return (
-                "I'm unable to process that request locally right now and cannot process it online due to privacy concerns.",
-                error,
+                _provider_unavailable_message(),
+                None,
             )
 
         return response, None
@@ -65,43 +92,42 @@ def route_request(prompt: str):
     
     _debug_print(f"[DEBUG] Provider being checked: {provider}")
 
-    #  Skip provider if it recently failed or was just attempted
-    if logger.should_skip_provider(provider):
-        _debug_print(f"[ROUTER] Skipping {provider} (recent failure)")
+    print(f"[ROUTER] → Calling {llm_service.describe_llm_fallback()}")
 
-        response, error = llm_service.call_provider("ollama", prompt)
+    response, error, skipped = _call_provider_with_health(provider, prompt)
 
-        if error or not response:
-            logger.log_failure("ollama")
-            print(f"[ROUTER] ollama failed: {error}")
+    if skipped:
+        alternate_provider = "ollama" if provider != "ollama" else "openai"
+        print(f"[ROUTER] {provider} skipped due to recent failure; trying {alternate_provider} instead")
+
+        response, error, skipped = _call_provider_with_health(alternate_provider, prompt)
+
+        if skipped or error or not response:
+            if not skipped:
+                logger.log_failure(alternate_provider)
+                print(f"[ROUTER] {alternate_provider} failed: {error}")
             return (
-                "I'm unable to process that request locally right now and cannot process it online due to privacy concerns.",
-                error,
+                _provider_unavailable_message(),
+                None,
             )
 
         return response, None
 
-    print(f"[ROUTER] → Calling {llm_service.describe_llm_fallback()}")
-
-    # 🔥 Track attempt BEFORE calling
-    logger.log_attempt(provider)
-
-    response, error = llm_service._generate_llm_response(prompt)
-
     if error or not response:
         logger.log_failure(provider)
-        print(f"[ROUTER] {provider} failed: {error}")
+        _debug_print(f"[ROUTER] {provider} failed: {error}")
 
         print("[ROUTER] Cloud failed → falling back to LOCAL (ollama)")
 
-        fallback_response, fallback_error = llm_service.call_provider("ollama", prompt)
+        fallback_response, fallback_error, fallback_skipped = _call_provider_with_health("ollama", prompt)
 
-        if fallback_error or not fallback_response:
-            logger.log_failure("ollama")
-            print(f"[ROUTER] ollama failed: {fallback_error}")
+        if fallback_skipped or fallback_error or not fallback_response:
+            if not fallback_skipped:
+                logger.log_failure("ollama")
+                _debug_print(f"[ROUTER] ollama failed: {fallback_error}")
             return (
-                "I'm unable to process that request locally right now and cannot process it online due to privacy concerns.",
-                fallback_error,
+                _provider_unavailable_message(),
+                None,
             )
 
         return fallback_response, None
