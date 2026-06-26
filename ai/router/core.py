@@ -49,6 +49,7 @@ def route_request(prompt: str):
     _debug_print(f"[DEBUG - ROUTER] Privacy risk: {risk}")
 
     risk = detect_privacy(prompt)
+    
 
     providers = get_provider_order(risk)
 
@@ -57,14 +58,16 @@ def route_request(prompt: str):
 
     # High risk, LOCAL ONLY
     if risk > 0.7:
-        print("[ROUTER] Using LOCAL model (ollama) due to high privacy risk")
+        provider = providers[0] # ollama
+        
+        print(f"[ROUTER] Using {provider} due to high privacy risk")
 
-        response, error, skipped = _call_provider_with_health("ollama", prompt)
+        response, error, skipped = _call_provider_with_health(provider, prompt)
 
         if skipped or error or not response:
             if not skipped:
-                logger.log_failure("ollama")
-                _debug_print(f"[ROUTER] ollama failed: {error}")
+                logger.log_failure(provider)
+                _debug_print(f"[ROUTER] {provider} failed: {error}")
             return (
                 _high_risk_unavailable_message(),
                 None,
