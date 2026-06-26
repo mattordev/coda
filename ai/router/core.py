@@ -2,6 +2,7 @@ import utils.llm_service as llm_service
 from ai.privacy.detector import detect_privacy
 from ai.telemetry import logger
 import utils.runtime_state as runtime_state
+from providers.registry import is_provider_supported, is_provider_configured
 
 
 def _debug_print(*args, **kwargs):
