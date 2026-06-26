@@ -248,10 +248,11 @@ def _generate_openai_response(user_text):
             assistant_message = response.choices[0].message.content
         else:
             # openai<=0.x legacy API
-            response = openai.ChatCompletion.create(
-                model=openai_model,
-                messages=conversation,
-            )
+            chat_completion = getattr(openai, "ChatCompletion", None)
+            if chat_completion is None:
+                return None, "openai package does not expose a legacy ChatCompletion API"
+
+            response = chat_completion.create(model=openai_model, messages=conversation)
             assistant_message = response["choices"][0]["message"]["content"]
     except Exception as exc:
         conversation.pop()

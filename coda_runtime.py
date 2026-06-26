@@ -111,9 +111,15 @@ def setup_commands():
         name = os.fsdecode(cmdFile)
         if name.endswith(".py") and not name.startswith("__"):
             command_path = os.path.join(str(command_file_location), cmdFile)
-            module = SourceFileLoader(name.split(
-                ".py")[0].lower(), command_path).load_module()
-            commands[name.split(".py")[0].lower()] = module
+            module_name = name.split(".py")[0].lower()
+            spec = importlib.util.spec_from_file_location(module_name, command_path)
+            module = importlib.util.module_from_spec(spec)
+
+            if spec.loader is None:
+                raise ImportError(f"Unable to load command module: {command_path}")
+
+            spec.loader.exec_module(module)
+            commands[module_name] = module
 
     # Save the commands to a JSON file after the setup is complete
     print("Saving commands...")
