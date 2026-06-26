@@ -45,10 +45,6 @@ def get_provider_order(risk: float):
 
 def route_request(prompt: str):
     risk = detect_privacy(prompt)
-
-    _debug_print(f"[DEBUG - ROUTER] Privacy risk: {risk}")
-
-    risk = detect_privacy(prompt)
     
 
     providers = get_provider_order(risk)
@@ -111,24 +107,25 @@ def route_request(prompt: str):
         return response, None
 
     # Low risk, CLOUD first, fallback to LOCAL
-    provider = llm_service.get_llm_provider()
+    provider = providers[0]
+    fallback_provider = providers[1]
     
     _debug_print(f"[DEBUG] Provider being checked: {provider}")
 
-    print(f"[ROUTER] → Calling {llm_service.describe_llm_fallback()}")
+    print(f"[ROUTER] → Calling {provider} first (low privacy risk)")
 
     response, error, skipped = _call_provider_with_health(provider, prompt)
 
     if skipped:
-        alternate_provider = "ollama" if provider != "ollama" else "openai"
-        print(f"[ROUTER] {provider} skipped due to recent failure; trying {alternate_provider} instead")
+        
+        print(f"[ROUTER] {provider} skipped due to recent failure; trying {fallback_provider} instead")
 
-        response, error, skipped = _call_provider_with_health(alternate_provider, prompt)
+        response, error, skipped = _call_provider_with_health(fallback_provider, prompt)
 
         if skipped or error or not response:
             if not skipped:
-                logger.log_failure(alternate_provider)
-                print(f"[ROUTER] {alternate_provider} failed: {error}")
+                logger.log_failure(fallback_provider)
+                print(f"[ROUTER] {fallback_provider} failed: {error}")
             return (
                 _provider_unavailable_message(),
                 None,
@@ -140,14 +137,17 @@ def route_request(prompt: str):
         logger.log_failure(provider)
         _debug_print(f"[ROUTER] {provider} failed: {error}")
 
-        print("[ROUTER] Cloud failed → falling back to LOCAL (ollama)")
+        print(
+        f"[ROUTER] Primary cloud provider ({provider}) failed → "
+        f"falling back to local provider ({fallback_provider})"
+        )
 
-        fallback_response, fallback_error, fallback_skipped = _call_provider_with_health("ollama", prompt)
+        fallback_response, fallback_error, fallback_skipped = _call_provider_with_health(fallback_provider, prompt)
 
         if fallback_skipped or fallback_error or not fallback_response:
             if not fallback_skipped:
-                logger.log_failure("ollama")
-                _debug_print(f"[ROUTER] ollama failed: {fallback_error}")
+                logger.log_failure(fallback_provider)
+                _debug_print(f"[ROUTER] {fallback_provider} failed: {fallback_error}")
             return (
                 _provider_unavailable_message(),
                 None,
