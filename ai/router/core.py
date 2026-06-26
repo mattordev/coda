@@ -31,11 +31,29 @@ def _provider_unavailable_message():
         "unavailable."
     )
 
+def get_provider_order(risk: float):
+
+    cloud = llm_service.get_llm_provider()
+
+    if risk > 0.7:
+        return ["ollama"]
+
+    if risk > 0.3:
+        return ["ollama", cloud]
+
+    return [cloud, "ollama"]
 
 def route_request(prompt: str):
     risk = detect_privacy(prompt)
 
     _debug_print(f"[DEBUG - ROUTER] Privacy risk: {risk}")
+
+    risk = detect_privacy(prompt)
+
+    providers = get_provider_order(risk)
+
+    _debug_print(f"[DEBUG - ROUTER] Privacy risk: {risk}")
+    _debug_print(f"[DEBUG - ROUTER] Provider order: {providers}")
 
     # High risk, LOCAL ONLY
     if risk > 0.7:
