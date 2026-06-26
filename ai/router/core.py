@@ -58,7 +58,7 @@ def route_request(prompt: str):
 
     # High risk, LOCAL ONLY
     if risk > 0.7:
-        provider = providers[0] # ollama
+        provider = providers[0]
         
         print(f"[ROUTER] Using {provider} due to high privacy risk")
 
@@ -77,29 +77,31 @@ def route_request(prompt: str):
 
     # Medium risk, try LOCAL first
     if risk > 0.3:
-        print("[ROUTER] Medium risk → trying LOCAL (ollama) first")
+        
+        local_provider = providers[0] 
+        cloud_provider = providers[1] 
+        
+        print(f"[ROUTER] Medium risk → trying LOCAL ({local_provider}) first")
 
-        response, error, skipped = _call_provider_with_health("ollama", prompt)
+        response, error, skipped = _call_provider_with_health(local_provider, prompt)
 
         if not skipped and not error and response:
             return response, None
 
         if not skipped:
-            logger.log_failure("ollama")
-            _debug_print(f"[ROUTER] ollama failed: {error}")
+            logger.log_failure(local_provider)
+            _debug_print(f"[ROUTER] {local_provider} failed: {error}")
         else:
-            print("[ROUTER] Ollama skipped due to recent failure; trying CLOUD (openai)")
+            print(f"[ROUTER] {local_provider} skipped due to recent failure; trying CLOUD ({cloud_provider}) instead")
 
-        print("[ROUTER] Local failed → trying CLOUD (openai)")
-
-        provider = llm_service.get_llm_provider()
+        print(f"[ROUTER] Local failed → trying CLOUD ({cloud_provider})")
         
-        response, error, skipped = _call_provider_with_health(provider, prompt)
+        response, error, skipped = _call_provider_with_health(cloud_provider, prompt)
 
         if skipped or error or not response:
             if not skipped:
-                logger.log_failure(provider)
-                _debug_print(f"[ROUTER] {provider} failed: {error}")
+                logger.log_failure(cloud_provider)
+                _debug_print(f"[ROUTER] {cloud_provider} failed: {error}")
             print("[ROUTER] Cloud also failed → giving up")
             return (
                 _provider_unavailable_message(),
