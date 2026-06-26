@@ -61,42 +61,30 @@ Speech-to-text notes:
 
 ### Environment Variables
 
-Create a `.env` file in the project root with:
+Copy `.env.example` to the project root (located in /docs), rename it to `.env` and populate the values appropriate for your setup.
+
+### Provider Routing
+
+CODA uses privacy-aware provider routing:
+
+- High-risk requests (for example passwords, bank details, API keys) are processed using local providers only.
+- Medium-risk requests attempt local providers first, then fall back to cloud providers.
+- Low-risk requests attempt cloud providers first, then fall back to local providers.
+
+Providers are attempted in the order specified in .env using:
 
 ```text
-OPENAI_API_KEY=your-openai-key
-ELEVENLABS_API_KEY=your-elevenlabs-key
-CODA_STT_PROVIDER=auto
-CODA_WHISPER_MODEL=auto
-CODA_WHISPER_LANGUAGE=en
-CODA_PAUSE_THRESHOLD=1.2
-CODA_PHRASE_TIME_LIMIT=12
-CODA_SYSTEM_PROMPT=
-CODA_LLM_PROVIDER=openai
-CODA_OPENAI_MODEL=gpt-4o-mini
-CODA_LLM_FALLBACK=1
+CODA_CLOUD_PROVIDERS=openai
+CODA_LOCAL_PROVIDERS=ollama
 ```
 
-To use Ollama instead of OpenAI, switch the provider and point it at your host:
-
-```text
-ELEVENLABS_API_KEY=your-elevenlabs-key
-CODA_STT_PROVIDER=auto
-CODA_WHISPER_MODEL=auto
-CODA_PAUSE_THRESHOLD=1.2
-CODA_PHRASE_TIME_LIMIT=12
-CODA_SYSTEM_PROMPT=
-CODA_LLM_PROVIDER=ollama
-CODA_OLLAMA_BASE_URL=http://192.168.0.64:30068
-CODA_OLLAMA_MODEL=lfm2:24b
-CODA_LLM_FALLBACK=1
-```
+Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
 
 Notes:
 
 - `ELEVENLABS_API_KEY` is now the preferred source for TTS auth.
-- Legacy `ELapi_key.txt` / `ELapikey.txt` files are still supported as fallback.
-- `CODA_GPT_FALLBACK` is still accepted as a legacy alias for `CODA_LLM_FALLBACK`.
+- Legacy `ELapi_key.txt` / `ELapikey.txt` files are still supported as fallback. This will be removed in future versions.
+- `CODA_GPT_FALLBACK` is still accepted as a legacy alias for `CODA_LLM_FALLBACK`. This will be removed in future versions.
 - If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `nemotron-3-nano:4b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
 - If no command word is detected after the wakeword, CODA falls back to the configured LLM so you can ask questions and continue the conversation naturally.
 - `CODA_STT_PROVIDER=auto` prefers local Whisper via `faster-whisper`, then falls back to Google recognition.
