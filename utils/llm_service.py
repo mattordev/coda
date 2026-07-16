@@ -2,15 +2,13 @@ import os
 
 import requests
 
+from ai.providers import openai as openai_provider
+from ai.providers import ollama as ollama_provider
+
 try:
     from dotenv import load_dotenv
 except ImportError:
     load_dotenv = None
-
-try:
-    import openai
-except ImportError:
-    openai = None
 
 
 if load_dotenv is not None:
@@ -18,18 +16,14 @@ if load_dotenv is not None:
 
 PROVIDERS = {
     "openai": {
-        "fn": lambda prompt: _generate_openai_response(prompt),
+        "fn": lambda prompt: _generate_provider_response(openai_provider, prompt),
         "type": "cloud",
-        "describe": lambda: f"openai (model: {_get_openai_model()})",
+        "describe": openai_provider.describe,
     },
     "ollama": {
-        "fn": lambda prompt: _generate_local_response(prompt),
+        "fn": lambda prompt: _generate_provider_response(ollama_provider, prompt),
         "type": "local",
-        "describe": lambda: (
-            f"ollama (model: {_get_ollama_model()[0]})"
-            if not _get_ollama_model()[1]
-            else f"ollama (model resolution failed: {_get_ollama_model()[1]})"
-        ),
+        "describe": ollama_provider.describe,
     },
 }
 
@@ -60,15 +54,6 @@ def _get_float_env(name, default):
         return float(value)
     except ValueError:
         return default
-
-
-def _get_openai_api_key():
-    return os.getenv("OPENAI_API_KEY", "").strip()
-
-
-def _get_openai_model():
-    return os.getenv("CODA_OPENAI_MODEL", "gpt-3.5-turbo").strip() or "gpt-3.5-turbo"
-
 
 def _get_system_prompt():
     configured_prompt = os.getenv("CODA_SYSTEM_PROMPT", "").strip()
@@ -130,22 +115,15 @@ def reload_config():
 
     ollama_model_cache = None
     _reset_conversation()
-
-    openai_api_key = _get_openai_api_key()
-    if openai is not None and hasattr(openai, "api_key"):
-        openai.api_key = openai_api_key or None
-
+    
+    openai_provider.reload_config()
+    ollama_provider.reload_config()
 
 def llm_fallback_enabled():
     configured_value = os.getenv("CODA_LLM_FALLBACK")
     if configured_value is None:
         configured_value = os.getenv("CODA_GPT_FALLBACK", "1")
     return configured_value.lower() in ("1", "true", "yes")
-
-
-def _get_ollama_base_url():
-    return os.getenv("CODA_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-
 
 def _get_configured_ollama_model():
     return os.getenv("CODA_OLLAMA_MODEL", "").strip()
@@ -166,152 +144,21 @@ def _get_llm_provider():
 
     return provider
 
-
-def _get_ollama_model():
-    global ollama_model_cache
-
-    configured_model = _get_configured_ollama_model()
-    if configured_model:
-        return configured_model, None
-
-    if ollama_model_cache:
-        return ollama_model_cache, None
-
-    ollama_base_url = _get_ollama_base_url()
-
-    try:
-        response = requests.get(
-            f"{ollama_base_url}/api/tags",
-            timeout=min(_get_llm_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception as exc:
-        return None, (
-            "could not fetch Ollama models automatically. "
-            "Set CODA_OLLAMA_MODEL explicitly. "
-            f"Details: {exc}"
-        )
-
-    if not models:
-        return None, (
-            "no Ollama models were found at the configured host. "
-            "Set CODA_OLLAMA_MODEL after pulling a model."
-        )
-
-    model_names = []
-    for model in models:
-        model_name = model.get("name") or model.get("model")
-        if model_name:
-            model_names.append(model_name)
-
-    selected_model = None
-
-    for preferred_model in preferred_ollama_models:
-        if preferred_model in model_names:
-            selected_model = preferred_model
-            break
-
-    if selected_model is None:
-        selected_model = model_names[0] if model_names else None
-
-    if not selected_model:
-        return None, "Ollama returned models but none included a usable name"
-
-    ollama_model_cache = selected_model
-    return ollama_model_cache, None
-
-
-def _generate_openai_response(user_text):
-    openai_api_key = _get_openai_api_key()
-    openai_model = _get_openai_model()
-
-    if openai is None:
-        return None, "openai package is not installed"
-
-    if not openai_api_key:
-        return None, "OPENAI_API_KEY is not set"
-
-    if hasattr(openai, "api_key"):
-        openai.api_key = openai_api_key
-
+def _generate_provider_response(provider_module, user_text):
     conversation.append({"role": "user", "content": user_text})
-
-    try:
-        # openai>=1.x client API
-        if hasattr(openai, "OpenAI"):
-            client = openai.OpenAI(api_key=openai_api_key)
-            response = client.chat.completions.create(
-                model=openai_model,
-                messages=conversation,
-            )
-            assistant_message = response.choices[0].message.content
-        else:
-            # openai<=0.x legacy API
-            chat_completion = getattr(openai, "ChatCompletion", None)
-            if chat_completion is None:
-                return None, "openai package does not expose a legacy ChatCompletion API"
-
-            response = chat_completion.create(model=openai_model, messages=conversation)
-            assistant_message = response["choices"][0]["message"]["content"]
-    except Exception as exc:
-        conversation.pop()
-        return None, str(exc)
-
-    assistant_message = (assistant_message or "").strip()
-    if assistant_message:
-        conversation.append({"role": "assistant", "content": assistant_message})
-        _trim_conversation()
-
-    return assistant_message, None
-
-
-def _generate_local_response(user_text):
-    model_name, error = _get_ollama_model()
+    
+    response, error = provider_module.generate(conversation)
+    
     if error:
-        return None, error
-
-    ollama_base_url = _get_ollama_base_url()
-    conversation.append({"role": "user", "content": user_text})
-
-    try:
-        response = requests.post(
-            f"{ollama_base_url}/api/chat",
-            json={
-                "model": model_name,
-                "messages": conversation,
-                "stream": False,
-            },
-            timeout=_get_llm_timeout_seconds(),
-        )
-        response.raise_for_status()
-        response_json = response.json()
-        message = response_json.get("message", {})
-        assistant_message = message.get("content") or response_json.get("response")
-    except Exception as exc:
         conversation.pop()
-        return None, str(exc)
-
-    assistant_message = (assistant_message or "").strip()
-    if assistant_message:
-        conversation.append({"role": "assistant", "content": assistant_message})
+        return None, error
+    
+    response = (response or "").strip()
+    if response:
+        conversation.append({"role": "assistant", "content": response})
         _trim_conversation()
-
-    return assistant_message, None
-
-
-def _generate_llm_response(user_text):
-    provider = _get_llm_provider()
-
-    provider_info = PROVIDERS.get(provider)
-    if not provider_info:
-        return None, (
-            f"unsupported CODA_LLM_PROVIDER '{provider}'. "
-            f"Available: {', '.join(PROVIDERS.keys())}"
-        )
-
-    return provider_info["fn"](user_text)
-
+        
+    return response, None
 
 def describe_llm_fallback():
     provider = _get_llm_provider()
