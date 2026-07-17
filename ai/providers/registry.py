@@ -76,7 +76,7 @@ def describe_provider(provider: str) -> str:
     
     return provider_module.describe()
 
-def reload_provider():
+def reload_providers():
     for config in SUPPORTED_PROVIDERS.values():
         provider_module = config["module"]
         provider_module.reload_config()

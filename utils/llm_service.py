@@ -2,8 +2,7 @@ import os
 
 import requests
 
-from ai.providers import openai as openai_provider
-from ai.providers import ollama as ollama_provider
+from ai.providers import registry
 
 try:
     from dotenv import load_dotenv
@@ -13,19 +12,6 @@ except ImportError:
 
 if load_dotenv is not None:
     load_dotenv()
-
-PROVIDERS = {
-    "openai": {
-        "fn": lambda prompt: _generate_provider_response(openai_provider, prompt),
-        "type": "cloud",
-        "describe": openai_provider.describe,
-    },
-    "ollama": {
-        "fn": lambda prompt: _generate_provider_response(ollama_provider, prompt),
-        "type": "local",
-        "describe": ollama_provider.describe,
-    },
-}
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are CODA, the user's personal voice assistant. "
@@ -116,8 +102,7 @@ def reload_config():
     ollama_model_cache = None
     _reset_conversation()
     
-    openai_provider.reload_config()
-    ollama_provider.reload_config()
+    registry.reload_providers()
 
 def llm_fallback_enabled():
     configured_value = os.getenv("CODA_LLM_FALLBACK")
@@ -162,31 +147,25 @@ def _generate_provider_response(provider_module, user_text):
 
 def describe_llm_fallback():
     provider = _get_llm_provider()
-    provider_info = PROVIDERS.get(provider)
-
-    if not provider_info:
-        return provider
-
-    return provider_info["describe"]()
+    return registry.describe_provider(provider)
 
 
 def get_llm_provider():
     return _get_llm_provider()
 
 def call_provider(provider_name, prompt):
-    provider_info = PROVIDERS.get(provider_name)
+    provider_module = registry.get_provider_module(provider_name)
 
-    if not provider_info:
-        return None, f"Unknown provider: {provider_name}"
+    if provider_module is None:
+        available = ", ".join(registry.SUPPORTED_PROVIDERS.keys())
+        provider_name = registry.normalize_provider_name(provider_name)
+        return None, f"Unknown provider: {provider_name}. Available: {available}"
 
-    return provider_info["fn"](prompt)
+    return _generate_provider_response(provider_module, prompt)
 
 
 def get_provider_type(provider_name):
-    provider_info = PROVIDERS.get(provider_name)
-    if not provider_info:
-        return None
-    return provider_info.get("type")
+    return registry.get_provider_type(provider_name)
 
 
 _reset_conversation()
