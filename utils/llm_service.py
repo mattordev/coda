@@ -96,24 +96,29 @@ def reload_config():
     registry.reload_providers()
 
 def llm_fallback_enabled():
-    configured_value = os.getenv("CODA_LLM_FALLBACK")
-    if configured_value is None:
-        configured_value = os.getenv("CODA_GPT_FALLBACK", "1")
+    configured_value = os.getenv("CODA_LLM_FALLBACK", "1")
     return configured_value.lower() in ("1", "true", "yes")
 
 
+def _split_provider_list(value: str) -> list[str]:
+    return [
+        provider.strip()
+        for provider in value.split(",")
+        if provider.strip()
+    ]
 
-def _get_llm_provider():
-    provider = registry.normalize_provider_name(
-        os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
-    )
 
-    if provider in ("", "auto"):
-        if os.getenv("CODA_OLLAMA_MODEL") or os.getenv("CODA_OLLAMA_BASE_URL"):
-            return "ollama"
-        return "openai"
+def _get_described_providers(env_name: str, provider_type: str) -> str:
+    configured_names = _split_provider_list(os.getenv(env_name, ""))
+    if configured_names:
+        providers = registry.get_configured_providers(configured_names)
+    else:
+        providers = registry.get_providers_by_type(provider_type)
 
-    return provider
+    if not providers:
+        return "none configured"
+
+    return ", ".join(registry.describe_provider(provider) for provider in providers)
 
 def _generate_provider_response(provider_module, user_text):
     conversation.append({"role": "user", "content": user_text})
@@ -132,13 +137,9 @@ def _generate_provider_response(provider_module, user_text):
     return response, None
 
 def describe_llm_fallback():
-    provider = _get_llm_provider()
-    return registry.describe_provider(provider)
-
-
-def get_llm_provider():
-    return _get_llm_provider()
-
+    cloud_providers = _get_described_providers("CODA_CLOUD_PROVIDERS", "cloud")
+    local_providers = _get_described_providers("CODA_LOCAL_PROVIDERS", "local")
+    return f"cloud: {cloud_providers}; local: {local_providers}"
 def call_provider(provider_name, prompt):
     provider_module = registry.get_provider_module(provider_name)
 

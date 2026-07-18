@@ -6,7 +6,7 @@ except ImportError:
     openai = None
 
 def get_api_key():
-    return os.getenv ("OPENAI_API_KEY", "").strip()
+    return os.getenv("OPENAI_API_KEY", "").strip()
     
 def get_model():
     return os.getenv("CODA_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
@@ -34,23 +34,12 @@ def generate(messages):
         openai.api_key = api_key
         
     try:
-        if hasattr (openai, "OpenAI"):
-            client = openai.OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-            )
-            assistant_message = response.choices[0].message.content
-        else:
-            chat_completion = getattr(openai, "ChatCompletion", None)
-            if chat_completion is None:
-                return None, "OpenAI package does not expose a legacy ChatCompletion API"
-
-            response = chat_completion.create(
-                model=model,
-                messages=messages,
-            )
-            assistant_message = response["choices"][0]["message"]["content"]
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+        )
+        assistant_message = response.choices[0].message.content
     except Exception as exc:
         return None, str(exc)
     
