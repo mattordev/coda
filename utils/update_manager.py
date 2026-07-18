@@ -25,8 +25,6 @@ BACKUP_DIR = "coda-old-version"
 # User/local runtime files we do not want to blow away on update.
 PRESERVED_FILES = (
     ".env",
-    "ELapi_key.txt",
-    "ELapikey.txt",
     "wakewords.json",
     "commands.json",
 )
@@ -193,3 +191,4 @@ if __name__ == "__main__":
         pyuac.runAsAdmin()
     else:
         main()
+
