@@ -78,7 +78,7 @@ CODA_CLOUD_PROVIDERS=openai
 CODA_LOCAL_PROVIDERS=ollama
 ```
 
-Provider names are resolved through `ai/providers/registry.py`, which defines provider type, aliases, configuration requirements, and the implementation module. Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
+Provider names are resolved through `ai/providers/registry.py`, which defines provider type, configuration requirements, and the implementation module. Use the canonical provider names from the registry. `CODA_CLOUD_PROVIDERS` only accepts cloud providers, and `CODA_LOCAL_PROVIDERS` only accepts local providers. Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
 
 Notes:
 

@@ -100,10 +100,6 @@ v1.1.0 is a major platform update for C.O.D.A, focused on faster local voice rec
 - Fixed empty-response fallback behavior for better assistant continuity.
 - Refined runtime flow and docs comments for clarity.
 
-## Compatibility Notes
-
-- Full environment setup guidance is available in `README.md`.
-
 ## Upgrade Checklist
 
 1. Update to v1.1.0.
