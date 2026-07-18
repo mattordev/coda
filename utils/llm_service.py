@@ -92,8 +92,9 @@ def reload_config():
         load_dotenv(override=True)
 
     _reset_conversation()
-    
+
     registry.reload_providers()
+
 
 def llm_fallback_enabled():
     configured_value = os.getenv("CODA_LLM_FALLBACK", "1")
@@ -111,7 +112,10 @@ def _split_provider_list(value: str) -> list[str]:
 def _get_described_providers(env_name: str, provider_type: str) -> str:
     configured_names = _split_provider_list(os.getenv(env_name, ""))
     if configured_names:
-        providers = registry.get_configured_providers(configured_names)
+        providers = registry.get_configured_providers(
+            configured_names,
+            provider_type=provider_type,
+        )
     else:
         providers = registry.get_providers_by_type(provider_type)
 
@@ -120,26 +124,30 @@ def _get_described_providers(env_name: str, provider_type: str) -> str:
 
     return ", ".join(registry.describe_provider(provider) for provider in providers)
 
+
 def _generate_provider_response(provider_module, user_text):
     conversation.append({"role": "user", "content": user_text})
-    
+
     response, error = provider_module.generate(conversation)
-    
+
     if error:
         conversation.pop()
         return None, error
-    
+
     response = (response or "").strip()
     if response:
         conversation.append({"role": "assistant", "content": response})
         _trim_conversation()
-        
+
     return response, None
+
 
 def describe_llm_fallback():
     cloud_providers = _get_described_providers("CODA_CLOUD_PROVIDERS", "cloud")
     local_providers = _get_described_providers("CODA_LOCAL_PROVIDERS", "local")
     return f"cloud: {cloud_providers}; local: {local_providers}"
+
+
 def call_provider(provider_name, prompt):
     provider_module = registry.get_provider_module(provider_name)
 
