@@ -98,3 +98,12 @@ def get_configured_providers(provider_names: list[str]) -> list[str]:
         configured.append(provider)
     
     return configured
+
+def get_providers_by_type(provider_type: str) -> list[str]:
+    providers = []
+    
+    for provider_name, config in SUPPORTED_PROVIDERS.items():
+        if config["type"] == provider_type and is_provider_configured(provider_name):
+            providers.append(provider_name)
+            
+    return providers

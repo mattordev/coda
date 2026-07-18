@@ -2,7 +2,7 @@ import utils.llm_service as llm_service
 from ai.privacy.detector import detect_privacy
 from ai.telemetry import logger
 import utils.runtime_state as runtime_state
-from ai.providers.registry import is_provider_supported, is_provider_configured
+from ai.providers import registry
 import os
 
 
@@ -62,17 +62,44 @@ def _provider_unavailable_message():
         "unavailable."
     )
 
-def get_provider_order(risk: float):
+def _split_provider_list(value: str) -> list[str]:
+    return [
+        provider.strip()
+        for provider in value.split(",")
+        if provider.strip()
+    ]
+    
+def _get_configured_provider_groups():
+    cloud_provider_names = _split_provider_list(
+        os.getenv("CODA_CLOUD_PROVIDERS", "")
+    )
+    local_provider_names = _split_provider_list(
+        os.getenv("CODA_LOCAL_PROVIDERS", "")
+    )
 
-    cloud = llm_service.get_llm_provider()
+    if cloud_provider_names:
+        cloud_providers = registry.get_configured_providers(cloud_provider_names)
+    else:
+        cloud_providers = registry.get_providers_by_type("cloud")
+
+    if local_provider_names:
+        local_providers = registry.get_configured_providers(local_provider_names)
+    else:
+        local_providers = registry.get_providers_by_type("local")
+
+    return cloud_providers, local_providers
+
+def get_provider_order(risk: float):
+    cloud_providers, local_providers = _get_configured_provider_groups()
+    
 
     if risk > 0.7:
-        return ["ollama"]
+        return local_providers
 
     if risk > 0.3:
-        return ["ollama", cloud]
+        return local_providers + cloud_providers
 
-    return [cloud, "ollama"]
+    return cloud_providers + local_providers
 
 def route_request(prompt: str):
     risk = detect_privacy(prompt)

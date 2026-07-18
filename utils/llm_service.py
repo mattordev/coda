@@ -1,7 +1,5 @@
 import os
 
-import requests
-
 from ai.providers import registry
 
 try:
@@ -25,10 +23,6 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 conversation = []
-ollama_model_cache = None
-preferred_ollama_models = (
-    "nemotron-3-nano:4b",
-)
 
 
 def _get_float_env(name, default):
@@ -94,12 +88,9 @@ def _trim_conversation():
 
 
 def reload_config():
-    global ollama_model_cache
-
     if load_dotenv is not None:
         load_dotenv(override=True)
 
-    ollama_model_cache = None
     _reset_conversation()
     
     registry.reload_providers()
@@ -110,20 +101,15 @@ def llm_fallback_enabled():
         configured_value = os.getenv("CODA_GPT_FALLBACK", "1")
     return configured_value.lower() in ("1", "true", "yes")
 
-def _get_configured_ollama_model():
-    return os.getenv("CODA_OLLAMA_MODEL", "").strip()
 
 
 def _get_llm_provider():
-    provider = os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
-
-    
-
-    if provider == "gpt":
-        return "openai"
+    provider = registry.normalize_provider_name(
+        os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
+    )
 
     if provider in ("", "auto"):
-        if _get_configured_ollama_model() or os.getenv("CODA_OLLAMA_BASE_URL"):
+        if os.getenv("CODA_OLLAMA_MODEL") or os.getenv("CODA_OLLAMA_BASE_URL"):
             return "ollama"
         return "openai"
 
@@ -169,3 +155,4 @@ def get_provider_type(provider_name):
 
 
 _reset_conversation()
+
