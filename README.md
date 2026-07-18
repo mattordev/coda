@@ -71,27 +71,26 @@ CODA uses privacy-aware provider routing:
 - Medium-risk requests attempt local providers first, then fall back to cloud providers.
 - Low-risk requests attempt cloud providers first, then fall back to local providers.
 
-Providers are attempted in the order specified in .env using:
+Providers are attempted in the order specified in `.env` using:
 
 ```text
 CODA_CLOUD_PROVIDERS=openai
 CODA_LOCAL_PROVIDERS=ollama
 ```
 
-Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
+Provider names are resolved through `ai/providers/registry.py`, which defines provider type, aliases, configuration requirements, and the implementation module. Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
 
 Notes:
 
-- `ELEVENLABS_API_KEY` is now the preferred source for TTS auth.
-- Legacy `ELapi_key.txt` / `ELapikey.txt` files are still supported as fallback. This will be removed in future versions.
-- `CODA_GPT_FALLBACK` is still accepted as a legacy alias for `CODA_LLM_FALLBACK`. This will be removed in future versions.
+- `ELEVENLABS_API_KEY` is required for ElevenLabs TTS auth.
+- `CODA_LLM_FALLBACK=1` enables LLM fallback when no command word is detected after the wakeword.
 - If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `nemotron-3-nano:4b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
-- If no command word is detected after the wakeword, CODA falls back to the configured LLM so you can ask questions and continue the conversation naturally.
+- `CODA_OLLAMA_COLD_START_TIMEOUT` controls the longer timeout used only when an Ollama model is not already loaded.
+- LLM voice replies open a short follow-up window so the next spoken reply can skip the wake word. Adjust this with `CODA_FOLLOWUP_TIMEOUT` in seconds.
 - `CODA_STT_PROVIDER=auto` prefers local Whisper via `faster-whisper`, then falls back to Google recognition.
 - In `auto` mode, CODA will also step down to a more compatible local Whisper setup before using Google, for example when CUDA is detected but the local CUDA runtime is not actually usable.
 - If a local Whisper attempt fails at runtime, CODA disables that exact attempt for the rest of the session so later utterances do not keep paying the same startup penalty. `debug reload` clears that session cache.
-- LLM voice replies now open a short follow-up window so the next spoken reply can skip the wake word. Adjust this with `CODA_FOLLOWUP_TIMEOUT` in seconds.
-- `CODA_STT_PROVIDER=google` keeps the legacy Google-only path.
+- `CODA_STT_PROVIDER=google` keeps the Google-only speech recognition path.
 - `CODA_WHISPER_MODEL=auto` picks a hardware-friendly default: `turbo` on CUDA systems, `small` on desktop CPU, and `base` on ARM boards such as Raspberry Pi.
 - `CODA_WHISPER_LANGUAGE` is optional. Leave it unset for auto-detection, or set it to `en` for English-first command recognition.
 - `CODA_PAUSE_THRESHOLD` controls how long a spoken pause CODA tolerates before it treats the utterance as finished. The default is now `1.2` seconds.
@@ -108,3 +107,4 @@ GNU AGPLv3
 Copyright (C) 2022 Matthew Roberts
 
 To view the full license, please view `LICENCE.md`
+
