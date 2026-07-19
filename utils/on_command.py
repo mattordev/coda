@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 
 import utils.llm_service as llm_service
+from ai.router.core import route_request
 
 
 @dataclass
@@ -40,15 +41,6 @@ def _ordered_matches(tokens, commands):
 def _llm_fallback_enabled():
     return llm_service.llm_fallback_enabled()
 
-
-def _generate_llm_response(user_text):
-    return llm_service.generate_llm_response(user_text)
-
-
-def _describe_llm_fallback():
-    return llm_service.describe_llm_fallback()
-
-
 def on_command(msg, commands, debug=False):
     normalized_message = msg.strip()
     tokens = _tokenize_message(normalized_message)
@@ -75,18 +67,16 @@ def on_command(msg, commands, debug=False):
         if not _llm_fallback_enabled():
             return CommandResult(handled=False)
 
-        provider = llm_service.get_llm_provider()
-        if debug:
-            print(f"[DEBUG] Using LLM fallback: {_describe_llm_fallback()}")
-        response_text, error = _generate_llm_response(normalized_message)
+        response_text, error = route_request(normalized_message)
+        
         if not error and not response_text:
             if debug:
                 print("[DEBUG] LLM returned an empty response. Retrying once.")
-            response_text, error = _generate_llm_response(normalized_message)
+            response_text, error = route_request(normalized_message)
 
         if error:
             if debug:
-                print(f"[DEBUG] LLM fallback unavailable ({provider}): {error}")
+                print(f"[DEBUG] LLM request failed: {error}")
             return CommandResult(handled=False)
 
         if not response_text:

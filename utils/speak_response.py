@@ -1,6 +1,5 @@
 import socket
 import os
-from pathlib import Path
 
 from elevenlabs import generate, play, set_api_key
 import utils.dashboard_state as dashboard_state
@@ -17,28 +16,13 @@ if load_dotenv is not None:
     load_dotenv()
 
 
-def _candidate_key_paths():
-    repo_root = Path(__file__).resolve().parent.parent
-    return [
-        repo_root / "ELapi_key.txt",
-        repo_root / "ELapikey.txt",
-    ]
-
 
 def load_api_key():
-    # Preferred source is .env for local secret management.
     env_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     if env_key:
         return env_key
 
-    for path in _candidate_key_paths():
-        if path.exists():
-            return path.read_text(encoding="utf-8").strip()
-    raise FileNotFoundError(
-        "Could not find ELEVENLABS_API_KEY in environment or key file. "
-        "Expected one of: "
-        + ", ".join(str(p) for p in _candidate_key_paths())
-    )
+    raise FileNotFoundError("Could not find ELEVENLABS_API_KEY in environment.")
 
 
 def ensure_api_key_loaded():
@@ -132,3 +116,4 @@ def use_pyttsx3(message):
         print(f"Error using pyttsx3 fallback: {error}")
         print(f"TTS disabled, response text: {message}")
         return False
+

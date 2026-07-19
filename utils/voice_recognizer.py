@@ -53,7 +53,7 @@ def _get_follow_up_timeout_seconds():
 
 
 def _voice_command_debug_enabled():
-    return _get_bool_env("CODA_VOICE_COMMAND_DEBUG", True)
+    return runtime_state.is_debug_enabled(default=False)
 
 
 def _list_mics_on_start():
@@ -153,9 +153,6 @@ def print_microphones():
 
 
 def run(wakeword, commands, mode=None, stop_event=None, **kwargs):
-    legacy_mode = kwargs.pop("type", None)
-    if legacy_mode is not None and mode is None:
-        mode = legacy_mode
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
         raise TypeError(f"run() got unexpected keyword argument(s): {unexpected}")
@@ -325,3 +322,4 @@ def display_message(message):
 
 def clear_terminal():
     return os.system('cls')
+

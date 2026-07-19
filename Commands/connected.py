@@ -26,4 +26,8 @@ def run(args):
         speak.speak_response(response)
         return True
     else:
+        response = random.choice(
+            ['We are not connected.', 'There is no established data connection.', 'We are offline and need to connect.', 'We are down and need to get back online.', 'Things are not looking good here.', 'We\'re offline and need to go online sir.'])
+        print(response)
+        speak.speak_response(response)
         return False
