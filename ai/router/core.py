@@ -1,7 +1,7 @@
 import os
 
 from ai.providers import registry
-from ai.privacy.detector import detect_privacy
+from ai.privacy.detector import analyze_privacy
 from ai.telemetry import logger
 import utils.llm_service as llm_service
 import utils.runtime_state as runtime_state
@@ -11,7 +11,7 @@ def _debug_print(*args, **kwargs):
     runtime_state.debug_print(*args, **kwargs)
 
 
-def _try_providers(providers: list[str], prompt: str, risk: float):
+def _try_providers(providers: list[str], prompt: str, risk: float, privacy_result=None):
     """
     Attempt providers in order and return the first successful response.
     """
@@ -20,7 +20,7 @@ def _try_providers(providers: list[str], prompt: str, risk: float):
     for provider in providers:
         _debug_print(f"[ROUTER] trying provider {provider}")
 
-        response, error, skipped = _call_provider_with_health(provider, prompt, risk)
+        response, error, skipped = _call_provider_with_health(provider, prompt, risk, privacy_result)
 
         if skipped:
             _debug_print(f"[ROUTER] {provider} skipped due to recent failure.")
@@ -38,7 +38,7 @@ def _try_providers(providers: list[str], prompt: str, risk: float):
     return None, last_error
 
 
-def _call_provider_with_health(provider: str, prompt: str, risk: float):
+def _call_provider_with_health(provider: str, prompt: str, risk: float, privacy_result=None):
     if logger.should_skip_provider(provider):
         _debug_print(
             f"[ROUTER] Skipping {provider} due to recent failure; using fallback."
@@ -46,7 +46,12 @@ def _call_provider_with_health(provider: str, prompt: str, risk: float):
         return None, f"{provider} is temporarily unavailable after a recent failure.", True
 
     logger.log_attempt(provider)
-    response, error = llm_service.call_provider(provider, prompt, risk=risk)
+    response, error = llm_service.call_provider(
+        provider,
+        prompt,
+        risk=risk,
+        privacy_result=privacy_result,
+    )
     return response, error, False
 
 
@@ -126,7 +131,8 @@ def get_provider_order(risk: float):
 
 
 def route_request(prompt: str):
-    risk = detect_privacy(prompt)
+    privacy_result = analyze_privacy(prompt)
+    risk = privacy_result["risk"]
 
     providers = get_provider_order(risk)
 
@@ -141,7 +147,7 @@ def route_request(prompt: str):
 
         _debug_print("[ROUTER] High risk -> using LOCAL providers only")
 
-        response, error = _try_providers(providers, prompt, risk)
+        response, error = _try_providers(providers, prompt, risk, privacy_result)
 
         if response:
             return response, None
@@ -156,7 +162,7 @@ def route_request(prompt: str):
 
         _debug_print(f"[ROUTER] Medium risk -> trying providers in order: {providers}")
 
-        response, error = _try_providers(providers, prompt, risk)
+        response, error = _try_providers(providers, prompt, risk, privacy_result)
 
         if response:
             return response, None
@@ -172,7 +178,7 @@ def route_request(prompt: str):
     _debug_print(f"[DEBUG] Primary provider being checked: {providers[0]}")
     _debug_print(f"[ROUTER] Low risk -> trying providers in order: {providers}")
 
-    response, error = _try_providers(providers, prompt, risk)
+    response, error = _try_providers(providers, prompt, risk, privacy_result)
 
     if response:
         return response, None

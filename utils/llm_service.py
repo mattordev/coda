@@ -1,6 +1,7 @@
 import os
 
 from ai.providers import registry
+from ai.privacy.sanitizer import sanitize_text
 
 try:
     from dotenv import load_dotenv
@@ -42,9 +43,14 @@ def _get_system_prompt():
         return configured_prompt
     return DEFAULT_SYSTEM_PROMPT
 
-def _get_cloud_safe_content(role, content, risk):
+def _get_cloud_safe_content(role, content, risk, privacy_result=None):
     if risk <= CLOUD_REDACTION_THRESHOLD:
         return content
+    
+    if privacy_result is not None and risk <= 0.7:
+        sanitized = sanitize_text(content, privacy_result)
+        if sanitized != content:
+            return sanitized
     
     if role == "user":
         return "[Sensitive user request redacted for cloud provider.]"
@@ -55,9 +61,9 @@ def _get_cloud_safe_content(role, content, risk):
     return content
         
 
-def _new_message(role, content, risk=0.0, cloud_content=None):
+def _new_message(role, content, risk=0.0, cloud_content=None, privacy_result=None):
     if cloud_content is None:
-        cloud_content = _get_cloud_safe_content(role, content, risk)
+        cloud_content = _get_cloud_safe_content(role, content, risk, privacy_result)
 
     return {
         "role": role,
@@ -169,8 +175,15 @@ def _get_described_providers(env_name: str, provider_type: str) -> str:
     return ", ".join(registry.describe_provider(provider) for provider in providers)
 
 
-def _generate_provider_response(provider_name, provider_module, user_text, risk=0.0):
-    conversation_log.append(_new_message("user", user_text, risk=risk))
+def _generate_provider_response(provider_name, provider_module, user_text, risk=0.0, privacy_result=None):
+    conversation_log.append(
+    _new_message(
+        "user",
+        user_text,
+        risk=risk,
+        privacy_result=privacy_result,
+    )
+)
 
     messages = _build_messages_for_provider(provider_name)
     response, error = provider_module.generate(messages)
@@ -193,7 +206,7 @@ def describe_llm_fallback():
     return f"cloud: {cloud_providers}; local: {local_providers}"
 
 
-def call_provider(provider_name, prompt, risk=0.0):
+def call_provider(provider_name, prompt, risk=0.0, privacy_result=None):
     provider_name = registry.normalize_provider_name(provider_name)
     provider_module = registry.get_provider_module(provider_name)
 
@@ -206,6 +219,7 @@ def call_provider(provider_name, prompt, risk=0.0):
         provider_module,
         prompt,
         risk=risk,
+        privacy_result=privacy_result,
     )
 
 
