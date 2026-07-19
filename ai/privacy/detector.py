@@ -95,7 +95,7 @@ MEDIUM_RISK_KEYWORDS = [
     "my manager",
 ]
 
-def detect_privacy(text: str) -> float:
+def _calculate_privacy_risk(text: str) -> float:
     """
     Returns a privacy risk score between 0.0 and 1.0 based on the presence of sensitive information.
     """
@@ -132,4 +132,84 @@ def detect_privacy(text: str) -> float:
 
     # clamp to 1.0 max to get a normalized risk score
     return min(risk_score, 1.0)
+
+def _detect_categories(text: str) -> list[str]:
+    if not text:
+        return []
+
+    text_lower = text.lower()
+    categories = set()
+
+    if re.search(EMAIL_PATTERN, text):
+        categories.add("email")
+
+    if re.search(PHONE_PATTERN, text):
+        categories.add("phone")
+
+    if re.search(UK_POSTCODE_PATTERN, text.upper()):
+        categories.add("postcode")
+
+    if re.search(CREDIT_CARD_PATTERN, text):
+        categories.add("payment_card")
+
+    if re.search(API_KEY_PATTERN, text_lower):
+        categories.add("api_key")
+
+    for keyword in HIGH_RISK_KEYWORDS:
+        if keyword in text_lower:
+            categories.add("sensitive_intent")
+
+    for keyword in MEDIUM_RISK_KEYWORDS:
+        if keyword in text_lower:
+            categories.add("personal_context")
+
+    return sorted(categories)
+
+def _detect_matches(text: str) -> list[dict]:
+    if not text:
+        return []
+
+    pattern_checks = [
+        ("email", EMAIL_PATTERN, 0),
+        ("phone", PHONE_PATTERN, 0),
+        ("postcode", UK_POSTCODE_PATTERN, re.IGNORECASE),
+        ("payment_card", CREDIT_CARD_PATTERN, 0),
+        ("api_key", API_KEY_PATTERN, re.IGNORECASE),
+    ]
+
+    matches = []
+
+    for category, pattern, flags in pattern_checks:
+        for match in re.finditer(pattern, text, flags):
+            matches.append({
+                "category": category,
+                "value": match.group(0),
+                "start": match.start(),
+                "end": match.end(),
+            })
+
+    return matches
+
+def _risk_level(risk: float) -> str:
+    if risk > 0.7:
+        return "high"
+    if risk > 0.3:
+        return "medium"
+    return "low"
+
+def analyze_privacy(text: str) -> dict:
+    risk = _calculate_privacy_risk(text)
+    return {
+        "risk": risk,
+        "level": _risk_level(risk),
+        "categories": _detect_categories(text),
+        "matches": _detect_matches(text),
+    }
+
+
+def detect_privacy(text: str) -> float:
+    """
+    Returns a privacy risk score between 0.0 and 1.0 based on the presence of sensitive information.
+    """
+    return analyze_privacy(text)["risk"]
 
