@@ -1,4 +1,5 @@
 import re
+from ai.privacy import policy
 
 # regex patterns for detecting sensitive information, trying to be uk aware.
 
@@ -95,9 +96,12 @@ MEDIUM_RISK_KEYWORDS = [
     "my manager",
 ]
 
-def detect_privacy(text: str) -> float:
+def _calculate_privacy_risk(text: str) -> float:
     """
-    Returns a privacy risk score between 0.0 and 1.0 based on the presence of sensitive information.
+    Score privacy risk from obvious sensitive patterns and softer intent keywords.
+
+    This is deliberately simple and explainable: regex hits add stronger weight,
+    while keywords add context that the request may involve personal data.
     """
     if not text:
         return 0.0
@@ -132,4 +136,103 @@ def detect_privacy(text: str) -> float:
 
     # clamp to 1.0 max to get a normalized risk score
     return min(risk_score, 1.0)
+
+def _detect_categories(text: str) -> list[str]:
+    """
+    Return broad privacy categories found in the text.
+
+    Categories are used by routing, summaries, and tests so we can say why a
+    message was treated as sensitive without relying only on a raw score.
+    """
+    if not text:
+        return []
+
+    text_lower = text.lower()
+    categories = set()
+
+    if re.search(EMAIL_PATTERN, text):
+        categories.add("email")
+
+    if re.search(PHONE_PATTERN, text):
+        categories.add("phone")
+
+    if re.search(UK_POSTCODE_PATTERN, text.upper()):
+        categories.add("postcode")
+
+    if re.search(CREDIT_CARD_PATTERN, text):
+        categories.add("payment_card")
+
+    if re.search(API_KEY_PATTERN, text_lower):
+        categories.add("api_key")
+
+    for keyword in HIGH_RISK_KEYWORDS:
+        if keyword in text_lower:
+            categories.add("sensitive_intent")
+
+    for keyword in MEDIUM_RISK_KEYWORDS:
+        if keyword in text_lower:
+            categories.add("personal_context")
+
+    return sorted(categories)
+
+def _detect_matches(text: str) -> list[dict]:
+    """
+    Return exact regex matches that can be safely replaced later.
+
+    Keyword-only signals are intentionally not included here because there is no
+    precise span to redact; the sanitizer should only replace known values.
+    """
+    if not text:
+        return []
+
+    pattern_checks = [
+        ("email", EMAIL_PATTERN, 0),
+        ("phone", PHONE_PATTERN, 0),
+        ("postcode", UK_POSTCODE_PATTERN, re.IGNORECASE),
+        ("payment_card", CREDIT_CARD_PATTERN, 0),
+        ("api_key", API_KEY_PATTERN, re.IGNORECASE),
+    ]
+
+    matches = []
+
+    for category, pattern, flags in pattern_checks:
+        for match in re.finditer(pattern, text, flags):
+            matches.append({
+                "category": category,
+                "value": match.group(0),
+                "start": match.start(),
+                "end": match.end(),
+            })
+
+    return matches
+
+def _risk_level(risk: float) -> str:
+    """
+    Convert a numeric score into the configured low/medium/high bucket.
+
+    Keeping this delegated to policy.py means threshold changes are centralised.
+    """
+    return policy.get_risk_level(risk)
+
+def analyze_privacy(text: str) -> dict:
+    """
+    Return the full privacy analysis used by routing and cloud-safe rendering.
+
+    This keeps the old score available while also carrying categories and exact
+    matches for sanitisation.
+    """
+    risk = _calculate_privacy_risk(text)
+    return {
+        "risk": risk,
+        "level": _risk_level(risk),
+        "categories": _detect_categories(text),
+        "matches": _detect_matches(text),
+    }
+
+
+def detect_privacy(text: str) -> float:
+    """
+    Returns a privacy risk score between 0.0 and 1.0 based on the presence of sensitive information.
+    """
+    return analyze_privacy(text)["risk"]
 

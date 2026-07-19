@@ -113,7 +113,7 @@ def setup_commands():
             command_path = os.path.join(str(command_file_location), cmdFile)
             module_name = name.split(".py")[0].lower()
             spec = importlib.util.spec_from_file_location(module_name, command_path)
-            module = importlib.util.module_from_spec(spec)
+            module = importlib.util.module_from_spec(spec) # this replaces the old depreciated load_module()
 
             if spec.loader is None:
                 raise ImportError(f"Unable to load command module: {command_path}")

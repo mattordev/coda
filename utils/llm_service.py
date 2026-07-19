@@ -1,37 +1,18 @@
 import os
 
-import requests
+from ai.providers import registry
+from ai.privacy.sanitizer import sanitize_text
+from ai.privacy import policy
+from ai.privacy.detector import analyze_privacy
 
 try:
     from dotenv import load_dotenv
 except ImportError:
     load_dotenv = None
 
-try:
-    import openai
-except ImportError:
-    openai = None
-
 
 if load_dotenv is not None:
     load_dotenv()
-
-PROVIDERS = {
-    "openai": {
-        "fn": lambda prompt: _generate_openai_response(prompt),
-        "type": "cloud",
-        "describe": lambda: f"openai (model: {_get_openai_model()})",
-    },
-    "ollama": {
-        "fn": lambda prompt: _generate_local_response(prompt),
-        "type": "local",
-        "describe": lambda: (
-            f"ollama (model: {_get_ollama_model()[0]})"
-            if not _get_ollama_model()[1]
-            else f"ollama (model resolution failed: {_get_ollama_model()[1]})"
-        ),
-    },
-}
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are CODA, the user's personal voice assistant. "
@@ -43,12 +24,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "Be helpful and informative without sounding robotic, corporate, or overly formal."
 )
 
+conversation_log = []
 
-conversation = []
-ollama_model_cache = None
-preferred_ollama_models = (
-    "nemotron-3-nano:4b",
-)
+CLOUD_REDACTION_THRESHOLD = 0.3
 
 
 def _get_float_env(name, default):
@@ -61,30 +39,89 @@ def _get_float_env(name, default):
     except ValueError:
         return default
 
-
-def _get_openai_api_key():
-    return os.getenv("OPENAI_API_KEY", "").strip()
-
-
-def _get_openai_model():
-    return os.getenv("CODA_OPENAI_MODEL", "gpt-3.5-turbo").strip() or "gpt-3.5-turbo"
-
-
 def _get_system_prompt():
     configured_prompt = os.getenv("CODA_SYSTEM_PROMPT", "").strip()
     if configured_prompt:
         return configured_prompt
     return DEFAULT_SYSTEM_PROMPT
 
+def _get_cloud_safe_content(role, content, risk, privacy_result=None):
+    """
+    Render one message for cloud providers according to privacy policy.
+
+    Local history keeps raw content, but cloud-visible history may be raw,
+    sanitized, summarized, or withheld depending on the policy action.
+    """
+    if privacy_result is None:
+        privacy_result = {
+            "risk": risk,
+            "level": policy.get_risk_level(risk),
+            "categories": [],
+            "matches": [],
+        }
+
+    action = policy.get_cloud_action(privacy_result)
+
+    if action == policy.ACTION_RAW:
+        return content
+    
+    if action == policy.ACTION_SUMMARIZE:
+        return _summarize_sensitive_content(role, privacy_result)
+
+    if action == policy.ACTION_SANITIZE:
+        sanitized = sanitize_text(content, privacy_result)
+        if sanitized != content:
+            return sanitized
+
+    if role in ("user", "assistant"):
+        return _summarize_sensitive_content(role, privacy_result)
+
+    return content
+
+def _summarize_sensitive_content(role, privacy_result):
+    """
+    Build a short cloud-safe placeholder for sensitive messages.
+
+    The categories are kept so future cloud replies have some conversational
+    context without receiving the actual private value.
+    """
+    categories = ", ".join(privacy_result.get("categories", [])) or "sensitive information"
+
+    if role == "assistant":
+        return f"[Sensitive assistant response withheld for cloud provider. Categories: {categories}.]"
+
+    return f"[Sensitive user request withheld for cloud provider. Categories: {categories}.]"
+        
+
+def _new_message(role, content, risk=0.0, cloud_content=None, privacy_result=None):
+    """
+    Store one conversation entry with raw content and a cloud-safe variant.
+
+    Provider rendering chooses between these fields later, so we only need one
+    conversation log while still respecting provider privacy boundaries.
+    """
+    if cloud_content is None:
+        cloud_content = _get_cloud_safe_content(role, content, risk, privacy_result)
+
+    return {
+        "role": role,
+        "content": content,
+        "risk": risk,
+        "cloud_content": cloud_content,
+    }
+    
+def _new_system_message():
+    return _new_message(
+        "system",
+        _get_system_prompt(),
+        risk=0.0,
+    )
 
 def _reset_conversation():
-    global conversation
+    global conversation_log
 
-    conversation = [
-        {
-            "role": "system",
-            "content": _get_system_prompt(),
-        },
+    conversation_log = [
+        _new_system_message(),
     ]
 
 
@@ -113,233 +150,153 @@ def _trim_conversation():
     max_messages = max_turns * 2  # each turn = 1 user + 1 assistant message
     system_messages = []
     non_system = []
-    for m in conversation:
+    for m in conversation_log:
         if m["role"] == "system":
             system_messages.append(m)
         else:
             non_system.append(m)
     if len(non_system) > max_messages:
-        conversation[:] = system_messages + non_system[-max_messages:]
+        conversation_log[:] = system_messages + non_system[-max_messages:]
+        
 
+def _build_messages_for_provider(provider_name):
+    provider_type = registry.get_provider_type(provider_name)
+
+    messages = []
+    for entry in conversation_log:
+        content = entry["content"]
+        if provider_type == "cloud":
+            content = entry["cloud_content"]
+
+        messages.append({
+            "role": entry["role"],
+            "content": content,
+        })
+
+    return messages
 
 def reload_config():
-    global ollama_model_cache
-
     if load_dotenv is not None:
         load_dotenv(override=True)
 
-    ollama_model_cache = None
     _reset_conversation()
 
-    openai_api_key = _get_openai_api_key()
-    if openai is not None and hasattr(openai, "api_key"):
-        openai.api_key = openai_api_key or None
+    registry.reload_providers()
 
 
 def llm_fallback_enabled():
-    configured_value = os.getenv("CODA_LLM_FALLBACK")
-    if configured_value is None:
-        configured_value = os.getenv("CODA_GPT_FALLBACK", "1")
+    configured_value = os.getenv("CODA_LLM_FALLBACK", "1")
     return configured_value.lower() in ("1", "true", "yes")
 
 
-def _get_ollama_base_url():
-    return os.getenv("CODA_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+def _split_provider_list(value: str) -> list[str]:
+    return [
+        provider.strip()
+        for provider in value.split(",")
+        if provider.strip()
+    ]
 
 
-def _get_configured_ollama_model():
-    return os.getenv("CODA_OLLAMA_MODEL", "").strip()
-
-
-def _get_llm_provider():
-    provider = os.getenv("CODA_LLM_PROVIDER", "").strip().lower()
-
-    
-
-    if provider == "gpt":
-        return "openai"
-
-    if provider in ("", "auto"):
-        if _get_configured_ollama_model() or os.getenv("CODA_OLLAMA_BASE_URL"):
-            return "ollama"
-        return "openai"
-
-    return provider
-
-
-def _get_ollama_model():
-    global ollama_model_cache
-
-    configured_model = _get_configured_ollama_model()
-    if configured_model:
-        return configured_model, None
-
-    if ollama_model_cache:
-        return ollama_model_cache, None
-
-    ollama_base_url = _get_ollama_base_url()
-
-    try:
-        response = requests.get(
-            f"{ollama_base_url}/api/tags",
-            timeout=min(_get_llm_timeout_seconds(), 10),
+def _get_described_providers(env_name: str, provider_type: str) -> str:
+    configured_names = _split_provider_list(os.getenv(env_name, ""))
+    if configured_names:
+        providers = registry.get_configured_providers(
+            configured_names,
+            provider_type=provider_type,
         )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception as exc:
-        return None, (
-            "could not fetch Ollama models automatically. "
-            "Set CODA_OLLAMA_MODEL explicitly. "
-            f"Details: {exc}"
+    else:
+        providers = registry.get_providers_by_type(provider_type)
+
+    if not providers:
+        return "none configured"
+
+    return ", ".join(registry.describe_provider(provider) for provider in providers)
+
+
+def _generate_provider_response(
+    provider_name,
+    provider_module,
+    user_text,
+    risk=0.0,
+    privacy_result=None,
+):
+    """
+    Add the user message, call the provider, then store the assistant reply.
+
+    Assistant replies are analysed too, because generated text can contain
+    sensitive values that should not be carried raw into later cloud calls.
+    """
+    conversation_log.append(
+        _new_message(
+            "user",
+            user_text,
+            risk=risk,
+            privacy_result=privacy_result,
         )
+    )
 
-    if not models:
-        return None, (
-            "no Ollama models were found at the configured host. "
-            "Set CODA_OLLAMA_MODEL after pulling a model."
-        )
+    messages = _build_messages_for_provider(provider_name)
+    response, error = provider_module.generate(messages)
 
-    model_names = []
-    for model in models:
-        model_name = model.get("name") or model.get("model")
-        if model_name:
-            model_names.append(model_name)
-
-    selected_model = None
-
-    for preferred_model in preferred_ollama_models:
-        if preferred_model in model_names:
-            selected_model = preferred_model
-            break
-
-    if selected_model is None:
-        selected_model = model_names[0] if model_names else None
-
-    if not selected_model:
-        return None, "Ollama returned models but none included a usable name"
-
-    ollama_model_cache = selected_model
-    return ollama_model_cache, None
-
-
-def _generate_openai_response(user_text):
-    openai_api_key = _get_openai_api_key()
-    openai_model = _get_openai_model()
-
-    if openai is None:
-        return None, "openai package is not installed"
-
-    if not openai_api_key:
-        return None, "OPENAI_API_KEY is not set"
-
-    if hasattr(openai, "api_key"):
-        openai.api_key = openai_api_key
-
-    conversation.append({"role": "user", "content": user_text})
-
-    try:
-        # openai>=1.x client API
-        if hasattr(openai, "OpenAI"):
-            client = openai.OpenAI(api_key=openai_api_key)
-            response = client.chat.completions.create(
-                model=openai_model,
-                messages=conversation,
-            )
-            assistant_message = response.choices[0].message.content
-        else:
-            # openai<=0.x legacy API
-            chat_completion = getattr(openai, "ChatCompletion", None)
-            if chat_completion is None:
-                return None, "openai package does not expose a legacy ChatCompletion API"
-
-            response = chat_completion.create(model=openai_model, messages=conversation)
-            assistant_message = response["choices"][0]["message"]["content"]
-    except Exception as exc:
-        conversation.pop()
-        return None, str(exc)
-
-    assistant_message = (assistant_message or "").strip()
-    if assistant_message:
-        conversation.append({"role": "assistant", "content": assistant_message})
-        _trim_conversation()
-
-    return assistant_message, None
-
-
-def _generate_local_response(user_text):
-    model_name, error = _get_ollama_model()
     if error:
+        conversation_log.pop()
         return None, error
 
-    ollama_base_url = _get_ollama_base_url()
-    conversation.append({"role": "user", "content": user_text})
+    response = (response or "").strip()
+    if response:
+        assistant_privacy_result = analyze_privacy(response)
+        assistant_risk = max(risk, assistant_privacy_result["risk"])
 
-    try:
-        response = requests.post(
-            f"{ollama_base_url}/api/chat",
-            json={
-                "model": model_name,
-                "messages": conversation,
-                "stream": False,
-            },
-            timeout=_get_llm_timeout_seconds(),
+        if assistant_risk > assistant_privacy_result["risk"]:
+            assistant_privacy_result = {
+                **assistant_privacy_result,
+                "risk": assistant_risk,
+                "level": policy.get_risk_level(assistant_risk),
+                "categories": sorted(
+                    set(assistant_privacy_result["categories"])
+                    | set(privacy_result["categories"] if privacy_result else [])
+                ),
+            }
+
+        conversation_log.append(
+            _new_message(
+                "assistant",
+                response,
+                risk=assistant_risk,
+                privacy_result=assistant_privacy_result,
+            )
         )
-        response.raise_for_status()
-        response_json = response.json()
-        message = response_json.get("message", {})
-        assistant_message = message.get("content") or response_json.get("response")
-    except Exception as exc:
-        conversation.pop()
-        return None, str(exc)
-
-    assistant_message = (assistant_message or "").strip()
-    if assistant_message:
-        conversation.append({"role": "assistant", "content": assistant_message})
         _trim_conversation()
 
-    return assistant_message, None
-
-
-def _generate_llm_response(user_text):
-    provider = _get_llm_provider()
-
-    provider_info = PROVIDERS.get(provider)
-    if not provider_info:
-        return None, (
-            f"unsupported CODA_LLM_PROVIDER '{provider}'. "
-            f"Available: {', '.join(PROVIDERS.keys())}"
-        )
-
-    return provider_info["fn"](user_text)
+    return response, None
 
 
 def describe_llm_fallback():
-    provider = _get_llm_provider()
-    provider_info = PROVIDERS.get(provider)
-
-    if not provider_info:
-        return provider
-
-    return provider_info["describe"]()
+    cloud_providers = _get_described_providers("CODA_CLOUD_PROVIDERS", "cloud")
+    local_providers = _get_described_providers("CODA_LOCAL_PROVIDERS", "local")
+    return f"cloud: {cloud_providers}; local: {local_providers}"
 
 
-def get_llm_provider():
-    return _get_llm_provider()
+def call_provider(provider_name, prompt, risk=0.0, privacy_result=None):
+    provider_name = registry.normalize_provider_name(provider_name)
+    provider_module = registry.get_provider_module(provider_name)
 
-def call_provider(provider_name, prompt):
-    provider_info = PROVIDERS.get(provider_name)
+    if provider_module is None:
+        available = ", ".join(registry.SUPPORTED_PROVIDERS.keys())
+        return None, f"Unknown provider: {provider_name}. Available: {available}"
 
-    if not provider_info:
-        return None, f"Unknown provider: {provider_name}"
-
-    return provider_info["fn"](prompt)
+    return _generate_provider_response(
+        provider_name,
+        provider_module,
+        prompt,
+        risk=risk,
+        privacy_result=privacy_result,
+    )
 
 
 def get_provider_type(provider_name):
-    provider_info = PROVIDERS.get(provider_name)
-    if not provider_info:
-        return None
-    return provider_info.get("type")
+    return registry.get_provider_type(provider_name)
 
 
 _reset_conversation()
+

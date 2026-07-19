@@ -26,7 +26,7 @@ v1.1.0 is a major quality and capability upgrade focused on local-first voice op
 
 ### LLM fallback is now more flexible and resilient
 
-- Added multi-provider support with `CODA_LLM_PROVIDER` (`openai` or `ollama`).
+- Added multi-provider support with `CODA_CLOUD_PROVIDERS` and `CODA_LOCAL_PROVIDERS`.
 - Added OpenAI model selection via `CODA_OPENAI_MODEL`.
 - Added Ollama host/model configuration via `CODA_OLLAMA_BASE_URL` and `CODA_OLLAMA_MODEL`.
 - Added automatic Ollama model selection when model is not configured (with preferred model fallback).
@@ -63,7 +63,7 @@ v1.1.0 is a major platform update for C.O.D.A, focused on faster local voice rec
 
 ### Smarter and more configurable LLM fallback
 
-- Provider abstraction added via `CODA_LLM_PROVIDER` (`openai` or `ollama`).
+- Provider abstraction added via `CODA_CLOUD_PROVIDERS` and `CODA_LOCAL_PROVIDERS`.
 - OpenAI model selection through `CODA_OPENAI_MODEL`.
 - Ollama host/model support through `CODA_OLLAMA_BASE_URL` and `CODA_OLLAMA_MODEL`.
 - Automatic Ollama model selection when no explicit model is provided (with preferred model fallback).
@@ -90,7 +90,7 @@ v1.1.0 is a major platform update for C.O.D.A, focused on faster local voice rec
 
 - Zip extraction hardened against Zip Slip path traversal.
 - Update staging and activation flow improved with stronger validation.
-- Local runtime files now preserved during update (`.env`, API key files, `wakewords.json`, `commands.json`).
+- Local runtime files now preserved during update (`.env`, `wakewords.json`, `commands.json`).
 - Local env/cache/build directories excluded from backups for faster updates.
 - Best-effort rollback path added for failed activations.
 
@@ -100,16 +100,10 @@ v1.1.0 is a major platform update for C.O.D.A, focused on faster local voice rec
 - Fixed empty-response fallback behavior for better assistant continuity.
 - Refined runtime flow and docs comments for clarity.
 
-## Compatibility Notes
-
-- `CODA_GPT_FALLBACK` remains supported as a legacy alias for `CODA_LLM_FALLBACK`.
-- Legacy key files remain supported: `ELapi_key.txt`, `ELapikey.txt`.
-- Full environment setup guidance is available in `README.md`.
-
 ## Upgrade Checklist
 
 1. Update to v1.1.0.
-2. Review `.env` and set `CODA_STT_PROVIDER` and `CODA_LLM_PROVIDER`.
+2. Review `.env` and set `CODA_STT_PROVIDER`, `CODA_CLOUD_PROVIDERS`, and `CODA_LOCAL_PROVIDERS`.
 3. If using Ollama, set `CODA_OLLAMA_BASE_URL` and optionally `CODA_OLLAMA_MODEL`.
 4. Tune voice behavior with pause, phrase, and follow-up timeout settings as needed.
 5. Verify runtime state on the dashboard endpoint at `/dashboard`.
@@ -117,3 +111,4 @@ v1.1.0 is a major platform update for C.O.D.A, focused on faster local voice rec
 ## Closing
 
 Thank you to everyone testing voice processing, dashboard state flow, and updater reliability. v1.1.0 establishes a stronger foundation for future command depth and local/offline assistant capability.
+
