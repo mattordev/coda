@@ -8,7 +8,14 @@ REPLACEMENTS = {
     "postcode": "[postcode redacted]",
 }
 
+
 def sanitize_text(text: str, privacy_result=None) -> str:
+    """
+    Replace exact sensitive matches with category placeholders.
+
+    This only touches spans reported by analyze_privacy(), so surrounding wording
+    stays useful while the detected value is removed.
+    """
     if not text:
         return text
     

@@ -67,9 +67,10 @@ Copy `.env.example` to the project root (located in /docs), rename it to `.env` 
 
 CODA uses privacy-aware provider routing:
 
-- High-risk requests (for example passwords, bank details, API keys) are processed using local providers only.
-- Medium-risk requests attempt local providers first, then fall back to cloud providers.
+- High-risk requests (for example passwords, bank details, API keys) are processed using local providers only by default.
+- Medium-risk requests attempt local providers first, then fall back to cloud providers with sensitive values sanitised.
 - Low-risk requests attempt cloud providers first, then fall back to local providers.
+- Local providers receive raw conversation history. Cloud providers receive the cloud-safe rendering of history, which can be raw, sanitised, summarized, or blocked depending on privacy policy.
 
 Providers are attempted in the order specified in `.env` using:
 
@@ -80,12 +81,25 @@ CODA_LOCAL_PROVIDERS=ollama
 
 Provider names are resolved through `ai/providers/registry.py`, which defines provider type, configuration requirements, and the implementation module. Use the canonical provider names from the registry. `CODA_CLOUD_PROVIDERS` only accepts cloud providers, and `CODA_LOCAL_PROVIDERS` only accepts local providers. Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
 
+Privacy behavior is controlled with:
+
+```text
+CODA_PRIVACY_MODE=balanced
+CODA_CLOUD_PRIVACY_ACTION=sanitize
+CODA_HIGH_RISK_CLOUD_FALLBACK=block
+CODA_PRIVACY_LOW_RISK_THRESHOLD=0.3
+CODA_PRIVACY_HIGH_RISK_THRESHOLD=0.7
+```
+
+Modes are `strict`, `balanced`, and `permissive`. See `docs/privacy-routing.md` for the full routing and cloud-safe rendering rules.
+
 Notes:
 
 - `ELEVENLABS_API_KEY` is required for ElevenLabs TTS auth.
 - `CODA_LLM_FALLBACK=1` enables LLM fallback when no command word is detected after the wakeword.
 - If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `nemotron-3-nano:4b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
 - `CODA_OLLAMA_COLD_START_TIMEOUT` controls the longer timeout used only when an Ollama model is not already loaded.
+- `CODA_PRIVACY_MODE` controls whether sensitive requests are blocked from cloud providers or sent with sanitised/summarized context.
 - LLM voice replies open a short follow-up window so the next spoken reply can skip the wake word. Adjust this with `CODA_FOLLOWUP_TIMEOUT` in seconds.
 - `CODA_STT_PROVIDER=auto` prefers local Whisper via `faster-whisper`, then falls back to Google recognition.
 - In `auto` mode, CODA will also step down to a more compatible local Whisper setup before using Google, for example when CUDA is detected but the local CUDA runtime is not actually usable.

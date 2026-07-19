@@ -2,6 +2,7 @@ import os
 
 from ai.providers import registry
 from ai.privacy.detector import analyze_privacy
+from ai.privacy import policy
 from ai.telemetry import logger
 import utils.llm_service as llm_service
 import utils.runtime_state as runtime_state
@@ -14,6 +15,9 @@ def _debug_print(*args, **kwargs):
 def _try_providers(providers: list[str], prompt: str, risk: float, privacy_result=None):
     """
     Attempt providers in order and return the first successful response.
+
+    The same privacy result is passed to every provider attempt so fallback
+    calls do not lose the sanitisation context from the original prompt.
     """
     last_error = None
 
@@ -39,6 +43,12 @@ def _try_providers(providers: list[str], prompt: str, risk: float, privacy_resul
 
 
 def _call_provider_with_health(provider: str, prompt: str, risk: float, privacy_result=None):
+    """
+    Call one provider unless telemetry says it is temporarily unhealthy.
+
+    This keeps cooldown handling in the router while llm_service handles
+    conversation history and provider-specific rendering.
+    """
     if logger.should_skip_provider(provider):
         _debug_print(
             f"[ROUTER] Skipping {provider} due to recent failure; using fallback."
@@ -118,29 +128,59 @@ def _get_configured_provider_groups():
     return cloud_providers, local_providers
 
 
-def get_provider_order(risk: float):
+def get_provider_order(privacy_result):
+    """
+    Build the provider attempt order from privacy level and cloud policy.
+
+    Float input is still supported for older tests/helpers, but normal routing
+    now passes the full privacy result from analyze_privacy().
+    """
     cloud_providers, local_providers = _get_configured_provider_groups()
 
-    if risk > 0.7:
-        return local_providers
+    if isinstance(privacy_result, (int, float)):
+        privacy_result = {
+            "risk": float(privacy_result),
+            "level": policy.get_risk_level(float(privacy_result)),
+            "categories": [],
+            "matches": [],
+        }
 
-    if risk > 0.3:
+    level = privacy_result["level"]
+    cloud_action = policy.get_cloud_action(privacy_result)
+
+    if level == "high":
+        if cloud_action == policy.ACTION_BLOCK:
+            return local_providers
+        return local_providers + cloud_providers
+
+    if level == "medium":
+        if cloud_action == policy.ACTION_BLOCK:
+            return local_providers
         return local_providers + cloud_providers
 
     return cloud_providers + local_providers
 
 
 def route_request(prompt: str):
+    """
+    Analyse privacy, choose provider order, and return the first good response.
+
+    Routing decides whether cloud providers are allowed, while llm_service
+    decides what cloud-safe content those providers actually receive.
+    """
     privacy_result = analyze_privacy(prompt)
     risk = privacy_result["risk"]
 
-    providers = get_provider_order(risk)
+    providers = get_provider_order(privacy_result)
 
     _debug_print(f"[DEBUG - ROUTER] Privacy risk: {risk}")
     _debug_print(f"[DEBUG - ROUTER] Provider order: {providers}")
 
-    # High risk, LOCAL ONLY
-    if risk > 0.7:
+    # High risk, LOCAL ONLY when cloud policy blocks fallback
+    if (
+        privacy_result["level"] == "high"
+        and policy.get_cloud_action(privacy_result) == policy.ACTION_BLOCK
+    ):
         if not providers:
             _debug_print("[ROUTER] High risk -> no local providers configured.")
             return _no_local_provider_configured_message(), None
@@ -154,8 +194,8 @@ def route_request(prompt: str):
 
         return _high_risk_unavailable_message(), None
 
-    # Medium risk, try LOCAL first
-    if risk > 0.3:
+    # Sensitive request, try providers in policy order
+    if privacy_result["level"] in ("medium", "high"):
         if not providers:
             _debug_print("[ROUTER] Medium risk -> no providers configured.")
             return _no_provider_configured_message(), None

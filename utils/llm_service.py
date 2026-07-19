@@ -2,6 +2,8 @@ import os
 
 from ai.providers import registry
 from ai.privacy.sanitizer import sanitize_text
+from ai.privacy import policy
+from ai.privacy.detector import analyze_privacy
 
 try:
     from dotenv import load_dotenv
@@ -44,24 +46,60 @@ def _get_system_prompt():
     return DEFAULT_SYSTEM_PROMPT
 
 def _get_cloud_safe_content(role, content, risk, privacy_result=None):
-    if risk <= CLOUD_REDACTION_THRESHOLD:
+    """
+    Render one message for cloud providers according to privacy policy.
+
+    Local history keeps raw content, but cloud-visible history may be raw,
+    sanitized, summarized, or withheld depending on the policy action.
+    """
+    if privacy_result is None:
+        privacy_result = {
+            "risk": risk,
+            "level": policy.get_risk_level(risk),
+            "categories": [],
+            "matches": [],
+        }
+
+    action = policy.get_cloud_action(privacy_result)
+
+    if action == policy.ACTION_RAW:
         return content
     
-    if privacy_result is not None and risk <= 0.7:
+    if action == policy.ACTION_SUMMARIZE:
+        return _summarize_sensitive_content(role, privacy_result)
+
+    if action == policy.ACTION_SANITIZE:
         sanitized = sanitize_text(content, privacy_result)
         if sanitized != content:
             return sanitized
-    
-    if role == "user":
-        return "[Sensitive user request redacted for cloud provider.]"
 
-    if role == "assistant":
-        return "[Sensitive assistant response redacted for cloud provider.]"
+    if role in ("user", "assistant"):
+        return _summarize_sensitive_content(role, privacy_result)
 
     return content
+
+def _summarize_sensitive_content(role, privacy_result):
+    """
+    Build a short cloud-safe placeholder for sensitive messages.
+
+    The categories are kept so future cloud replies have some conversational
+    context without receiving the actual private value.
+    """
+    categories = ", ".join(privacy_result.get("categories", [])) or "sensitive information"
+
+    if role == "assistant":
+        return f"[Sensitive assistant response withheld for cloud provider. Categories: {categories}.]"
+
+    return f"[Sensitive user request withheld for cloud provider. Categories: {categories}.]"
         
 
 def _new_message(role, content, risk=0.0, cloud_content=None, privacy_result=None):
+    """
+    Store one conversation entry with raw content and a cloud-safe variant.
+
+    Provider rendering chooses between these fields later, so we only need one
+    conversation log while still respecting provider privacy boundaries.
+    """
     if cloud_content is None:
         cloud_content = _get_cloud_safe_content(role, content, risk, privacy_result)
 
@@ -175,15 +213,27 @@ def _get_described_providers(env_name: str, provider_type: str) -> str:
     return ", ".join(registry.describe_provider(provider) for provider in providers)
 
 
-def _generate_provider_response(provider_name, provider_module, user_text, risk=0.0, privacy_result=None):
+def _generate_provider_response(
+    provider_name,
+    provider_module,
+    user_text,
+    risk=0.0,
+    privacy_result=None,
+):
+    """
+    Add the user message, call the provider, then store the assistant reply.
+
+    Assistant replies are analysed too, because generated text can contain
+    sensitive values that should not be carried raw into later cloud calls.
+    """
     conversation_log.append(
-    _new_message(
-        "user",
-        user_text,
-        risk=risk,
-        privacy_result=privacy_result,
+        _new_message(
+            "user",
+            user_text,
+            risk=risk,
+            privacy_result=privacy_result,
+        )
     )
-)
 
     messages = _build_messages_for_provider(provider_name)
     response, error = provider_module.generate(messages)
@@ -194,7 +244,28 @@ def _generate_provider_response(provider_name, provider_module, user_text, risk=
 
     response = (response or "").strip()
     if response:
-        conversation_log.append(_new_message("assistant", response, risk=risk))
+        assistant_privacy_result = analyze_privacy(response)
+        assistant_risk = max(risk, assistant_privacy_result["risk"])
+
+        if assistant_risk > assistant_privacy_result["risk"]:
+            assistant_privacy_result = {
+                **assistant_privacy_result,
+                "risk": assistant_risk,
+                "level": policy.get_risk_level(assistant_risk),
+                "categories": sorted(
+                    set(assistant_privacy_result["categories"])
+                    | set(privacy_result["categories"] if privacy_result else [])
+                ),
+            }
+
+        conversation_log.append(
+            _new_message(
+                "assistant",
+                response,
+                risk=assistant_risk,
+                privacy_result=assistant_privacy_result,
+            )
+        )
         _trim_conversation()
 
     return response, None

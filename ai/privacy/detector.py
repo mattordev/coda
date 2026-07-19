@@ -1,4 +1,5 @@
 import re
+from ai.privacy import policy
 
 # regex patterns for detecting sensitive information, trying to be uk aware.
 
@@ -97,7 +98,10 @@ MEDIUM_RISK_KEYWORDS = [
 
 def _calculate_privacy_risk(text: str) -> float:
     """
-    Returns a privacy risk score between 0.0 and 1.0 based on the presence of sensitive information.
+    Score privacy risk from obvious sensitive patterns and softer intent keywords.
+
+    This is deliberately simple and explainable: regex hits add stronger weight,
+    while keywords add context that the request may involve personal data.
     """
     if not text:
         return 0.0
@@ -134,6 +138,12 @@ def _calculate_privacy_risk(text: str) -> float:
     return min(risk_score, 1.0)
 
 def _detect_categories(text: str) -> list[str]:
+    """
+    Return broad privacy categories found in the text.
+
+    Categories are used by routing, summaries, and tests so we can say why a
+    message was treated as sensitive without relying only on a raw score.
+    """
     if not text:
         return []
 
@@ -166,6 +176,12 @@ def _detect_categories(text: str) -> list[str]:
     return sorted(categories)
 
 def _detect_matches(text: str) -> list[dict]:
+    """
+    Return exact regex matches that can be safely replaced later.
+
+    Keyword-only signals are intentionally not included here because there is no
+    precise span to redact; the sanitizer should only replace known values.
+    """
     if not text:
         return []
 
@@ -191,13 +207,20 @@ def _detect_matches(text: str) -> list[dict]:
     return matches
 
 def _risk_level(risk: float) -> str:
-    if risk > 0.7:
-        return "high"
-    if risk > 0.3:
-        return "medium"
-    return "low"
+    """
+    Convert a numeric score into the configured low/medium/high bucket.
+
+    Keeping this delegated to policy.py means threshold changes are centralised.
+    """
+    return policy.get_risk_level(risk)
 
 def analyze_privacy(text: str) -> dict:
+    """
+    Return the full privacy analysis used by routing and cloud-safe rendering.
+
+    This keeps the old score available while also carrying categories and exact
+    matches for sanitisation.
+    """
     risk = _calculate_privacy_risk(text)
     return {
         "risk": risk,

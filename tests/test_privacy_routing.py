@@ -3,6 +3,7 @@ from unittest import mock
 
 from ai.providers import registry
 from ai.privacy.detector import analyze_privacy
+from ai.privacy import policy
 from ai.router import core
 import utils.llm_service as llm_service
 
@@ -28,8 +29,8 @@ class PrivacyRoutingTests(unittest.TestCase):
 
         rendered_history = str(captured)
         self.assertNotIn("swordfish", rendered_history)
-        self.assertIn("[Sensitive user request redacted for cloud provider.]", rendered_history)
-        self.assertIn("[Sensitive assistant response redacted for cloud provider.]", rendered_history)
+        self.assertIn("[Sensitive user request withheld for cloud provider.", rendered_history)
+        self.assertIn("[Sensitive assistant response withheld for cloud provider.", rendered_history)
         self.assertEqual(captured[-1], {"role": "user", "content": "say ok"})
 
     def test_local_messages_keep_sensitive_history(self):
@@ -118,6 +119,99 @@ class PrivacyRoutingTests(unittest.TestCase):
         self.assertEqual(
             captured[-1],
             {"role": "user", "content": "email me at [email redacted]"},
+        )
+
+    def test_default_policy_cloud_actions(self):
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "CODA_PRIVACY_MODE": "balanced",
+                "CODA_CLOUD_PRIVACY_ACTION": "sanitize",
+                "CODA_HIGH_RISK_CLOUD_FALLBACK": "block",
+            },
+        ):
+            # Make sure the default policy keeps low risk raw, medium sanitised, high blocked.
+            self.assertEqual(policy.get_cloud_action({"level": "low"}), policy.ACTION_RAW)
+            self.assertEqual(
+                policy.get_cloud_action({"level": "medium"}),
+                policy.ACTION_SANITIZE,
+            )
+            self.assertEqual(
+                policy.get_cloud_action({"level": "high"}),
+                policy.ACTION_BLOCK,
+            )
+
+    def test_strict_mode_blocks_medium_risk_cloud_fallback(self):
+        privacy_result = analyze_privacy("email me at test@example.com")
+
+        with mock.patch.dict("os.environ", {"CODA_PRIVACY_MODE": "strict"}), \
+             mock.patch.object(
+                 core,
+                 "_get_configured_provider_groups",
+                 return_value=(["openai"], ["ollama"]),
+             ):
+            # Make sure strict mode keeps sensitive requests local-only.
+            self.assertEqual(core.get_provider_order(privacy_result), ["ollama"])
+
+    def test_permissive_mode_allows_high_risk_cloud_fallback(self):
+        privacy_result = analyze_privacy("my password is swordfish")
+
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "CODA_PRIVACY_MODE": "permissive",
+                "CODA_HIGH_RISK_CLOUD_FALLBACK": "sanitize",
+            },
+        ), \
+             mock.patch.object(
+                 core,
+                 "_get_configured_provider_groups",
+                 return_value=(["openai"], ["ollama"]),
+             ):
+            # Make sure permissive mode can still fallback to cloud after local fails.
+            self.assertEqual(core.get_provider_order(privacy_result), ["ollama", "openai"])
+
+    def test_summarize_action_renders_cloud_safe_summary(self):
+        privacy_result = analyze_privacy("email me at test@example.com")
+
+        with mock.patch.dict("os.environ", {"CODA_CLOUD_PRIVACY_ACTION": "summarize"}):
+            message = llm_service._new_message(
+                "user",
+                "email me at test@example.com",
+                risk=privacy_result["risk"],
+                privacy_result=privacy_result,
+            )
+
+        # Make sure summarize mode hides the original value but keeps useful categories.
+        self.assertEqual(
+            message["cloud_content"],
+            "[Sensitive user request withheld for cloud provider. Categories: email, personal_context.]",
+        )
+
+    def test_sensitive_assistant_response_is_sanitised_for_future_cloud_history(self):
+        cloud_provider = registry.get_provider_module("openai")
+        captured = []
+
+        with mock.patch.object(
+            cloud_provider,
+            "generate",
+            return_value=("contact me at private@example.com", None),
+        ):
+            llm_service.call_provider("openai", "say contact details", risk=0.0)
+
+        with mock.patch.object(
+            cloud_provider,
+            "generate",
+            side_effect=lambda messages: (captured.extend(messages) or ("ok", None)),
+        ):
+            llm_service.call_provider("openai", "say ok", risk=0.0)
+
+        rendered_history = str(captured)
+        # Make sure provider-generated sensitive content does not leak into the next cloud call.
+        self.assertNotIn("private@example.com", rendered_history)
+        self.assertIn(
+            {"role": "assistant", "content": "contact me at [email redacted]"},
+            captured,
         )
 
 
