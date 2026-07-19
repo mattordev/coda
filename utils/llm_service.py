@@ -42,7 +42,7 @@ def _get_system_prompt():
         return configured_prompt
     return DEFAULT_SYSTEM_PROMPT
 
-def _get_cloud_safe_content (role, content, risk):
+def _get_cloud_safe_content(role, content, risk):
     if risk <= CLOUD_REDACTION_THRESHOLD:
         return content
     
