@@ -21,8 +21,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "Be helpful and informative without sounding robotic, corporate, or overly formal."
 )
 
+conversation_log = []
 
-conversation = []
+CLOUD_REDACTION_THRESHOLD = 0.3
 
 
 def _get_float_env(name, default):
@@ -41,15 +42,42 @@ def _get_system_prompt():
         return configured_prompt
     return DEFAULT_SYSTEM_PROMPT
 
+def _get_cloud_safe_content (role, content, risk):
+    if risk <= CLOUD_REDACTION_THRESHOLD:
+        return content
+    
+    if role == "user":
+        return "[Sensitive user request redacted for cloud provider.]"
+
+    if role == "assistant":
+        return "[Sensitive assistant response redacted for cloud provider.]"
+
+    return content
+        
+
+def _new_message(role, content, risk=0.0, cloud_content=None):
+    if cloud_content is None:
+        cloud_content = _get_cloud_safe_content(role, content, risk)
+
+    return {
+        "role": role,
+        "content": content,
+        "risk": risk,
+        "cloud_content": cloud_content,
+    }
+    
+def _new_system_message():
+    return _new_message(
+        "system",
+        _get_system_prompt(),
+        risk=0.0,
+    )
 
 def _reset_conversation():
-    global conversation
+    global conversation_log
 
-    conversation = [
-        {
-            "role": "system",
-            "content": _get_system_prompt(),
-        },
+    conversation_log = [
+        _new_system_message(),
     ]
 
 
@@ -78,14 +106,30 @@ def _trim_conversation():
     max_messages = max_turns * 2  # each turn = 1 user + 1 assistant message
     system_messages = []
     non_system = []
-    for m in conversation:
+    for m in conversation_log:
         if m["role"] == "system":
             system_messages.append(m)
         else:
             non_system.append(m)
     if len(non_system) > max_messages:
-        conversation[:] = system_messages + non_system[-max_messages:]
+        conversation_log[:] = system_messages + non_system[-max_messages:]
+        
 
+def _build_messages_for_provider(provider_name):
+    provider_type = registry.get_provider_type(provider_name)
+
+    messages = []
+    for entry in conversation_log:
+        content = entry["content"]
+        if provider_type == "cloud":
+            content = entry["cloud_content"]
+
+        messages.append({
+            "role": entry["role"],
+            "content": content,
+        })
+
+    return messages
 
 def reload_config():
     if load_dotenv is not None:
@@ -125,18 +169,19 @@ def _get_described_providers(env_name: str, provider_type: str) -> str:
     return ", ".join(registry.describe_provider(provider) for provider in providers)
 
 
-def _generate_provider_response(provider_module, user_text):
-    conversation.append({"role": "user", "content": user_text})
+def _generate_provider_response(provider_name, provider_module, user_text, risk=0.0):
+    conversation_log.append(_new_message("user", user_text, risk=risk))
 
-    response, error = provider_module.generate(conversation)
+    messages = _build_messages_for_provider(provider_name)
+    response, error = provider_module.generate(messages)
 
     if error:
-        conversation.pop()
+        conversation_log.pop()
         return None, error
 
     response = (response or "").strip()
     if response:
-        conversation.append({"role": "assistant", "content": response})
+        conversation_log.append(_new_message("assistant", response, risk=risk))
         _trim_conversation()
 
     return response, None
@@ -148,15 +193,20 @@ def describe_llm_fallback():
     return f"cloud: {cloud_providers}; local: {local_providers}"
 
 
-def call_provider(provider_name, prompt):
+def call_provider(provider_name, prompt, risk=0.0):
+    provider_name = registry.normalize_provider_name(provider_name)
     provider_module = registry.get_provider_module(provider_name)
 
     if provider_module is None:
         available = ", ".join(registry.SUPPORTED_PROVIDERS.keys())
-        provider_name = registry.normalize_provider_name(provider_name)
         return None, f"Unknown provider: {provider_name}. Available: {available}"
 
-    return _generate_provider_response(provider_module, prompt)
+    return _generate_provider_response(
+        provider_name,
+        provider_module,
+        prompt,
+        risk=risk,
+    )
 
 
 def get_provider_type(provider_name):
