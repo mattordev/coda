@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 
 import utils.llm_service as llm_service
-from ai.router.core import route_request
+from ai.llm_router.core import route_request
 
 
 @dataclass
