@@ -100,11 +100,16 @@ class BuiltinIntentTests(unittest.TestCase):
 
         self.assertEqual(registry.all(), BUILTIN_INTENTS)
 
-    def test_factory_resolves_builtin_aliases(self):
+    def test_factory_resolves_all_builtin_names_and_aliases(self):
         registry = create_builtin_registry()
 
-        self.assertEqual(registry.get("online").name, "connected")
-        self.assertEqual(registry.get("navigate").name, "maps")
+        for intent in BUILTIN_INTENTS:
+            with self.subTest(name=intent.name):
+                self.assertIs(registry.get(intent.name), intent)
+
+            for alias in intent.aliases:
+                with self.subTest(name=intent.name, alias=alias):
+                    self.assertIs(registry.get(alias), intent)
 
 
 if __name__ == "__main__":

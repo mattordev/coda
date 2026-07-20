@@ -30,13 +30,53 @@ BUILTIN_INTENTS: tuple[Intent, ...] = (
             "network status",
         ),
     ),
+    Intent(
+        name="say",
+        description="Ask CODA to say something.",
+        parameters=(
+            IntentParameter(
+                name="message",
+                description="The thing that you want CODA to say.",
+            ),
+        ),
+        aliases=(
+            "repeat",
+            "read aloud",
+        ),
+    ),
+    Intent(
+        name="debug",
+        description="View or change CODA's runtime debugging configuration.",
+        parameters=(
+            IntentParameter(
+                name="action",
+                description="The debug action: on, off, status, or reload.",
+                required=False,
+            ),
+        ),
+        aliases=(
+            "debug mode",
+            "diagnostics",
+            "diagnostic mode",
+        ),
+    ),
+    Intent(
+        name="status",
+        description="Report information about the system running CODA.",
+        aliases=(
+            "system status",
+            "system information",
+            "system report",
+        ),
+    ),
 )
+
 
 def create_builtin_registry() -> IntentRegistry:
     """Create a registry populated with CODA's built-in intents."""
     registry = IntentRegistry()
-    
+
     for intent in BUILTIN_INTENTS:
         registry.register(intent)
-        
+
     return registry
