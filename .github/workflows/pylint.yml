@@ -30,6 +30,8 @@ jobs:
 
             - name: Analysing the code with pylint
               shell: bash
+              env:
+                  PYTHONPATH: ${{ github.workspace }}
               run: |
                   set -euo pipefail
 
