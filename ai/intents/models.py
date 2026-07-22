@@ -17,6 +17,22 @@ class Intent:
 
 
 @dataclass(frozen=True)
+class IntentRequest:
+    intent: Intent
+    message: str
+    confidence: float
+    strategy: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the structured intent request."""
+        if not self.message.strip():
+            raise ValueError("Intent request message cannot be empty.")
+
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("Confidence must be between 0.0 and 1.0.")
+
+
+@dataclass(frozen=True)
 class IntentResult:
     intent: Intent | None
     confidence: float = 0.0
@@ -41,3 +57,17 @@ class IntentResult:
     def needs_clarification(self) -> bool:
         """Return whether a candidate was found but not accepted."""
         return self.matched and not self.accepted
+
+    def to_request(self, message: str) -> IntentRequest:
+        """Convert an accepted result into a structured request."""
+        if not self.accepted or self.intent is None:
+            raise ValueError(
+                "Only accepted intent results can create requests."
+            )
+
+        return IntentRequest(
+            intent=self.intent,
+            message=message,
+            confidence=self.confidence,
+            strategy=self.strategy,
+        )
