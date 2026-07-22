@@ -1,8 +1,7 @@
-import socket
 import random
-from importlib.machinery import SourceFileLoader
-import sys
-import os
+import socket
+
+from ai.intents import IntentRequest
 import utils.speak_response as speak
 
 
@@ -18,7 +17,7 @@ def is_connected():
     return False
 
 
-def run(args):
+def run(request: IntentRequest) -> bool:
     if (is_connected()):
         response = random.choice(
             ['We are connected.', 'There is an established data connection.', 'We are online and ready to go boss!', 'We are up and running, with consistent data streams.', 'Things are looking good here.', 'We\'re online and ready to go sir.'])

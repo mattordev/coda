@@ -1,19 +1,18 @@
-import os
 import platform
 import time
 # import memory_profiler as profiler
+
+from ai.intents import IntentRequest
 import utils.speak_response as speak
-import utils.speak_response_with_input as speak_input
 
 # TODO: have the program ask if the user wants to know about the system status, or the program status.
 # Also implement someway to check the system health (temp, power usage etc.)
 
 
-def run(args):
+def run(request: IntentRequest) -> bool:
     speak.speak_response("Generating system report now...")
-    # ask for the type of check
-    # check(type)
     get_running_on_system_status()
+    return True
 
 
 # Gets the status of the machine or system that CODA is running on.
