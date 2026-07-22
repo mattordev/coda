@@ -22,6 +22,23 @@ class MapsMatchStrategy:
     def detect(self, message, registry):
         return IntentResult(
             intent=registry.get("maps"),
+            confidence=0.90,
+            strategy=self.name,
+        )
+
+
+class ScoredIntentStrategy:
+    """A configurable strategy used to exercise confidence thresholds."""
+
+    def __init__(self, name, intent_name, confidence):
+        self.name = name
+        self.intent_name = intent_name
+        self.confidence = confidence
+
+    def detect(self, message, registry):
+        return IntentResult(
+            intent=registry.get(self.intent_name),
+            confidence=self.confidence,
             strategy=self.name,
         )
 
@@ -48,7 +65,10 @@ class IntentRouterTests(unittest.TestCase):
 
         self.assertTrue(result.matched)
         self.assertIs(result.intent, self.registry.get("maps"))
+        self.assertEqual(result.confidence, 1.0)
         self.assertEqual(result.strategy, "exact_match")
+        self.assertTrue(result.accepted)
+        self.assertFalse(result.needs_clarification)
         self.assertIsNone(result.error)
 
     def test_routes_normalized_alias(self):
@@ -83,7 +103,9 @@ class IntentRouterTests(unittest.TestCase):
 
         self.assertTrue(result.matched)
         self.assertEqual(result.intent.name, "maps")
+        self.assertEqual(result.confidence, 0.90)
         self.assertEqual(result.strategy, "maps_match")
+        self.assertTrue(result.accepted)
 
     def test_continues_after_strategy_raises_exception(self):
         router = IntentRouter(
@@ -109,6 +131,114 @@ class IntentRouterTests(unittest.TestCase):
         self.assertFalse(result.matched)
         self.assertIsNone(result.intent)
         self.assertEqual(result.error, "broken: strategy exploded")
+
+    def test_accepts_candidate_at_acceptance_threshold(self):
+        strategy = ScoredIntentStrategy("boundary", "maps", 0.75)
+        router = IntentRouter(self.registry, strategies=(strategy,))
+
+        result = router.route("find somewhere")
+
+        self.assertTrue(result.matched)
+        self.assertTrue(result.accepted)
+        self.assertFalse(result.needs_clarification)
+        self.assertEqual(result.confidence, 0.75)
+
+    def test_requests_clarification_at_clarification_threshold(self):
+        strategy = ScoredIntentStrategy("boundary", "maps", 0.40)
+        router = IntentRouter(self.registry, strategies=(strategy,))
+
+        result = router.route("find somewhere")
+
+        self.assertTrue(result.matched)
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.needs_clarification)
+        self.assertEqual(result.confidence, 0.40)
+
+    def test_ignores_candidate_below_clarification_threshold(self):
+        strategy = ScoredIntentStrategy("weak", "maps", 0.39)
+        router = IntentRouter(self.registry, strategies=(strategy,))
+
+        result = router.route("find somewhere")
+
+        self.assertFalse(result.matched)
+        self.assertFalse(result.accepted)
+        self.assertFalse(result.needs_clarification)
+        self.assertEqual(result.confidence, 0.0)
+
+    def test_returns_strongest_clarification_candidate(self):
+        strategies = (
+            ScoredIntentStrategy("weaker", "maps", 0.50),
+            ScoredIntentStrategy("stronger", "connected", 0.65),
+        )
+        router = IntentRouter(self.registry, strategies=strategies)
+
+        result = router.route("ambiguous request")
+
+        self.assertEqual(result.intent.name, "connected")
+        self.assertEqual(result.strategy, "stronger")
+        self.assertEqual(result.confidence, 0.65)
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.needs_clarification)
+
+    def test_keeps_earlier_candidate_when_scores_are_equal(self):
+        strategies = (
+            ScoredIntentStrategy("first", "maps", 0.60),
+            ScoredIntentStrategy("second", "connected", 0.60),
+        )
+        router = IntentRouter(self.registry, strategies=strategies)
+
+        result = router.route("ambiguous request")
+
+        self.assertEqual(result.intent.name, "maps")
+        self.assertEqual(result.strategy, "first")
+
+    def test_uses_custom_confidence_thresholds(self):
+        strategy = ScoredIntentStrategy("custom", "maps", 0.80)
+        router = IntentRouter(
+            self.registry,
+            strategies=(strategy,),
+            acceptance_threshold=0.90,
+            clarification_threshold=0.60,
+        )
+
+        result = router.route("find somewhere")
+
+        self.assertTrue(result.matched)
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.needs_clarification)
+
+    def test_rejects_invalid_confidence_thresholds(self):
+        invalid_thresholds = (
+            (-0.1, 0.0),
+            (1.1, 0.4),
+            (0.5, 0.6),
+        )
+
+        for acceptance, clarification in invalid_thresholds:
+            with self.subTest(
+                acceptance=acceptance,
+                clarification=clarification,
+            ):
+                with self.assertRaisesRegex(ValueError, "thresholds"):
+                    IntentRouter(
+                        self.registry,
+                        acceptance_threshold=acceptance,
+                        clarification_threshold=clarification,
+                    )
+
+
+class IntentResultTests(unittest.TestCase):
+    """Tests for confidence-related IntentResult invariants."""
+
+    def test_rejects_confidence_outside_valid_range(self):
+        for confidence in (-0.1, 1.1):
+            with self.subTest(confidence=confidence):
+                with self.assertRaisesRegex(ValueError, "Confidence"):
+                    IntentResult(intent=None, confidence=confidence)
+
+    def test_rejects_accepted_result_without_intent(self):
+        with self.assertRaisesRegex(ValueError, "accepted result"):
+            IntentResult(intent=None, accepted=True)
 
 
 if __name__ == "__main__":
