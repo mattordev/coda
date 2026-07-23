@@ -1,28 +1,65 @@
-import webbrowser
 import random
+from urllib.parse import urlencode
+import webbrowser
 
-# TODO: GET wakewords from JSON and append them at the end of the stopwords list.
-
-
-def extract_query_from_command(command):
-    excluded_words = ['google', 'maps', 'search', 'find', 'look', 'up', 'show', 'display', 'navigate',
-                      'to', 'directions', 'route', 'get', 'take', 'me', 'on', 'in', 'near', 'around', 'nearby', 'for']
-    querywords = [word for word in command if word.lower()
-                  not in excluded_words]
-    query = ' '.join(querywords)
-    return query.strip()
+from ai.intents import IntentRequest
 
 
-def run(message):
-    query = extract_query_from_command(message)
-    if query:
-        chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        webbrowser.register(
-            'chrome', None, webbrowser.BackgroundBrowser(chrome_path))
-        webbrowser.get('chrome').open(
-            "https://www.google.be/maps/place/" + query, new=2)
-        print(random.choice([query + ' on Google Maps', 'Maps loading...']))
-        return True  # Command executed successfully
-    else:
+def extract_query_from_command(message: str) -> str:
+    """Remove command words to produce a Maps search query."""
+    excluded_words = {
+        "google",
+        "map",
+        "maps",
+        "search",
+        "find",
+        "look",
+        "up",
+        "show",
+        "display",
+        "navigate",
+        "to",
+        "directions",
+        "route",
+        "get",
+        "take",
+        "me",
+        "on",
+        "in",
+        "near",
+        "around",
+        "nearby",
+        "for",
+    }
+    query_words = [
+        word
+        for word in message.split()
+        if word.lower() not in excluded_words
+    ]
+
+    return " ".join(query_words).strip()
+
+
+def run(request: IntentRequest) -> bool:
+    """Open a Maps search for the location in a structured request."""
+    query = extract_query_from_command(request.message)
+
+    if not query:
         print("No valid query found")
-        return False  # Command failed to execute
+        return False
+
+    chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    webbrowser.register(
+        "chrome",
+        None,
+        webbrowser.BackgroundBrowser(chrome_path),
+    )
+    maps_url = "https://www.google.com/maps/search/?" + urlencode(
+        {
+            "api": 1,
+            "query": query,
+        }
+    )
+    webbrowser.get("chrome").open(maps_url, new=2)
+    print(random.choice([f"{query} on Google Maps", "Maps loading..."]))
+    return True
