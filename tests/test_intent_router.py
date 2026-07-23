@@ -2,7 +2,7 @@ import unittest
 
 from ai.intents.defaults import create_builtin_registry
 from ai.intents.models import IntentResult
-from ai.intents.router import IntentRouter
+from ai.intents.router import CommandPrefixStrategy, IntentRouter
 
 
 class NoMatchStrategy:
@@ -50,6 +50,36 @@ class BrokenStrategy:
 
     def detect(self, message, registry):
         raise RuntimeError("strategy exploded")
+
+
+class CommandPrefixStrategyTests(unittest.TestCase):
+    def setUp(self):
+        self.registry = create_builtin_registry()
+        self.strategy = CommandPrefixStrategy()
+
+    def test_matches_intent_name_and_alias_at_start_of_message(self):
+        cases = (
+            ("maps London", "maps"),
+            ("debug on", "debug"),
+            ("repeat Mind the gap", "say"),
+            ("read aloud Platform nine", "say"),
+        )
+
+        for message, expected_intent in cases:
+            with self.subTest(message=message):
+                result = self.strategy.detect(message, self.registry)
+
+                self.assertEqual(result.intent.name, expected_intent)
+                self.assertEqual(result.confidence, 1.0)
+                self.assertEqual(result.strategy, "command_prefix")
+
+    def test_does_not_match_trigger_inside_message(self):
+        result = self.strategy.detect(
+            "please say hello",
+            self.registry,
+        )
+
+        self.assertFalse(result.matched)
 
 
 class IntentRouterTests(unittest.TestCase):

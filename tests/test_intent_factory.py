@@ -51,6 +51,20 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertEqual(result.strategy, "exact_match")
         generate.assert_not_called()
 
+    @patch("ai.intents.factory.ollama_provider.generate")
+    def test_command_prefix_skips_enabled_classifier(self, generate):
+        with patch.dict(
+            os.environ,
+            {"CODA_INTENT_LOCAL_CLASSIFIER": "1"},
+        ):
+            router = create_builtin_router()
+            result = router.route("maps London")
+
+        self.assertEqual(result.intent.name, "maps")
+        self.assertEqual(result.strategy, "command_prefix")
+        self.assertTrue(result.accepted)
+        generate.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
