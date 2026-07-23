@@ -1,10 +1,28 @@
-from ai.intents import IntentRequest
+from ai.intents import Intent, IntentParameter, IntentRequest
 
 import utils.llm_service as llm_service
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.speak_response as speak_response
 import utils.stt_service as stt_service
+
+
+INTENT = Intent(
+    name="debug",
+    description="View or change CODA's runtime debugging configuration.",
+    parameters=(
+        IntentParameter(
+            name="action",
+            description="The debug action: on, off, status, or reload.",
+            required=False,
+        ),
+    ),
+    aliases=(
+        "debug mode",
+        "diagnostics",
+        "diagnostic mode",
+    ),
+)
 
 
 def _get_action(message: str) -> str:

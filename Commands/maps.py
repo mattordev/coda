@@ -2,7 +2,25 @@ import random
 from urllib.parse import urlencode
 import webbrowser
 
-from ai.intents import IntentRequest
+from ai.intents import Intent, IntentParameter, IntentRequest
+
+
+INTENT = Intent(
+    name="maps",
+    description="Search for a place or get directions using Google Maps.",
+    parameters=(
+        IntentParameter(
+            name="query",
+            description="The place, address or destination to search for.",
+        ),
+    ),
+    aliases=(
+        "map",
+        "directions",
+        "navigate",
+        "route",
+    ),
+)
 
 
 def extract_query_from_command(message: str) -> str:

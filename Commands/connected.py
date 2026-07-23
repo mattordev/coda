@@ -1,8 +1,21 @@
 import random
 import socket
 
-from ai.intents import IntentRequest
+from ai.intents import Intent, IntentRequest
 import utils.speak_response as speak
+
+INTENT = Intent(
+    name="connected",
+    description="Checks if CODA can reach the internet.",
+    aliases=(
+        "connection",
+        "connectivity",
+        "online",
+        "offline",
+        "internet status",
+        "network status",
+    ),
+)
 
 
 def is_connected():

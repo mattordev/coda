@@ -1,6 +1,22 @@
-from ai.intents import IntentRequest
+from ai.intents import Intent, IntentParameter, IntentRequest
 
 import utils.speak_response as speak
+
+
+INTENT = Intent(
+    name="say",
+    description="Ask CODA to say something.",
+    parameters=(
+        IntentParameter(
+            name="message",
+            description="The thing that you want CODA to say.",
+        ),
+    ),
+    aliases=(
+        "repeat",
+        "read aloud",
+    ),
+)
 
 
 def _extract_message(request: IntentRequest) -> str:

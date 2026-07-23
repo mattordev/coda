@@ -2,8 +2,19 @@ import platform
 import time
 # import memory_profiler as profiler
 
-from ai.intents import IntentRequest
+from ai.intents import Intent, IntentRequest
 import utils.speak_response as speak
+
+
+INTENT = Intent(
+    name="status",
+    description="Report information about the system running CODA.",
+    aliases=(
+        "system status",
+        "system information",
+        "system report",
+    ),
+)
 
 # TODO: have the program ask if the user wants to know about the system status, or the program status.
 # Also implement someway to check the system health (temp, power usage etc.)
