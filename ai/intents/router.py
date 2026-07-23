@@ -37,6 +37,52 @@ class ExactMatchStrategy:
         )
 
 
+class CommandPrefixStrategy:
+    name = "command_prefix"
+
+    def detect(
+        self,
+        message: str,
+        registry: IntentRegistry,
+    ) -> IntentResult:
+        """Match a message beginning with an intent name or alias."""
+        normalized_message = " ".join(
+            message.strip().lower().split()
+        )
+        matches = []
+
+        for intent in registry.all():
+            triggers = (
+                intent.name,
+                *intent.aliases,
+            )
+
+            for trigger in triggers:
+                normalized_trigger = " ".join(
+                    trigger.strip().lower().split()
+                )
+                prefix = normalized_trigger + " "
+
+                if normalized_message.startswith(prefix):
+                    matches.append(
+                        (len(normalized_trigger), intent)
+                    )
+
+        if not matches:
+            return IntentResult(intent=None)
+
+        _, intent = max(
+            matches,
+            key=lambda match: match[0],
+        )
+
+        return IntentResult(
+            intent=intent,
+            confidence=1.0,
+            strategy=self.name,
+        )
+
+
 class IntentRouter:
     def __init__(
         self,

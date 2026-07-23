@@ -4,7 +4,11 @@ from ai.providers import ollama as ollama_provider
 
 from .defaults import create_builtin_registry
 from .local_classifier import LocalClassifierStrategy
-from .router import ExactMatchStrategy, IntentRouter
+from .router import (
+    CommandPrefixStrategy,
+    ExactMatchStrategy,
+    IntentRouter,
+)
 
 
 def _local_classifier_enabled() -> bool:
@@ -19,7 +23,10 @@ def _local_classifier_enabled() -> bool:
 
 def create_builtin_router() -> IntentRouter:
     """Create CODA's router with its configured detection strategies."""
-    strategies = [ExactMatchStrategy()]
+    strategies = [
+        ExactMatchStrategy(),
+        CommandPrefixStrategy(),
+    ]
 
     if _local_classifier_enabled():
         strategies.append(

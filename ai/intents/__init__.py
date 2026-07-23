@@ -4,10 +4,16 @@ from .factory import create_builtin_router
 from .local_classifier import LocalClassifierStrategy
 from .models import Intent, IntentParameter, IntentRequest, IntentResult
 from .registry import IntentRegistry
-from .router import DetectionStrategy, ExactMatchStrategy, IntentRouter
+from .router import (
+    CommandPrefixStrategy,
+    DetectionStrategy,
+    ExactMatchStrategy,
+    IntentRouter,
+)
 
 __all__ = (
     "BUILTIN_INTENTS",
+    "CommandPrefixStrategy",
     "DetectionStrategy",
     "ExactMatchStrategy",
     "Intent",
