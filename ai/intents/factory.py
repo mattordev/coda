@@ -9,6 +9,7 @@ from .router import (
     ExactMatchStrategy,
     IntentRouter,
 )
+from .registry import IntentRegistry
 
 
 def _local_classifier_enabled() -> bool:
@@ -21,8 +22,8 @@ def _local_classifier_enabled() -> bool:
     return value in ("1", "true", "yes", "on")
 
 
-def create_builtin_router() -> IntentRouter:
-    """Create CODA's router with its configured detection strategies."""
+def create_router(registry: IntentRegistry) -> IntentRouter:
+    """Create CODA's router using the supplied intent registry."""
     strategies = [
         ExactMatchStrategy(),
         CommandPrefixStrategy(),
@@ -34,6 +35,11 @@ def create_builtin_router() -> IntentRouter:
         )
 
     return IntentRouter(
-        registry=create_builtin_registry(),
+        registry=registry,
         strategies=tuple(strategies),
     )
+
+
+def create_builtin_router() -> IntentRouter:
+    """Create CODA's router using the old legacy built-in registry."""
+    return create_router(create_builtin_registry())

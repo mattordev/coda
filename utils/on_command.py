@@ -1,12 +1,18 @@
 import os
 from dataclasses import dataclass
 
-from ai.intents import IntentDispatcher, create_builtin_router
+from ai.intents import (
+    IntentDispatcher,
+    create_builtin_router,
+    create_command_registry,
+    create_router,
+)
 from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
 
 
 _intent_router = create_builtin_router()
+_intent_registry = None
 
 
 @dataclass
@@ -25,11 +31,23 @@ def run(message, commands, debug=False):
     return on_command(message, commands, debug=debug)
 
 
+def configure_intent_router(commands):
+    """Configure intent routing from the loaded command modules."""
+    global _intent_registry
+    global _intent_router
+
+    _intent_registry = create_command_registry(commands)
+    _intent_router = create_router(_intent_registry)
+
+
 def reload_config():
     global _intent_router
 
     llm_service.reload_config()
-    _intent_router = create_builtin_router()
+    if _intent_registry is None:
+        _intent_router = create_builtin_router()
+    else:
+        _intent_router = create_router(_intent_registry)
 
 
 def _llm_fallback_enabled():
