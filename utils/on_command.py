@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 from ai.intents import (
     IntentDispatcher,
-    create_builtin_router,
     create_command_registry,
     create_router,
 )
@@ -11,7 +10,7 @@ from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
 
 
-_intent_router = create_builtin_router()
+_intent_router = None
 _intent_registry = None
 
 
@@ -45,9 +44,9 @@ def reload_config():
 
     llm_service.reload_config()
     if _intent_registry is None:
-        _intent_router = create_builtin_router()
-    else:
-        _intent_router = create_router(_intent_registry)
+        raise RuntimeError("Intent router has not been configured.")
+
+    _intent_router = create_router(_intent_registry)
 
 
 def _llm_fallback_enabled():
@@ -60,6 +59,9 @@ def _dispatch_intent(
     debug=False,
 ) -> CommandResult | None:
     """Route and dispatch an accepted intent or return None."""
+    if _intent_router is None:
+        raise RuntimeError("Intent router has not been configured.")
+
     result = _intent_router.route(message)
 
     if debug:
