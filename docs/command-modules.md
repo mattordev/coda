@@ -16,6 +16,10 @@ INTENT = Intent(
     name="greet",
     description="Greet the user.",
     aliases=("hello", "say hello"),
+    examples=(
+        "Hello there.",
+        "Please greet me.",
+    ),
 )
 
 
@@ -27,6 +31,10 @@ def run(request: IntentRequest) -> bool:
 The filename must match the canonical intent name: an intent named `greet`
 belongs in `greet.py`. Restart CODA after adding or removing a command. The
 command cache is rebuilt automatically when the files in `Commands` change.
+
+Use `aliases` for alternate command triggers that may prefix additional
+content. Use `examples` for complete natural-language phrasings that should
+deterministically select the intent without calling the local classifier.
 
 ## Module Contract
 
