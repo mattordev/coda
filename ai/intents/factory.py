@@ -5,6 +5,7 @@ from ai.providers import ollama as ollama_provider
 from .local_classifier import LocalClassifierStrategy
 from .router import (
     CommandPrefixStrategy,
+    ExampleMatchStrategy,
     ExactMatchStrategy,
     IntentRouter,
 )
@@ -25,6 +26,7 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
     """Create CODA's router using the supplied intent registry."""
     strategies = [
         ExactMatchStrategy(),
+        ExampleMatchStrategy(),
         CommandPrefixStrategy(),
     ]
 

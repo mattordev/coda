@@ -43,6 +43,7 @@ def _build_intent_catalog(
                 "name": intent.name,
                 "description": intent.description,
                 "aliases": list(intent.aliases),
+                "examples": list(intent.examples),
                 "parameters": parameters,
             }
         )

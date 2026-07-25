@@ -37,6 +37,27 @@ class ExactMatchStrategy:
         )
 
 
+class ExampleMatchStrategy:
+    name = "example_match"
+
+    def detect(
+        self,
+        message: str,
+        registry: IntentRegistry,
+    ) -> IntentResult:
+        """Match a complete message against a declared intent example."""
+        intent = registry.get_by_example(message)
+
+        if intent is None:
+            return IntentResult(intent=None)
+
+        return IntentResult(
+            intent=intent,
+            confidence=1.0,
+            strategy=self.name,
+        )
+
+
 class CommandPrefixStrategy:
     name = "command_prefix"
 

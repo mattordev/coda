@@ -7,6 +7,7 @@ from .registry import IntentRegistry
 from .router import (
     CommandPrefixStrategy,
     DetectionStrategy,
+    ExampleMatchStrategy,
     ExactMatchStrategy,
     IntentRouter,
 )
@@ -14,6 +15,7 @@ from .router import (
 __all__ = (
     "CommandPrefixStrategy",
     "DetectionStrategy",
+    "ExampleMatchStrategy",
     "ExactMatchStrategy",
     "Intent",
     "IntentCommand",

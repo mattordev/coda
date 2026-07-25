@@ -14,6 +14,7 @@ class Intent:
     description: str
     parameters: tuple[IntentParameter, ...] = ()
     aliases: tuple[str, ...] = ()
+    examples: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

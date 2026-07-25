@@ -15,6 +15,12 @@ INTENT = Intent(
         "internet status",
         "network status",
     ),
+    examples=(
+        "Are we connected?",
+        "Are we online?",
+        "Do we have an internet connection?",
+        "Is the internet available?",
+    ),
 )
 
 
