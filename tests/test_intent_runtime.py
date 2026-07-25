@@ -1,15 +1,15 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from ai.intents.defaults import create_builtin_registry
-from ai.intents.models import IntentResult
+from ai.intents.models import Intent, IntentResult
 import utils.on_command as command_runtime
 
 
 class FakeCommand:
     """Record structured requests and return a configured result."""
 
-    def __init__(self, result=True):
+    def __init__(self, intent, result=True):
+        self.INTENT = intent
         self.result = result
         self.requests = []
 
@@ -21,12 +21,21 @@ class FakeCommand:
 class IntentRuntimeTests(unittest.TestCase):
     @patch.object(command_runtime, "route_request")
     def test_prefix_intent_dispatches_without_llm_fallback(self, route_request):
-        command = FakeCommand()
-
-        result = command_runtime.on_command(
-            "say Hello World",
-            {"say": command},
+        command = FakeCommand(
+            Intent(
+                name="say",
+                description="Say something.",
+            )
         )
+        commands = {"say": command}
+
+        with patch.object(command_runtime, "_intent_registry", None), \
+                patch.object(command_runtime, "_intent_router", None):
+            command_runtime.configure_intent_router(commands)
+            result = command_runtime.on_command(
+                "say Hello World",
+                commands,
+            )
 
         self.assertTrue(result.handled)
         self.assertEqual(result.command_matches, ("say",))
@@ -37,15 +46,18 @@ class IntentRuntimeTests(unittest.TestCase):
 
     @patch.object(command_runtime, "route_request")
     def test_classifier_intent_dispatches_structured_request(self, route_request):
-        registry = create_builtin_registry()
+        maps_intent = Intent(
+            name="maps",
+            description="Open a map.",
+        )
         router = Mock()
         router.route.return_value = IntentResult(
-            intent=registry.get("maps"),
+            intent=maps_intent,
             confidence=0.9,
             strategy="local_classifier",
             accepted=True,
         )
-        command = FakeCommand()
+        command = FakeCommand(maps_intent)
 
         with patch.object(command_runtime, "_intent_router", router):
             result = command_runtime.on_command(
@@ -96,15 +108,36 @@ class IntentRuntimeTests(unittest.TestCase):
 
     @patch.object(command_runtime, "route_request")
     def test_failed_command_does_not_use_llm_fallback(self, route_request):
-        command = FakeCommand(result=False)
-
-        result = command_runtime.on_command(
-            "connected",
-            {"connected": command},
+        command = FakeCommand(
+            Intent(
+                name="connected",
+                description="Check connectivity.",
+            ),
+            result=False,
         )
+        commands = {"connected": command}
+
+        with patch.object(command_runtime, "_intent_registry", None), \
+                patch.object(command_runtime, "_intent_router", None):
+            command_runtime.configure_intent_router(commands)
+            result = command_runtime.on_command(
+                "connected",
+                commands,
+            )
 
         self.assertFalse(result.handled)
         self.assertEqual(len(command.requests), 1)
+        route_request.assert_not_called()
+
+    @patch.object(command_runtime, "route_request")
+    def test_requires_configured_intent_router(self, route_request):
+        with patch.object(command_runtime, "_intent_router", None):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Intent router has not been configured",
+            ):
+                command_runtime.on_command("say hello", {})
+
         route_request.assert_not_called()
 
     def test_empty_message_does_not_route_or_dispatch(self):
