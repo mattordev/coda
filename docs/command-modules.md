@@ -77,6 +77,7 @@ CODA validates command modules while configuring the intent router. Startup
 fails with a clear error when:
 
 - `INTENT` is missing or is not an `Intent` instance.
+- The filename and canonical intent name do not match.
 - `run` is missing or is not callable.
 - An intent name or alias conflicts with another command.
 

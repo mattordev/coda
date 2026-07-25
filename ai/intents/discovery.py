@@ -20,6 +20,12 @@ def create_command_registry(
                 f"Command module '{module_name}' must expose an INTENT."
             )
 
+        if module_name != intent.name:
+            raise ValueError(
+                f"Command module '{module_name}' exposes intent "
+                f"'{intent.name}'. The module name and intent name must match."
+            )
+
         if not callable(run):
             raise TypeError(
                 f"Command module '{module_name}' must expose a callable run()."

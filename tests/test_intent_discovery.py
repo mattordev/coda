@@ -99,6 +99,21 @@ class IntentDiscoveryTests(unittest.TestCase):
         ):
             create_command_registry(commands)
 
+    def test_rejects_mismatched_module_and_intent_names(self):
+        commands = {
+            "weather": _command_module(
+                "weather",
+                intent=Intent("forecast", "Report the weather."),
+                run=lambda request: True,
+            ),
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "module name and intent name must match",
+        ):
+            create_command_registry(commands)
+
     def test_rejects_module_without_run(self):
         commands = {
             "missing": _command_module(
@@ -130,14 +145,14 @@ class IntentDiscoveryTests(unittest.TestCase):
 
     def test_rejects_duplicate_intent_names(self):
         commands = {
-            "first": _command_module(
-                "first",
+            "shared": _command_module(
+                "shared",
                 Intent("shared", "First command."),
                 lambda request: True,
             ),
-            "second": _command_module(
-                "second",
-                Intent("shared", "Second command."),
+            " SHARED ": _command_module(
+                " SHARED ",
+                Intent(" SHARED ", "Second command."),
                 lambda request: True,
             ),
         }
