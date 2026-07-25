@@ -26,6 +26,20 @@ class IntentRegistryTests(unittest.TestCase):
 
         self.assertIs(result, self.intent)
 
+    def test_gets_intent_by_normalized_example(self):
+        intent = Intent(
+            name="time",
+            description="Report the current time.",
+            examples=("What's the time?",),
+        )
+        self.registry.register(intent)
+
+        result = self.registry.get_by_example(
+            "  WHAT'S   THE TIME!  "
+        )
+
+        self.assertIs(result, intent)
+
     def test_returns_none_for_unknown_name(self):
         self.assertIsNone(self.registry.get("unknown"))
 
@@ -49,6 +63,33 @@ class IntentRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate alias"):
             self.registry.register(intent)
+
+    def test_rejects_duplicate_examples_after_normalization(self):
+        intent = Intent(
+            name="time",
+            description="Report the current time.",
+            examples=("Current time.", " CURRENT   TIME! "),
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate example"):
+            self.registry.register(intent)
+
+    def test_rejects_example_registered_by_another_intent(self):
+        self.registry.register(
+            Intent(
+                name="time",
+                description="Report the current time.",
+                examples=("Tell me the time.",),
+            )
+        )
+        conflicting = Intent(
+            name="clock",
+            description="Report the clock.",
+            examples=(" TELL ME THE TIME! ",),
+        )
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            self.registry.register(conflicting)
 
     def test_rejects_alias_that_matches_existing_intent_name(self):
         self.registry.register(self.intent)
@@ -80,6 +121,7 @@ class IntentRegistryTests(unittest.TestCase):
             name="connected",
             description="Check internet connectivity.",
             aliases=("online", "map"),
+            examples=("Are we connected?",),
         )
 
         with self.assertRaises(ValueError):
@@ -87,6 +129,9 @@ class IntentRegistryTests(unittest.TestCase):
 
         self.assertIsNone(self.registry.get("connected"))
         self.assertIsNone(self.registry.get("online"))
+        self.assertIsNone(
+            self.registry.get_by_example("Are we connected?")
+        )
 
 if __name__ == "__main__":
     unittest.main()

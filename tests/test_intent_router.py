@@ -1,7 +1,12 @@
 import unittest
 
-from ai.intents.models import IntentResult
-from ai.intents.router import CommandPrefixStrategy, IntentRouter
+from ai.intents.models import Intent, IntentResult
+from ai.intents.registry import IntentRegistry
+from ai.intents.router import (
+    CommandPrefixStrategy,
+    ExampleMatchStrategy,
+    IntentRouter,
+)
 from tests.intent_fixtures import create_test_registry
 
 
@@ -78,6 +83,37 @@ class CommandPrefixStrategyTests(unittest.TestCase):
             "please say hello",
             self.registry,
         )
+
+        self.assertFalse(result.matched)
+
+
+class ExampleMatchStrategyTests(unittest.TestCase):
+    def setUp(self):
+        self.intent = Intent(
+            name="time",
+            description="Report the current time.",
+            examples=(
+                "What's the time?",
+                "Tell me the time.",
+                "Current time.",
+                "What time is it?",
+            ),
+        )
+        self.registry = IntentRegistry()
+        self.registry.register(self.intent)
+        self.strategy = ExampleMatchStrategy()
+
+    def test_maps_declared_phrasings_to_same_intent(self):
+        for message in self.intent.examples:
+            with self.subTest(message=message):
+                result = self.strategy.detect(message, self.registry)
+
+                self.assertIs(result.intent, self.intent)
+                self.assertEqual(result.confidence, 1.0)
+                self.assertEqual(result.strategy, "example_match")
+
+    def test_returns_unmatched_result_for_unknown_phrase(self):
+        result = self.strategy.detect("Set an alarm.", self.registry)
 
         self.assertFalse(result.matched)
 

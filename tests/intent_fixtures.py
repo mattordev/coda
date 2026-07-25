@@ -6,6 +6,7 @@ TEST_INTENTS = (
         name="maps",
         description="Open a map.",
         aliases=("map", "navigate"),
+        examples=("Where is the station?",),
     ),
     Intent(
         name="connected",

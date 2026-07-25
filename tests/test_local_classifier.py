@@ -41,6 +41,10 @@ class LocalClassifierStrategyTests(unittest.TestCase):
             [intent["name"] for intent in payload["available_intents"]],
             [intent.name for intent in self.registry.all()],
         )
+        self.assertEqual(
+            payload["available_intents"][0]["examples"],
+            ["Where is the station?"],
+        )
         self.assertIn("parameters", payload["available_intents"][0])
 
     def test_returns_classified_intent_and_confidence(self):
