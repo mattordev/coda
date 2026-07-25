@@ -1,11 +1,6 @@
 import unittest
 
-from ai.intents import (
-    BUILTIN_INTENTS,
-    Intent,
-    IntentRegistry,
-    create_builtin_registry,
-)
+from ai.intents import Intent, IntentRegistry
 
 
 class IntentRegistryTests(unittest.TestCase):
@@ -92,25 +87,6 @@ class IntentRegistryTests(unittest.TestCase):
 
         self.assertIsNone(self.registry.get("connected"))
         self.assertIsNone(self.registry.get("online"))
-
-
-class BuiltinIntentTests(unittest.TestCase):
-    def test_factory_registers_all_builtin_intents(self):
-        registry = create_builtin_registry()
-
-        self.assertEqual(registry.all(), BUILTIN_INTENTS)
-
-    def test_factory_resolves_all_builtin_names_and_aliases(self):
-        registry = create_builtin_registry()
-
-        for intent in BUILTIN_INTENTS:
-            with self.subTest(name=intent.name):
-                self.assertIs(registry.get(intent.name), intent)
-
-            for alias in intent.aliases:
-                with self.subTest(name=intent.name, alias=alias):
-                    self.assertIs(registry.get(alias), intent)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,8 @@
 import unittest
 
-from ai.intents.defaults import create_builtin_registry
 from ai.intents.models import IntentResult
 from ai.intents.router import CommandPrefixStrategy, IntentRouter
+from tests.intent_fixtures import create_test_registry
 
 
 class NoMatchStrategy:
@@ -54,7 +54,7 @@ class BrokenStrategy:
 
 class CommandPrefixStrategyTests(unittest.TestCase):
     def setUp(self):
-        self.registry = create_builtin_registry()
+        self.registry = create_test_registry()
         self.strategy = CommandPrefixStrategy()
 
     def test_matches_intent_name_and_alias_at_start_of_message(self):
@@ -87,7 +87,7 @@ class IntentRouterTests(unittest.TestCase):
 
     def setUp(self):
         # Give every test a fresh registry and router so state cannot leak.
-        self.registry = create_builtin_registry()
+        self.registry = create_test_registry()
         self.router = IntentRouter(self.registry)
 
     def test_routes_canonical_intent_name(self):

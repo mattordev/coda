@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import patch
 
-from ai.intents.defaults import create_builtin_registry
 from ai.intents.models import IntentRequest
 from commands import debug as debug_command
 from commands import maps as maps_command
@@ -10,10 +9,14 @@ from commands import say as say_command
 
 def _create_request(intent_name, message):
     """Create a structured request for a built-in command."""
-    registry = create_builtin_registry()
+    intents = {
+        debug_command.INTENT.name: debug_command.INTENT,
+        maps_command.INTENT.name: maps_command.INTENT,
+        say_command.INTENT.name: say_command.INTENT,
+    }
 
     return IntentRequest(
-        intent=registry.get(intent_name),
+        intent=intents[intent_name],
         message=message,
         confidence=1.0,
         strategy="test",

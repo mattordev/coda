@@ -9,6 +9,7 @@ from ai.intents import (
     create_command_registry,
     create_router,
 )
+from commands import connected, debug, maps, say, status
 
 
 _MISSING = object()
@@ -32,6 +33,20 @@ def _command_module(
 
 
 class IntentDiscoveryTests(unittest.TestCase):
+    def test_registers_existing_command_modules(self):
+        modules = (connected, debug, maps, say, status)
+        commands = {
+            module.INTENT.name: module
+            for module in modules
+        }
+
+        registry = create_command_registry(commands)
+
+        self.assertEqual(
+            tuple(intent.name for intent in registry.all()),
+            ("connected", "debug", "maps", "say", "status"),
+        )
+
     def test_creates_registry_from_command_modules(self):
         maps_intent = Intent(
             name="maps",

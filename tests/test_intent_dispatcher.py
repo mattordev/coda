@@ -1,9 +1,9 @@
 import unittest
 
-from ai.intents.defaults import create_builtin_registry
 from ai.intents.dispatcher import IntentDispatcher
 from ai.intents.models import IntentRequest, IntentResult
 from ai.intents.router import IntentRouter
+from tests.intent_fixtures import create_test_registry
 
 
 class FakeIntentCommand:
@@ -20,7 +20,7 @@ class FakeIntentCommand:
 
 class IntentRequestTests(unittest.TestCase):
     def setUp(self):
-        self.registry = create_builtin_registry()
+        self.registry = create_test_registry()
         self.maps_intent = self.registry.get("maps")
 
     def test_rejects_empty_message(self):
@@ -74,7 +74,7 @@ class IntentRequestTests(unittest.TestCase):
 
 class IntentDispatcherTests(unittest.TestCase):
     def setUp(self):
-        registry = create_builtin_registry()
+        registry = create_test_registry()
         self.maps_request = IntentRequest(
             intent=registry.get("maps"),
             message="find the station",
@@ -98,7 +98,7 @@ class IntentDispatcherTests(unittest.TestCase):
         self.assertEqual(command.requests, [self.maps_request])
 
     def test_dispatches_intent_selected_by_router(self):
-        registry = create_builtin_registry()
+        registry = create_test_registry()
         router = IntentRouter(registry)
         command = FakeIntentCommand()
         dispatcher = IntentDispatcher({"maps": command})

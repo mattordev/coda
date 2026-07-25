@@ -1,9 +1,9 @@
 import json
 import unittest
 
-from ai.intents.defaults import create_builtin_registry
 from ai.intents.local_classifier import LocalClassifierStrategy
 from ai.intents.router import ExactMatchStrategy, IntentRouter
+from tests.intent_fixtures import create_test_registry
 
 
 class FakeGenerator:
@@ -21,7 +21,7 @@ class FakeGenerator:
 
 class LocalClassifierStrategyTests(unittest.TestCase):
     def setUp(self):
-        self.registry = create_builtin_registry()
+        self.registry = create_test_registry()
 
     def test_builds_prompt_with_message_and_registered_intents(self):
         generator = FakeGenerator(
