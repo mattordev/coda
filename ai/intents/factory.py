@@ -2,7 +2,6 @@ import os
 
 from ai.providers import ollama as ollama_provider
 
-from .defaults import create_builtin_registry
 from .local_classifier import LocalClassifierStrategy
 from .router import (
     CommandPrefixStrategy,
@@ -38,8 +37,3 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
         registry=registry,
         strategies=tuple(strategies),
     )
-
-
-def create_builtin_router() -> IntentRouter:
-    """Create CODA's router using the old legacy built-in registry."""
-    return create_router(create_builtin_registry())
