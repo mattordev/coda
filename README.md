@@ -116,7 +116,8 @@ Notes:
 
 Commands are self-registering Python modules that own their intent metadata
 and execution function. See [Command Modules](docs/command-modules.md) for the
-drop-in template and validation rules.
+drop-in template and validation rules. See
+[Intent Routing](docs/intent-routing.md) for the detection and dispatcher flow.
 
 ---
 
