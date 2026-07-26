@@ -1,12 +1,32 @@
+from ai.intents import Intent, IntentParameter, IntentRequest
+
+import utils.llm_service as llm_service
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.speak_response as speak_response
 import utils.stt_service as stt_service
-import utils.llm_service as llm_service
 
 
-def _get_action(args):
-    tokens = [token.lower() for token in args[1:]]
+INTENT = Intent(
+    name="debug",
+    description="View or change CODA's runtime debugging configuration.",
+    parameters=(
+        IntentParameter(
+            name="action",
+            description="The debug action: on, off, status, or reload.",
+            required=False,
+        ),
+    ),
+    aliases=(
+        "debug mode",
+        "diagnostics",
+        "diagnostic mode",
+    ),
+)
+
+
+def _get_action(message: str) -> str:
+    tokens = message.lower().split()[1:]
 
     if tokens and tokens[0] == "mode":
         tokens = tokens[1:]
@@ -42,8 +62,8 @@ def _reload_runtime_config():
     return True
 
 
-def run(args):
-    action = _get_action(args)
+def run(request: IntentRequest) -> bool:
+    action = _get_action(request.message)
 
     if action in ("on", "enable", "enabled", "true", "1"):
         runtime_state.set_debug_enabled(True)

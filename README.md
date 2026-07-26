@@ -112,6 +112,13 @@ Notes:
 - Optional Whisper tuning: `CODA_WHISPER_DEVICE`, `CODA_WHISPER_COMPUTE_TYPE`, `CODA_WHISPER_BEAM_SIZE`, and `CODA_WHISPER_VAD_FILTER`.
 - `CODA_SYSTEM_PROMPT` lets you override CODA's default assistant style without editing code. Run `debug reload` after changing it.
 
+### Command Development
+
+Commands are self-registering Python modules that own their intent metadata
+and execution function. See [Command Modules](docs/command-modules.md) for the
+drop-in template and validation rules. See
+[Intent Routing](docs/intent-routing.md) for the detection and dispatcher flow.
+
 ---
 
 #### Licence

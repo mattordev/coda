@@ -377,6 +377,8 @@ def main():
         except FileNotFoundError:
             run_first_time_setup()
 
+    command.configure_intent_router(commands)
+
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 

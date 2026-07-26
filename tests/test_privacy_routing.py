@@ -4,7 +4,7 @@ from unittest import mock
 from ai.providers import registry
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
-from ai.router import core
+from ai.llm_router import core
 import utils.llm_service as llm_service
 
 
