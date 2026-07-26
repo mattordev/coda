@@ -30,6 +30,8 @@ jobs:
 
             - name: Analysing the code with pylint
               shell: bash
+              env:
+                  PYTHONPATH: ${{ github.workspace }}
               run: |
                   set -euo pipefail
 
@@ -39,7 +41,8 @@ jobs:
                     mapfile -t files < <(git diff --name-only --diff-filter=ACMRTUXB "${GITHUB_EVENT_BEFORE}" "${GITHUB_SHA}" -- '*.py')
                   else
                     default_branch="${{ github.event.repository.default_branch }}"
-                    git fetch origin "${default_branch}" --depth=1
+                    git fetch origin \
+                      "${default_branch}:refs/remotes/origin/${default_branch}"
                     base_commit="$(git merge-base "origin/${default_branch}" HEAD)"
                     mapfile -t files < <(git diff --name-only --diff-filter=ACMRTUXB "${base_commit}" HEAD -- '*.py')
                   fi

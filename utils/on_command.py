@@ -1,9 +1,17 @@
 import os
-import re
 from dataclasses import dataclass
 
+from ai.intents import (
+    IntentDispatcher,
+    create_command_registry,
+    create_router,
+)
+from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
-from ai.router.core import route_request
+
+
+_intent_router = None
+_intent_registry = None
 
 
 @dataclass
@@ -22,116 +30,156 @@ def run(message, commands, debug=False):
     return on_command(message, commands, debug=debug)
 
 
+def configure_intent_router(commands):
+    """Configure intent routing from the loaded command modules."""
+    global _intent_registry
+    global _intent_router
+
+    _intent_registry = create_command_registry(commands)
+    _intent_router = create_router(_intent_registry)
+
+
 def reload_config():
+    global _intent_router
+
     llm_service.reload_config()
+    if _intent_registry is None:
+        raise RuntimeError("Intent router has not been configured.")
 
-
-def _tokenize_message(message):
-    return re.findall(r"[a-z0-9']+", message.lower())
-
-
-def _ordered_matches(tokens, commands):
-    matched = []
-    for token in tokens:
-        if token in commands and token not in matched:
-            matched.append(token)
-    return matched
+    _intent_router = create_router(_intent_registry)
 
 
 def _llm_fallback_enabled():
     return llm_service.llm_fallback_enabled()
 
+
+def _dispatch_intent(
+    message,
+    commands,
+    debug=False,
+) -> CommandResult | None:
+    """Route and dispatch an accepted intent or return None."""
+    if _intent_router is None:
+        raise RuntimeError("Intent router has not been configured.")
+
+    result = _intent_router.route(message)
+
+    if debug:
+        print(
+            "[DEBUG - INTENT] "
+            f"intent={result.intent.name if result.intent else None}, "
+            f"confidence={result.confidence}, "
+            f"strategy={result.strategy}, "
+            f"accepted={result.accepted}, "
+            f"error={result.error}"
+        )
+
+    if not result.accepted:
+        return None
+
+    request = result.to_request(message)
+    dispatcher = IntentDispatcher(commands)
+    intent_name = request.intent.name
+
+    try:
+        executed = dispatcher.dispatch(request)
+    except Exception as exc:
+        print(f"Command '{intent_name}' raised an error: {exc}")
+        return CommandResult(handled=False)
+
+    if not executed:
+        print("Command failed to execute... Please try again!")
+
+    return CommandResult(
+        handled=executed,
+        command_matches=(intent_name,) if executed else (),
+    )
+
+
 def on_command(msg, commands, debug=False):
     normalized_message = msg.strip()
-    tokens = _tokenize_message(normalized_message)
 
     if debug:
         print(f"[DEBUG] Raw message: {msg}")
-        print(f"[DEBUG] Tokens: {tokens}")
-        print(f"[DEBUG] Available commands: {sorted(commands.keys())}")
+        print(
+            f"[DEBUG] Available commands: "
+            f"{sorted(commands.keys())}"
+        )
 
-    matched_commands = _ordered_matches(tokens, commands)
-
-    if debug:
-        print(f"[DEBUG] Matched commands: {matched_commands}")
-
-    if not matched_commands:
-        if not normalized_message:
-            if debug:
-                print("[DEBUG] No command content remained after normalization.")
-            return CommandResult(handled=False)
-
+    if not normalized_message:
         if debug:
-            print("[DEBUG] No command found. Routing message to LLM fallback.")
-
-        if not _llm_fallback_enabled():
-            return CommandResult(handled=False)
-
-        response_text, error = route_request(normalized_message)
-        
-        if not error and not response_text:
-            if debug:
-                print("[DEBUG] LLM returned an empty response. Retrying once.")
-            response_text, error = route_request(normalized_message)
-
-        if error:
-            if debug:
-                print(f"[DEBUG] LLM request failed: {error}")
-            return CommandResult(handled=False)
-
-        if not response_text:
-            if debug:
-                print("[DEBUG] LLM returned empty response twice. Keeping follow-up window open.")
-            return CommandResult(
-                handled=True,
-                used_llm=True,
-                open_follow_up=True,
+            print(
+                "[DEBUG] No command content remained "
+                "after normalization."
             )
 
-        print(f"CODA: {response_text}")
-        try:
-            import utils.speak_response as speak
-            speak.speak_response(response_text)
-        except Exception as exc:
-            if debug:
-                print(f"[DEBUG] Could not speak LLM response: {exc}")
+        return CommandResult(handled=False)
+
+    dispatch_result = _dispatch_intent(
+        normalized_message,
+        commands,
+        debug=debug,
+    )
+
+    if dispatch_result is not None:
+        return dispatch_result
+
+    if debug:
+        print(
+            "[DEBUG] No accepted intent. "
+            "Routing message to LLM fallback."
+        )
+
+    if not _llm_fallback_enabled():
+        return CommandResult(handled=False)
+
+    response_text, error = route_request(normalized_message)
+
+    if not error and not response_text:
+        if debug:
+            print(
+                "[DEBUG] LLM returned an empty response. "
+                "Retrying once."
+            )
+
+        response_text, error = route_request(normalized_message)
+
+    if error:
+        if debug:
+            print(f"[DEBUG] LLM request failed: {error}")
+
+        return CommandResult(handled=False)
+
+    if not response_text:
+        if debug:
+            print(
+                "[DEBUG] LLM returned empty response twice. "
+                "Keeping follow-up window open."
+            )
+
         return CommandResult(
             handled=True,
-            response_text=response_text,
             used_llm=True,
             open_follow_up=True,
         )
 
-    command_executed = False
-    executed_commands = []
+    print(f"CODA: {response_text}")
 
-    for cmd in matched_commands:
-        cmd_index = tokens.index(cmd)
-        args = tokens[cmd_index:]
+    try:
+        import utils.speak_response as speak
 
+        speak.speak_response(response_text)
+    except Exception as exc:
         if debug:
-            print(f"[DEBUG] Running command '{cmd}' with args: {args}")
-
-        try:
-            result = commands[cmd].run(args)
-        except Exception as exc:
-            print(f"Command '{cmd}' raised an error: {exc}")
-            continue
-
-        if debug:
-            print(f"[DEBUG] Command '{cmd}' returned: {result}")
-
-        if result:
-            command_executed = True
-            executed_commands.append(cmd)
-        else:
-            print("Command failed to execute... Please try again!")
+            print(f"[DEBUG] Could not speak LLM response: {exc}")
 
     return CommandResult(
-        handled=command_executed,
-        command_matches=tuple(executed_commands),
+        handled=True,
+        response_text=response_text,
+        used_llm=True,
+        open_follow_up=True,
     )
 
 
 def clear_terminal():
-    return os.system('cls')
+    return os.system("cls")

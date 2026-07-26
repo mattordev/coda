@@ -11,10 +11,11 @@ This document explains how the runtime in main.py initializes, switches modes, h
 3. Determine startup mode (manual or voice).
 4. Check for updates.
 5. Load command cache and wakewords, or run first-time setup.
-6. Start heartbeat thread for dashboard liveness.
-7. Start voice thread if voice mode is active.
-8. Enter the main loop.
-9. On exit, stop threads and terminate.
+6. Configure the intent router from the loaded command modules.
+7. Start heartbeat thread for dashboard liveness.
+8. Start voice thread if voice mode is active.
+9. Enter the main loop.
+10. On exit, stop threads and terminate.
 
 ## Detailed Flow
 
@@ -36,6 +37,9 @@ This document explains how the runtime in main.py initializes, switches modes, h
 - Else:
     - Try load_commands() and load_wakewords().
     - If files are missing, run run_first_time_setup().
+- Pass the loaded command modules to command.configure_intent_router().
+- Validate each module's INTENT metadata and run function.
+- Build the intent registry and configured detection strategies.
 
 ### 3) Background Threads
 
@@ -57,7 +61,12 @@ This document explains how the runtime in main.py initializes, switches modes, h
     - Start voice thread.
 - Require wakeword in manual command text.
 - Strip content before wakeword.
-- If command text remains, route it to command.run(...).
+- If command text remains, pass it to command.run(...).
+- Try exact, example and command-prefix intent rules.
+- Try the local classifier when enabled and no rule is accepted.
+- Dispatch an accepted intent to the matching command module.
+- Use the general LLM fallback when no intent is accepted and fallback is
+  enabled.
 
 #### Voice Mode Branch
 
@@ -86,4 +95,7 @@ This document explains how the runtime in main.py initializes, switches modes, h
 
 - Commands cache is validated against command files and rebuilt when stale.
 - Heartbeat thread is independent of manual or voice mode.
-- Manual and voice inputs converge into the same command router.
+- Manual and voice inputs converge into the same intent router and dispatcher.
+- Intent metadata lives in each command module rather than a central command
+  catalogue.
+- See [Intent Routing](intent-routing.md) for the strategy and dispatcher flow.
