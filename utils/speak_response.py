@@ -3,6 +3,7 @@ import os
 
 from elevenlabs import generate, play, set_api_key
 import utils.dashboard_state as dashboard_state
+import utils.runtime_state as runtime_state
 
 try:
     from dotenv import load_dotenv
@@ -77,7 +78,7 @@ def speak_response(response):
 
     if is_connected() and ensure_api_key_loaded():
         try:
-            print("Using Eleven labs for speech")
+            runtime_state.debug_print("Using Eleven labs for speech")
             audio = generate(
                 text=response,
                 voice="N2lVS1w4EtoT3dr4eOWO",
