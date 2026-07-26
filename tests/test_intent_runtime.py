@@ -45,6 +45,37 @@ class IntentRuntimeTests(unittest.TestCase):
         route_request.assert_not_called()
 
     @patch.object(command_runtime, "route_request")
+    def test_example_intent_dispatches_without_llm_fallback(
+        self,
+        route_request,
+    ):
+        command = FakeCommand(
+            Intent(
+                name="connected",
+                description="Check connectivity.",
+                examples=("Are we connected?",),
+            )
+        )
+        commands = {"connected": command}
+
+        with patch.object(command_runtime, "_intent_registry", None), \
+                patch.object(command_runtime, "_intent_router", None):
+            command_runtime.configure_intent_router(commands)
+            result = command_runtime.on_command(
+                "Are we connected?",
+                commands,
+            )
+
+        self.assertTrue(result.handled)
+        self.assertEqual(result.command_matches, ("connected",))
+        self.assertEqual(len(command.requests), 1)
+        self.assertEqual(
+            command.requests[0].strategy,
+            "example_match",
+        )
+        route_request.assert_not_called()
+
+    @patch.object(command_runtime, "route_request")
     def test_classifier_intent_dispatches_structured_request(self, route_request):
         maps_intent = Intent(
             name="maps",
@@ -105,6 +136,30 @@ class IntentRuntimeTests(unittest.TestCase):
             "tell me something interesting"
         )
         speak_response.assert_called_once_with("General response")
+
+    @patch.object(command_runtime, "route_request")
+    @patch.object(
+        command_runtime,
+        "_llm_fallback_enabled",
+        return_value=False,
+    )
+    def test_unknown_message_is_unhandled_when_llm_fallback_is_disabled(
+        self,
+        _fallback_enabled,
+        route_request,
+    ):
+        router = Mock()
+        router.route.return_value = IntentResult(intent=None)
+
+        with patch.object(command_runtime, "_intent_router", router):
+            result = command_runtime.on_command(
+                "tell me something interesting",
+                {},
+            )
+
+        self.assertFalse(result.handled)
+        self.assertFalse(result.used_llm)
+        route_request.assert_not_called()
 
     @patch.object(command_runtime, "route_request")
     def test_failed_command_does_not_use_llm_fallback(self, route_request):

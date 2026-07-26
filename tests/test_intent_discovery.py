@@ -47,6 +47,34 @@ class IntentDiscoveryTests(unittest.TestCase):
             ("connected", "debug", "maps", "say", "status"),
         )
 
+    def test_routes_every_existing_command_phrase_to_its_owner(self):
+        modules = (connected, debug, maps, say, status)
+        commands = {
+            module.INTENT.name: module
+            for module in modules
+        }
+        registry = create_command_registry(commands)
+
+        with patch.dict(
+            os.environ,
+            {"CODA_INTENT_LOCAL_CLASSIFIER": "0"},
+        ):
+            router = create_router(registry)
+
+        for intent in registry.all():
+            phrases = (
+                intent.name,
+                *intent.aliases,
+                *intent.examples,
+            )
+
+            for phrase in phrases:
+                with self.subTest(intent=intent.name, phrase=phrase):
+                    result = router.route(phrase)
+
+                    self.assertIs(result.intent, intent)
+                    self.assertTrue(result.accepted)
+
     def test_creates_registry_from_command_modules(self):
         maps_intent = Intent(
             name="maps",
