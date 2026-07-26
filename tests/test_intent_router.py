@@ -79,12 +79,16 @@ class CommandPrefixStrategyTests(unittest.TestCase):
                 self.assertEqual(result.strategy, "command_prefix")
 
     def test_does_not_match_trigger_inside_message(self):
-        result = self.strategy.detect(
+        messages = (
             "please say hello",
-            self.registry,
+            "What's the status of that project?",
         )
 
-        self.assertFalse(result.matched)
+        for message in messages:
+            with self.subTest(message=message):
+                result = self.strategy.detect(message, self.registry)
+
+                self.assertFalse(result.matched)
 
 
 class ExampleMatchStrategyTests(unittest.TestCase):
