@@ -1,5 +1,7 @@
 import os
 
+_input_mode = "unknown"
+
 try:
     from dotenv import find_dotenv, load_dotenv
 except ImportError:
@@ -41,3 +43,10 @@ def reload_dotenv():
 
     load_dotenv(override=True)
     return True, ".env"
+
+def set_input_mode(mode: str) -> None:
+    global _input_mode
+    _input_mode = mode
+    
+def get_input_mode() -> str:
+    return _input_mode

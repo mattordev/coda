@@ -39,6 +39,7 @@ def _get_flag_value(flag_name):
 
 # checks to see if manual mode should be enabled based on flag
 def _is_manual_mode_requested():
+    runtime_state._input_mode = "manual"
     return "-m" in sys.argv or "--manual" in sys.argv
 
 
@@ -274,6 +275,7 @@ def check_update_available(version_url):
 
 # calls voice recog run loop using wakewords, commands and a stop event.
 def start_voice_recognition():
+    runtime_state._input_mode = "wake word"
     voice_recognizer.run(wakewords, commands, mode='normal',
                          stop_event=voice_stop_event)
 
