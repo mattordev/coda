@@ -157,7 +157,17 @@ def format_processor_name_for_speech(processor_name: str) -> str:
 def get_system_ram_usage() -> dict[str, float] | None:
     """Return total_gb, used_gb and percent for system memory."""
     # TODO: Collect system-wide memory information with psutil.
-    return None
+    memory = psutil.virtual_memory()
+    
+    # convert to GB
+    total_gb = round(memory.total / (1024 ** 3), 1)
+    # get used GB
+    used_gb = round((memory.total - memory.available) / (1024 ** 3), 1)
+    return {
+        "total_gb": total_gb,
+        "used_gb": used_gb,
+        "percent": memory.percent,
+    }
 
 
 def get_battery_status() -> dict[str, object] | None:
