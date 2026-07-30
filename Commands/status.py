@@ -187,10 +187,10 @@ def get_battery_status() -> dict[str, object]:
     }
 
 
-def get_system_uptime() -> str | None:
+def get_system_uptime() -> str:
     """Return the time since the operating system started."""
-    # TODO: Calculate uptime from the system boot time and format it for display.
-    return None
+    calculated_time = time.time() - psutil.boot_time()
+    return format_uptime(calculated_time)
 
 
 def get_system_status_data() -> dict[str, object]:
