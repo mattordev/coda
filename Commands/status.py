@@ -223,11 +223,22 @@ def print_system_status(status: dict[str, object]) -> None:
     else:
         ram_status = "Unavailable"
 
+    remaining_battery_time = None
+
     if battery["available"]:
         charging_status = (
             "charging" if battery["plugged_in"] else "not charging"
         )
         battery_status = f"{battery['percent']}%, {charging_status}"
+
+        seconds_left = battery.get("seconds_left")
+        if (
+            not battery["plugged_in"]
+            and isinstance(seconds_left, (int, float))
+            and seconds_left >= 0
+        ):
+            remaining_battery_time = format_uptime(seconds_left)
+            battery_status += f", {remaining_battery_time} remaining"
     else:
         battery_status = str(battery["reason"])
 
@@ -260,13 +271,17 @@ def print_system_status(status: dict[str, object]) -> None:
         )
 
     if isinstance(battery, dict) and battery.get("available"):
-        spoken_charging_status = (
-            "charging" if battery["plugged_in"] else "not charging"
-        )
-        spoken_details.append(
+        spoken_battery_status = (
             f"The battery is at {battery['percent']} percent and is "
-            f"{spoken_charging_status}."
+            f"{charging_status}"
         )
+
+        if remaining_battery_time:
+            spoken_battery_status += (
+                f", with approximately {remaining_battery_time} remaining"
+            )
+
+        spoken_details.append(f"{spoken_battery_status}.")
     elif isinstance(battery, dict):
         spoken_details.append(str(battery.get("reason", "Battery unavailable.")))
 
