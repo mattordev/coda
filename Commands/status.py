@@ -156,7 +156,6 @@ def format_processor_name_for_speech(processor_name: str) -> str:
 
 def get_system_ram_usage() -> dict[str, float] | None:
     """Return total_gb, used_gb and percent for system memory."""
-    # TODO: Collect system-wide memory information with psutil.
     memory = psutil.virtual_memory()
     
     # convert to GB
@@ -170,10 +169,22 @@ def get_system_ram_usage() -> dict[str, float] | None:
     }
 
 
-def get_battery_status() -> dict[str, object] | None:
-    """Return percent and plugged_in values when a battery is supported."""
-    # TODO: Collect battery information and handle systems without a battery.
-    return None
+def get_battery_status() -> dict[str, object]:
+    """Return battery percentage, time remaining and charging state."""
+    battery = psutil.sensors_battery()
+    
+    if battery is None:
+        return {
+            "available": False,
+            "reason": "No battery found/No battery information available."
+        }
+    
+    return {
+        "available": True,
+        "percent": battery.percent,
+        "seconds_left": battery.secsleft,
+        "plugged_in": battery.power_plugged,
+    }
 
 
 def get_system_uptime() -> str | None:
@@ -212,13 +223,13 @@ def print_system_status(status: dict[str, object]) -> None:
     else:
         ram_status = "Unavailable"
 
-    if isinstance(battery, dict):
+    if battery["available"]:
         charging_status = (
             "charging" if battery["plugged_in"] else "not charging"
         )
-        battery_status = f"{battery['percent']} percent, {charging_status}"
+        battery_status = f"{battery['percent']}%, {charging_status}"
     else:
-        battery_status = "Unavailable"
+        battery_status = str(battery["reason"])
 
     print(f"This system is running on: {status['operating_system']}")
 
@@ -248,11 +259,16 @@ def print_system_status(status: dict[str, object]) -> None:
             f"System uptime is {status['system_uptime']}."
         )
 
-    if isinstance(battery, dict):
+    if isinstance(battery, dict) and battery.get("available"):
+        spoken_charging_status = (
+            "charging" if battery["plugged_in"] else "not charging"
+        )
         spoken_details.append(
             f"The battery is at {battery['percent']} percent and is "
-            f"{charging_status}."
+            f"{spoken_charging_status}."
         )
+    elif isinstance(battery, dict):
+        spoken_details.append(str(battery.get("reason", "Battery unavailable.")))
 
     spoken_status_details = " ".join(spoken_details)
 
