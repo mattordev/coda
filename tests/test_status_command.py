@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from Commands import status as status_command
+from commands import status as status_command
 
 
 class StatusCommandTests(unittest.TestCase):
@@ -37,7 +37,7 @@ class StatusCommandTests(unittest.TestCase):
                     expected,
                 )
 
-    @patch("Commands.status.psutil.virtual_memory")
+    @patch("commands.status.psutil.virtual_memory")
     def test_collects_system_ram_usage(self, virtual_memory):
         virtual_memory.return_value = SimpleNamespace(
             total=16 * (1024 ** 3),
@@ -56,14 +56,14 @@ class StatusCommandTests(unittest.TestCase):
             },
         )
 
-    @patch("Commands.status.psutil.sensors_battery", return_value=None)
+    @patch("commands.status.psutil.sensors_battery", return_value=None)
     def test_reports_when_battery_is_unavailable(self, _sensors_battery):
         result = status_command.get_battery_status()
 
         self.assertFalse(result["available"])
         self.assertIn("No battery", result["reason"])
 
-    @patch("Commands.status.psutil.sensors_battery")
+    @patch("commands.status.psutil.sensors_battery")
     def test_collects_battery_status(self, sensors_battery):
         sensors_battery.return_value = SimpleNamespace(
             percent=59.0,
@@ -83,15 +83,15 @@ class StatusCommandTests(unittest.TestCase):
             },
         )
 
-    @patch("Commands.status.psutil.boot_time", return_value=6280)
-    @patch("Commands.status.time.time", return_value=10000)
+    @patch("commands.status.psutil.boot_time", return_value=6280)
+    @patch("commands.status.time.time", return_value=10000)
     def test_formats_system_uptime(self, _current_time, _boot_time):
         self.assertEqual(
             status_command.get_system_uptime(),
             "1 hour and 2 minutes",
         )
 
-    @patch("Commands.status.speak.speak_response")
+    @patch("commands.status.speak.speak_response")
     @patch("builtins.print")
     def test_reports_battery_time_remaining(self, print_output, speak_response):
         system_status = self._system_status(
@@ -114,7 +114,7 @@ class StatusCommandTests(unittest.TestCase):
             spoken_summary,
         )
 
-    @patch("Commands.status.speak.speak_response")
+    @patch("commands.status.speak.speak_response")
     @patch("builtins.print")
     def test_omits_unknown_battery_time(self, print_output, speak_response):
         system_status = self._system_status(
