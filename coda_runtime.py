@@ -92,12 +92,9 @@ def _apply_cli_microphone_flags():
     return _is_manual_mode_requested()
 
 
-# gets the commands directory in a portable way, checks both "Commands" and "commands" to account for different naming conventions
 def _get_commands_dir():
-    cwd = Path.cwd()
-    if (cwd / "Commands").exists():
-        return cwd / "Commands"
-    return cwd / "commands"
+    """Return the canonical command module directory."""
+    return Path.cwd() / "commands"
 
 
 # loads the command modules from the commands dir, fills the global commands dict and writes to json via save_commands.

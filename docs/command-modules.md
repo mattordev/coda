@@ -1,12 +1,12 @@
 # Command Modules
 
-CODA discovers commands from Python files in the `Commands` directory. A
+CODA discovers commands from Python files in the `commands` directory. A
 command owns both the metadata used for intent detection and the function used
 for execution, so adding one does not require editing a central catalogue.
 
 ## Minimal Command
 
-Create `Commands/greet.py`:
+Create `commands/greet.py`:
 
 ```python
 from ai.intents import Intent, IntentRequest
@@ -30,7 +30,7 @@ def run(request: IntentRequest) -> bool:
 
 The filename must match the canonical intent name: an intent named `greet`
 belongs in `greet.py`. Restart CODA after adding or removing a command. The
-command cache is rebuilt automatically when the files in `Commands` change.
+command cache is rebuilt automatically when the files in `commands` change.
 
 Use `aliases` for alternate command triggers that may prefix additional
 content. Use `examples` for complete natural-language phrasings that should
