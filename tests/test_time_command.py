@@ -63,6 +63,28 @@ class TimeCommandTests(unittest.TestCase):
             },
         )
 
+    def test_formats_midnight_midday_and_evening(self):
+        cases = (
+            (0, "12:05 AM", "12:05 AM"),
+            (12, "12:05 PM", "12:05 PM"),
+            (20, "08:05 PM", "8:05 PM"),
+        )
+
+        for hour, expected_time, expected_spoken_time in cases:
+            with self.subTest(hour=hour):
+                fixed_date_time = datetime.datetime(2026, 1, 1, hour, 5)
+
+                with patch("commands.time.datetime.datetime") as datetime_type:
+                    datetime_type.now.return_value = fixed_date_time
+
+                    result = time_command.get_date_time()
+
+                self.assertEqual(result["time"], expected_time)
+                self.assertEqual(
+                    result["spoken_time"],
+                    expected_spoken_time,
+                )
+
     def test_reports_current_time(self):
         request = self._request("TIME")
 
