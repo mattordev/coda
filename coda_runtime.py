@@ -39,7 +39,12 @@ def _get_flag_value(flag_name):
 
 # checks to see if manual mode should be enabled based on flag
 def _is_manual_mode_requested():
-    return "-m" in sys.argv or "--manual" in sys.argv
+    manual_mode_requested = "-m" in sys.argv or "--manual" in sys.argv
+
+    if manual_mode_requested:
+        runtime_state.set_input_mode("manual")
+
+    return manual_mode_requested
 
 
 # turns text into lowercase and tokenizes it, uses regex. Used for wakeword detection to filter punctuation and ensure consistent matching.
@@ -91,12 +96,9 @@ def _apply_cli_microphone_flags():
     return _is_manual_mode_requested()
 
 
-# gets the commands directory in a portable way, checks both "Commands" and "commands" to account for different naming conventions
 def _get_commands_dir():
-    cwd = Path.cwd()
-    if (cwd / "Commands").exists():
-        return cwd / "Commands"
-    return cwd / "commands"
+    """Return the canonical command module directory."""
+    return Path.cwd() / "commands"
 
 
 # loads the command modules from the commands dir, fills the global commands dict and writes to json via save_commands.
@@ -274,6 +276,7 @@ def check_update_available(version_url):
 
 # calls voice recog run loop using wakewords, commands and a stop event.
 def start_voice_recognition():
+    runtime_state.set_input_mode("wake word")
     voice_recognizer.run(wakewords, commands, mode='normal',
                          stop_event=voice_stop_event)
 
@@ -440,6 +443,7 @@ def main():
                 try:
                     if keyboard.is_pressed('ctrl+b'):
                         manual_assisstant_input = True
+                        runtime_state.set_input_mode("manual")
                         stop_voice_thread()
                         print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
                         print("Type commands directly. Type 'voice' to switch back or 'quit' to exit.")

@@ -110,6 +110,11 @@ class PrivacyRoutingTests(unittest.TestCase):
                  "generate",
                  side_effect=lambda messages: (captured.extend(messages) or ("ok", None)),
              ), \
+             mock.patch.object(
+                 core,
+                 "get_provider_order",
+                 return_value=["ollama", "openai"],
+             ), \
              mock.patch.object(core.logger, "should_skip_provider", return_value=False), \
              mock.patch.object(core.logger, "log_attempt"), \
              mock.patch.object(core.logger, "log_failure"):

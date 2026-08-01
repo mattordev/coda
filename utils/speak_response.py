@@ -3,6 +3,7 @@ import os
 
 from elevenlabs import generate, play, set_api_key
 import utils.dashboard_state as dashboard_state
+import utils.runtime_state as runtime_state
 
 try:
     from dotenv import load_dotenv
@@ -70,6 +71,26 @@ def is_connected():
         return False
 
 
+def is_tts_available():
+    """Return whether a configured cloud or local TTS path is available."""
+    has_eleven_labs = (
+        not _eleven_labs_disabled
+        and bool(os.getenv("ELEVENLABS_API_KEY", "").strip())
+        and is_connected()
+    )
+    if has_eleven_labs:
+        return True
+
+    try:
+        import pyttsx3 as tts
+
+        speaker = tts.init()
+        speaker.stop()
+        return True
+    except Exception:
+        return False
+
+
 def speak_response(response):
     global _eleven_labs_disabled
 
@@ -77,7 +98,7 @@ def speak_response(response):
 
     if is_connected() and ensure_api_key_loaded():
         try:
-            print("Using Eleven labs for speech")
+            runtime_state.debug_print("Using Eleven labs for speech")
             audio = generate(
                 text=response,
                 voice="N2lVS1w4EtoT3dr4eOWO",

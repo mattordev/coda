@@ -8,7 +8,7 @@ focus on doing the work.
 
 CODA sets the router up after loading the command modules:
 
-1. Command files are loaded from `Commands` or from the command cache.
+1. Command files are loaded from `commands` or from the command cache.
 2. Each module is checked for a valid `INTENT` and callable `run` function.
 3. The discovered intents are added to an `IntentRegistry`.
 4. `create_router()` builds the configured list of detection strategies.

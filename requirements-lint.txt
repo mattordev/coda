@@ -1,4 +1,5 @@
 pylint>=3.0,<4
+psutil
 requests
 SpeechRecognition
 tqdm

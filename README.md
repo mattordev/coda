@@ -1,87 +1,159 @@
-# C.O.D.A Source Code
+# C.O.D.A
 
-Primary runtime entry point is _main.py_.
+[![Tests](https://github.com/mattordev/coda/actions/workflows/tests.yml/badge.svg)](https://github.com/mattordev/coda/actions/workflows/tests.yml)
+[![Pylint](https://github.com/mattordev/coda/actions/workflows/pylint.yml/badge.svg)](https://github.com/mattordev/coda/actions/workflows/pylint.yml)
 
-## What does this program do?
+C.O.D.A is a local-first voice assistant with wake-word detection, drop-in
+command modules, intent routing, LLM fallback, text-to-speech and a live
+dashboard.
 
-C.O.D.A is a local-first smart assistant with wake word detection, command modules, LLM fallback chat, text-to-speech, and a live dashboard. It is designed to run on local hardware including Raspberry Pi setups, with graceful online and offline behavior depending on configured providers.
+C.O.D.A stands for **Cognitive Operational Data Assistant**. The project began
+in 2016 under the name H.A.D.E.S, was left alone for several years, and was
+eventually revived as the assistant it is today.
 
-C.O.D.A stands for **Cognitive Operational Data Assistant**, but this project was originally called H.A.D.E.S, aka Home And Data... something or other. This project started in 2016, but was forgotten and not worked on for many years. The initial concept was for this system/assistant to act as a user interface and aid in general purpose tasks.
+## What It Can Do
 
-Now, there's not much "cognitive" about a basic smart assistant. But later down the line, depending on the completion of the first prototype and what I manage to get done I also want to look at Machine Learning for more accurate wakeword detection and speech synthesis.
+- Accept wake-word voice input or typed input in manual mode.
+- Route exact commands, aliases and natural-language examples through the
+  intent system.
+- Fall back to a local or cloud LLM when no command matches.
+- Keep sensitive requests local or sanitise them before cloud fallback.
+- Prefer local Whisper speech recognition with Google as a fallback.
+- Speak responses through ElevenLabs with a local `pyttsx3` fallback.
+- Load self-registering commands from the `commands` directory.
+- Report live runtime state and transcripts through the dashboard.
 
-C.O.D.A has several planned commands and features, the planned commands and finished commands are here:
+### Commands
 
-Planned:
+| Command | What it does | Example |
+| --- | --- | --- |
+| `connected` | Checks whether CODA can reach the internet. | `coda are we connected?` |
+| `debug` | Views or changes runtime debugging settings. | `coda debug status` |
+| `maps` | Opens a Google Maps search. | `coda where is Victoria Station?` |
+| `say` | Speaks the supplied text. | `coda say hello there` |
+| `status` | Reports CODA or system information. | `coda system status` |
+| `time` | Reports the local time or date. | `coda what time is it?` |
 
-- Check system status (Temperature, storage, etc)
-- Create "project" folders & files
-- Spotify integration (so you can play your best tunes, whilst you do your best work)
-- Search the systems default browser for a query
-- Home automation (Change thermostat, lock doors, manage other home based sensors)
+## Roadmap
 
-Finished:
+The active roadmap is maintained in the
+[CODA GitHub project](https://github.com/users/mattordev/projects/1/views/1).
 
-- Check for an internet connection
+### Completed Milestones
 
-Other features:
+- [v1.2.0 - Provider Routing & Privacy](https://github.com/mattordev/coda/milestone/1)
+- [v1.3.0 - Intent Routing & Command System](https://github.com/mattordev/coda/milestone/2)
 
-- Flask-based dashboard for live runtime state and transcript visibility
-- System logging and runtime diagnostics
+### In Progress
 
----
+- [v1.4.0 - Concurrent Runtime & Interruptible Responses](https://github.com/mattordev/coda/milestone/3)
 
-### Installation
+### Future Milestones
 
-Install prerequisites first:
+- [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
+- [v1.6.0 - Semantic Intent Matching](https://github.com/mattordev/coda/milestone/5)
 
-Prereqs for pyaudio and speech recognition:
-`sudo apt-get install libportaudio0 libportaudio2 libportaudiocpp0 portaudio19-dev flac`
+## Supported Platforms
 
-After cloning, install Python dependencies from the project root:
-`pip install -r requirements.txt`
+CODA is currently tested on:
 
-### Run
+- Windows with Python 3.11 and 3.12
+- Linux with Python 3.11 and 3.12
 
-Start the assistant:
-`python main.py`
+Automated tests run against Windows and Ubuntu through GitHub Actions.
 
-Start the dashboard web app:
-`python dashboard/app.py`
+Known limitations:
 
-Open the dashboard in your browser:
-`http://localhost:5000/dashboard`
+- The global `Ctrl+B` hotkey may require additional permissions on Linux and
+  may not work under WSL, containers, headless systems or some Wayland
+  sessions.
+- Manual mode remains available with `python main.py -m` when the global hotkey
+  is unavailable.
+- macOS and Raspberry Pi hardware are not currently included in automated
+  testing.
+- Audio and microphone hardware are not exercised by CI.
 
-Speech-to-text notes:
+## Installation
 
-- CODA now prefers local Whisper transcription through `faster-whisper` when available.
-- Google speech recognition is still supported as a fallback.
-- The first Whisper run will download the selected model.
-- `faster-whisper` uses bundled FFmpeg libraries via PyAV, so you do not need a separate system `ffmpeg` install for the local Whisper path.
+CODA requires Python 3.11 or 3.12.
 
-### Environment Variables
+Create and activate a virtual environment, then install the locked dependencies:
 
-Copy `.env.example` to the project root (located in /docs), rename it to `.env` and populate the values appropriate for your setup.
+```text
+python -m venv .venv
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-### Provider Routing
+On Ubuntu, install the audio prerequisites first:
 
-CODA uses privacy-aware provider routing:
+```text
+sudo apt-get update
+sudo apt-get install libportaudio0 libportaudio2 libportaudiocpp0 portaudio19-dev flac
+```
 
-- High-risk requests (for example passwords, bank details, API keys) are processed using local providers only by default.
-- Medium-risk requests attempt local providers first, then fall back to cloud providers with sensitive values sanitised.
-- Low-risk requests attempt cloud providers first, then fall back to local providers.
-- Local providers receive raw conversation history. Cloud providers receive the cloud-safe rendering of history, which can be raw, sanitised, summarized, or blocked depending on privacy policy.
+Copy `docs/.env.example` to `.env` in the project root and fill in the settings
+for the providers you want to use.
 
-Providers are attempted in the order specified in `.env` using:
+PowerShell:
+
+```powershell
+Copy-Item docs/.env.example .env
+```
+
+Linux:
+
+```bash
+cp docs/.env.example .env
+```
+
+## Running CODA
+
+Start in voice mode:
+
+```text
+python main.py
+```
+
+Start in manual mode:
+
+```text
+python main.py -m
+```
+
+Manual requests still require a wake word, for example:
+
+```text
+manual> coda what time is it?
+```
+
+Start the dashboard separately:
+
+```text
+python dashboard/app.py
+```
+
+Then open `http://localhost:5000/dashboard`.
+
+## AI Provider Routing
+
+Provider order is configured in `.env`:
 
 ```text
 CODA_CLOUD_PROVIDERS=openai
 CODA_LOCAL_PROVIDERS=ollama
 ```
 
-Provider names are resolved through `ai/providers/registry.py`, which defines provider type, configuration requirements, and the implementation module. Use the canonical provider names from the registry. `CODA_CLOUD_PROVIDERS` only accepts cloud providers, and `CODA_LOCAL_PROVIDERS` only accepts local providers. Unavailable providers are automatically skipped and temporarily placed into cooldown before being retried.
+By default:
 
-Privacy behavior is controlled with:
+- Low-risk requests try cloud providers before local providers.
+- Medium-risk requests try local providers first and sanitise sensitive values
+  before a cloud fallback.
+- High-risk requests stay local unless the privacy policy explicitly permits a
+  cloud fallback.
+- Unavailable providers enter a temporary cooldown before CODA retries them.
+
+Privacy behaviour is controlled with:
 
 ```text
 CODA_PRIVACY_MODE=balanced
@@ -91,41 +163,44 @@ CODA_PRIVACY_LOW_RISK_THRESHOLD=0.3
 CODA_PRIVACY_HIGH_RISK_THRESHOLD=0.7
 ```
 
-Modes are `strict`, `balanced`, and `permissive`. See `docs/privacy-routing.md` for the full routing and cloud-safe rendering rules.
+See [Privacy Routing](docs/privacy-routing.md) for the complete policy and
+cloud-safe conversation rules.
 
-Notes:
+## Voice Configuration
 
-- `ELEVENLABS_API_KEY` is required for ElevenLabs TTS auth.
-- `CODA_LLM_FALLBACK=1` enables LLM fallback when no command word is detected after the wakeword.
-- If `CODA_OLLAMA_MODEL` is omitted, CODA prefers `nemotron-3-nano:4b` when that model exists and otherwise falls back to the first model returned by Ollama's `/api/tags` endpoint.
-- `CODA_OLLAMA_COLD_START_TIMEOUT` controls the longer timeout used only when an Ollama model is not already loaded.
-- `CODA_PRIVACY_MODE` controls whether sensitive requests are blocked from cloud providers or sent with sanitised/summarized context.
-- LLM voice replies open a short follow-up window so the next spoken reply can skip the wake word. Adjust this with `CODA_FOLLOWUP_TIMEOUT` in seconds.
-- `CODA_STT_PROVIDER=auto` prefers local Whisper via `faster-whisper`, then falls back to Google recognition.
-- In `auto` mode, CODA will also step down to a more compatible local Whisper setup before using Google, for example when CUDA is detected but the local CUDA runtime is not actually usable.
-- If a local Whisper attempt fails at runtime, CODA disables that exact attempt for the rest of the session so later utterances do not keep paying the same startup penalty. `debug reload` clears that session cache.
-- `CODA_STT_PROVIDER=google` keeps the Google-only speech recognition path.
-- `CODA_WHISPER_MODEL=auto` picks a hardware-friendly default: `turbo` on CUDA systems, `small` on desktop CPU, and `base` on ARM boards such as Raspberry Pi.
-- `CODA_WHISPER_LANGUAGE` is optional. Leave it unset for auto-detection, or set it to `en` for English-first command recognition.
-- `CODA_PAUSE_THRESHOLD` controls how long a spoken pause CODA tolerates before it treats the utterance as finished. The default is now `1.2` seconds.
-- `CODA_PHRASE_TIME_LIMIT` caps the maximum length of a single captured utterance. The default is now `12` seconds.
-- Optional Whisper tuning: `CODA_WHISPER_DEVICE`, `CODA_WHISPER_COMPUTE_TYPE`, `CODA_WHISPER_BEAM_SIZE`, and `CODA_WHISPER_VAD_FILTER`.
-- `CODA_SYSTEM_PROMPT` lets you override CODA's default assistant style without editing code. Run `debug reload` after changing it.
+- `CODA_STT_PROVIDER=auto` prefers local Whisper and falls back to Google speech
+  recognition.
+- `CODA_WHISPER_MODEL=auto` selects a model based on the available hardware.
+- `CODA_WHISPER_LANGUAGE` can be left unset for automatic detection or set to
+  `en` for English-first recognition.
+- `CODA_PAUSE_THRESHOLD` controls how long a pause is allowed within an
+  utterance.
+- `CODA_PHRASE_TIME_LIMIT` limits the length of one captured utterance.
+- `CODA_FOLLOWUP_TIMEOUT` controls how long an LLM voice follow-up can omit the
+  wake word.
+- `ELEVENLABS_API_KEY` enables ElevenLabs speech output.
 
-### Command Development
+The remaining provider, privacy, speech and model options are documented in
+[`docs/.env.example`](docs/.env.example).
 
-Commands are self-registering Python modules that own their intent metadata
-and execution function. See [Command Modules](docs/command-modules.md) for the
-drop-in template and validation rules. See
-[Intent Routing](docs/intent-routing.md) for the detection and dispatcher flow.
+## Development
 
----
+Run the complete unit-test suite with:
 
-#### Licence
+```text
+python -m unittest discover -s tests -p "test_*.py" -v
+```
 
-GNU AGPLv3
+Commands are self-registering modules that own their intent metadata and
+`run(request)` function. See:
+
+- [Command Modules](docs/command-modules.md)
+- [Intent Routing](docs/intent-routing.md)
+- [Main Program Flow](docs/main-program-flow.md)
+- [Concurrent Runtime Design](docs/concurrent-runtime.md)
+
+## Licence
+
+CODA is licensed under the GNU AGPLv3. See [LICENCE.md](LICENCE.md).
 
 Copyright (C) 2022 Matthew Roberts
-
-To view the full license, please view `LICENCE.md`
-
