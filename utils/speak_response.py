@@ -71,6 +71,26 @@ def is_connected():
         return False
 
 
+def is_tts_available():
+    """Return whether a configured cloud or local TTS path is available."""
+    has_eleven_labs = (
+        not _eleven_labs_disabled
+        and bool(os.getenv("ELEVENLABS_API_KEY", "").strip())
+        and is_connected()
+    )
+    if has_eleven_labs:
+        return True
+
+    try:
+        import pyttsx3 as tts
+
+        speaker = tts.init()
+        speaker.stop()
+        return True
+    except Exception:
+        return False
+
+
 def speak_response(response):
     global _eleven_labs_disabled
 

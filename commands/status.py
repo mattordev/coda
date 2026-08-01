@@ -390,7 +390,7 @@ def get_program_status_data() -> dict[str, object]:
         "debug": is_debug_enabled(),
         "input_mode": get_input_mode(),
         "stt_provider": get_stt_status(),
-        "tts_available": speak.speak_response("Checking CODA status.."),
+        "tts_available": speak.is_tts_available(),
     }
 
 

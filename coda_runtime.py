@@ -39,8 +39,12 @@ def _get_flag_value(flag_name):
 
 # checks to see if manual mode should be enabled based on flag
 def _is_manual_mode_requested():
-    runtime_state._input_mode = "manual"
-    return "-m" in sys.argv or "--manual" in sys.argv
+    manual_mode_requested = "-m" in sys.argv or "--manual" in sys.argv
+
+    if manual_mode_requested:
+        runtime_state.set_input_mode("manual")
+
+    return manual_mode_requested
 
 
 # turns text into lowercase and tokenizes it, uses regex. Used for wakeword detection to filter punctuation and ensure consistent matching.
@@ -272,7 +276,7 @@ def check_update_available(version_url):
 
 # calls voice recog run loop using wakewords, commands and a stop event.
 def start_voice_recognition():
-    runtime_state._input_mode = "wake word"
+    runtime_state.set_input_mode("wake word")
     voice_recognizer.run(wakewords, commands, mode='normal',
                          stop_event=voice_stop_event)
 
@@ -439,6 +443,7 @@ def main():
                 try:
                     if keyboard.is_pressed('ctrl+b'):
                         manual_assisstant_input = True
+                        runtime_state.set_input_mode("manual")
                         stop_voice_thread()
                         print("VOICE RECOGNITION STOPPED. MANUAL MODE ENABLED")
                         print("Type commands directly. Type 'voice' to switch back or 'quit' to exit.")

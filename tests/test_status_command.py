@@ -91,6 +91,31 @@ class StatusCommandTests(unittest.TestCase):
             "1 hour and 2 minutes",
         )
 
+    def test_collects_program_status_without_speaking(self):
+        with (
+            patch.object(status_command, "get_program_version", return_value="1.3.3"),
+            patch.object(status_command, "get_used_memory", return_value=100.0),
+            patch.object(status_command, "get_uptime", return_value="1 minute"),
+            patch.object(status_command, "is_debug_enabled", return_value=False),
+            patch.object(status_command, "get_input_mode", return_value="manual"),
+            patch.object(
+                status_command,
+                "get_stt_status",
+                return_value="Configured",
+            ),
+            patch.object(
+                status_command.speak,
+                "is_tts_available",
+                return_value=True,
+            ) as is_tts_available,
+            patch.object(status_command.speak, "speak_response") as speak_response,
+        ):
+            result = status_command.get_program_status_data()
+
+        self.assertTrue(result["tts_available"])
+        is_tts_available.assert_called_once_with()
+        speak_response.assert_not_called()
+
     @patch("commands.status.speak.speak_response")
     @patch("builtins.print")
     def test_reports_battery_time_remaining(self, print_output, speak_response):

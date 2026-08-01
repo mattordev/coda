@@ -45,7 +45,7 @@ class TimeCommandTests(unittest.TestCase):
         self.assertEqual(result, "the 1st of January 2026")
 
     def test_collects_consistent_date_and_time_formats(self):
-        fixed_date_time = datetime.datetime(2026, 1, 1, 8, 5)
+        fixed_date_time = datetime.datetime(2026, 7, 23, 8, 5)
 
         with patch("commands.time.datetime.datetime") as datetime_type:
             datetime_type.now.return_value = fixed_date_time
@@ -58,8 +58,8 @@ class TimeCommandTests(unittest.TestCase):
             {
                 "time": "08:05 AM",
                 "spoken_time": "8:05 AM",
-                "date": "01/01/2026",
-                "spoken_date": "the 1st of January 2026",
+                "date": "23/07/2026",
+                "spoken_date": "the 23rd of July 2026",
             },
         )
 
