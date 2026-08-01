@@ -1,5 +1,8 @@
 # C.O.D.A Source Code
 
+[![Tests](https://github.com/mattordev/coda/actions/workflows/tests.yml/badge.svg)](https://github.com/mattordev/coda/actions/workflows/tests.yml)
+[![Pylint](https://github.com/mattordev/coda/actions/workflows/pylint.yml/badge.svg)](https://github.com/mattordev/coda/actions/workflows/pylint.yml)
+
 Primary runtime entry point is _main.py_.
 
 ## What does this program do?
@@ -9,6 +12,22 @@ C.O.D.A is a local-first smart assistant with wake word detection, command modul
 C.O.D.A stands for **Cognitive Operational Data Assistant**, but this project was originally called H.A.D.E.S, aka Home And Data... something or other. This project started in 2016, but was forgotten and not worked on for many years. The initial concept was for this system/assistant to act as a user interface and aid in general purpose tasks.
 
 Now, there's not much "cognitive" about a basic smart assistant. But later down the line, depending on the completion of the first prototype and what I manage to get done I also want to look at Machine Learning for more accurate wakeword detection and speech synthesis.
+
+### Supported Platforms
+
+CODA is currently tested on:
+
+- Windows with Python 3.11 and 3.12
+- Linux with Python 3.11 and 3.12
+
+Automated tests run against both Windows and Ubuntu through GitHub Actions.
+
+Known limitations:
+
+- The global `Ctrl+B` hotkey may require additional permissions on Linux and may not work under WSL, containers, headless systems or some Wayland sessions.
+- Manual mode remains available with `python main.py -m` when the global hotkey is unavailable.
+- macOS and Raspberry Pi hardware are not currently included in automated testing.
+- Audio and microphone hardware are not exercised by CI.
 
 C.O.D.A has several planned commands and features, the planned commands and finished commands are here:
 
