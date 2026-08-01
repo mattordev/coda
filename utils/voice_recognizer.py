@@ -10,6 +10,8 @@ import utils.dashboard_state as dashboard_state
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.stt_service as stt_service
+from runtime.messages import InputSource, RuntimeRequest
+from runtime.runtime_queue import RuntimeQueue
 
 # Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
 # Currently not using `wakewords.json` or `commands.json` but will be in the future
@@ -90,6 +92,18 @@ def _strip_text_before_wakeword(message, wakewords):
 def _normalize_message(message):
     return message.strip().lower().strip(" ,.!?-")
 
+def _queue_runtime_request(
+    message: str,
+    request_queue: RuntimeQueue[RuntimeRequest],
+) -> RuntimeRequest:
+    """Create and queue a voice runtime request"""
+    request = RuntimeRequest(
+        message=message,
+        source=InputSource.VOICE,
+    )
+    request_queue.put(request)
+    return request
+
 
 def _is_follow_up_stop_phrase(message):
     normalized_message = _normalize_message(message)
@@ -152,7 +166,12 @@ def print_microphones():
         print(f"[{i}] {name}")
 
 
-def run(wakeword, commands, mode=None, stop_event=None, **kwargs):
+def run(
+    wakeword, 
+    commands, mode=None,
+    stop_event=None,
+    request_queue: RuntimeQueue[RuntimeRequest] | None = None,
+    **kwargs):
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
         raise TypeError(f"run() got unexpected keyword argument(s): {unexpected}")
@@ -271,6 +290,11 @@ def run(wakeword, commands, mode=None, stop_event=None, **kwargs):
                 print("[VOICE] Wakeword not detected. Ignoring phrase.")
                 follow_up_active_until = 0.0
                 continue
+
+            if request_queue is not None:
+                _queue_runtime_request(command_message, request_queue)
+                follow_up_active_until = 0.0
+                continue    
 
             result = command.run(command_message, commands, debug=debug_enabled)
 

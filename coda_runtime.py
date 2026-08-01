@@ -1,3 +1,7 @@
+from runtime.voice_worker import VoiceInputWorker
+from runtime.runtime_queue import RuntimeQueues
+from runtime.messages import ExecutionResult, RuntimeRequest
+
 import os
 import sys
 import json
@@ -21,10 +25,12 @@ commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 manual_assisstant_input = False
-voice_stop_event = threading.Event()
-voice_thread = None
 heartbeat_stop_event = threading.Event()
 heartbeat_thread = None
+voice_worker = None
+runtime_queues = RuntimeQueues()
+execution_stop_event = threading.Event()
+execution_thread = None
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -273,32 +279,105 @@ def check_update_available(version_url):
 
     return False
 
-
-# calls voice recog run loop using wakewords, commands and a stop event.
-def start_voice_recognition():
-    runtime_state.set_input_mode("wake word")
-    voice_recognizer.run(wakewords, commands, mode='normal',
-                         stop_event=voice_stop_event)
-
-
-# Starts daemon thread for voice loop if not already alive.
-def start_voice_thread():
-    global voice_thread
-
-    if voice_thread is not None and voice_thread.is_alive():
+def _create_execution_result(
+    request: RuntimeRequest,
+    command_result,
+) -> ExecutionResult:
+    """Convert a command result into a runtime execution result"""
+    return ExecutionResult(
+        request_id=request.request_id,
+        handled=command_result.handled,
+        response_text=command_result.response_text,
+        open_follow_up=command_result.open_follow_up,
+        cancelled=request.cancel_event.is_set(),
+    )
+    
+def _execution_loop(stop_event):
+    """Process queued runtime requests untill system shutdown."""
+    while not stop_event.is_set():
+        request = runtime_queues.requests.get(timeout=0.1)
+        
+        if request is None:
+            continue
+        
+        try:
+            if request.cancel_event.is_set():
+                execution_result = ExecutionResult(
+                    request_id=request.request_id,
+                    handled=False,
+                    cancelled=True,
+                )
+            else:
+                command_result = command.run(
+                    request.message,
+                    commands,
+                    debug=runtime_state.is_debug_enabled(default=False),
+                )
+                execution_result = _create_execution_result(
+                    request,
+                    command_result,
+                )
+        except Exception as error:
+            execution_result = ExecutionResult(
+                request_id=request.request_id,
+                handled=False,
+                error=str(error),
+            )
+        finally:
+            runtime_queues.requests.task_done()
+        
+        runtime_queues.events.put(execution_result)
+        
+def start_execution_thread():
+    """Start the runitme request-processing thread."""
+    global execution_thread
+    
+    if execution_thread is not None and execution_thread.is_alive():
         return
+    
+    execution_stop_event.clear()
+    execution_thread = threading.Thread(
+        target=_execution_loop,
+        args=(execution_stop_event,),
+        name="coda-execution",
+        daemon=True,
+    )
+    execution_thread.start()
+    
+def stop_execution_thread(timeout_seconds=4.0):
+    """Stop the runtime request-processing thread."""
+    execution_stop_event.set()
+    if execution_thread is not None and execution_thread.is_alive():
+        execution_thread.join(timeout=timeout_seconds)
 
-    voice_stop_event.clear()
-    voice_thread = threading.Thread(target=start_voice_recognition, daemon=True)
-    voice_thread.start()
+def start_voice_recognition(stop_event):
+    """Run voice recog untill the worker receives a shutdown."""
+    runtime_state.set_input_mode("wake word")
+    voice_recognizer.run(
+        wakewords, 
+        commands, 
+        mode='normal', 
+        stop_event=stop_event,
+        )
 
 
-# signals the voice thread to stop and waits for it to finish.
+def start_voice_thread():
+    """Start the dedicated voice-input worker."""
+    global voice_worker
+    
+    if voice_worker is None:
+        voice_worker = VoiceInputWorker(
+            start_voice_recognition,
+            threading.Event(),
+        )
+
+    voice_worker.start()
+
+
 def stop_voice_thread(timeout_seconds=4.0):
-    voice_stop_event.set()
-
-    if voice_thread is not None and voice_thread.is_alive():
-        voice_thread.join(timeout=timeout_seconds)
+    """Stop the dedicated voice-input worker."""
+    if voice_worker is not None:
+        voice_worker.stop(timeout=timeout_seconds)
 
 
 # calls dashboard_state with a delay, this is used to feed the connection pill on the dashboard.
