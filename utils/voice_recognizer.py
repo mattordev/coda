@@ -12,6 +12,7 @@ import utils.runtime_state as runtime_state
 import utils.stt_service as stt_service
 from runtime.messages import InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueue
+from runtime.follow_up import FollowUpState
 
 # Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
 # Currently not using `wakewords.json` or `commands.json` but will be in the future
@@ -171,6 +172,7 @@ def run(
     commands, mode=None,
     stop_event=None,
     request_queue: RuntimeQueue[RuntimeRequest] | None = None,
+    follow_up_state: FollowUpState | None = None,
     **kwargs):
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))

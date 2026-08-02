@@ -147,6 +147,7 @@ class RuntimeExecutionTests(unittest.TestCase):
             mode="normal",
             stop_event=stop_event,
             request_queue=queues.requests,
+            follow_up_state=coda_runtime.follow_up_state,
         )
         
     def test_execution_thread_starts_once_and_stops(self):

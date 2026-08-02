@@ -33,6 +33,8 @@ runtime_queues = RuntimeQueues()
 follow_up_state = FollowUpState()
 execution_stop_event = threading.Event()
 execution_thread = None
+event_stop_event = threading.Event()
+event_thread = None
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -365,6 +367,29 @@ def _event_loop(stop_event):
         
         finally:
             runtime_queues.events.task_done()
+            
+def start_event_thread():
+    """Start the runtime event-processing thread."""
+    global event_thread
+    
+    if event_thread is not None and event_thread.is_alive():
+        return
+    
+    event_stop_event.clear()
+    event_thread = threading.Thread(
+        target=_event_loop,
+        args=(event_stop_event,),
+        name="coda-events",
+        daemon=True,
+    )
+    event_thread.start()
+    
+def stop_event_thread(timeout_seconds=4.0):
+    """Stop the runtime event processing thread."""
+    event_stop_event.set()
+
+    if event_thread is not None and event_thread.is_alive():
+        event_thread.join(timeout=timeout_seconds)
         
 def start_execution_thread():
     """Start the runitme request-processing thread."""
@@ -397,6 +422,7 @@ def start_voice_recognition(stop_event):
         mode='normal', 
         stop_event=stop_event,
         request_queue=runtime_queues.requests,
+        follow_up_state=follow_up_state,
         )
 
 
@@ -506,6 +532,8 @@ def main():
     start_heartbeat_thread()  # start heartbeat daemon for dashboard connection status
     
     start_execution_thread() # start the execution worker
+    
+    start_event_thread() # start the event thread
 
     if manual_assisstant_input:
         print("MANUAL MODE ENABLED")
@@ -530,6 +558,7 @@ def main():
             if normalized_manual_message in ("quit", "exit"):
                 stop_voice_thread()
                 stop_execution_thread()
+                stop_event_thread()
                 stop_heartbeat_thread()
                 print("Exiting C.O.D.A")
                 break
