@@ -50,7 +50,7 @@ def _get_calibration_seconds():
     return _get_float_env("CODA_CALIBRATION_SECONDS", 0.8)
 
 
-def _get_follow_up_timeout_seconds():
+def get_follow_up_timeout_seconds():
     return _get_float_env("CODA_FOLLOWUP_TIMEOUT", 10.0)
 
 
@@ -299,7 +299,7 @@ def run(
             result = command.run(command_message, commands, debug=debug_enabled)
 
             if result.open_follow_up:
-                follow_up_timeout_seconds = _get_follow_up_timeout_seconds()
+                follow_up_timeout_seconds = get_follow_up_timeout_seconds()
                 follow_up_active_until = time.monotonic() + follow_up_timeout_seconds
                 if debug_enabled:
                     print(

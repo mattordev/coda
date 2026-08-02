@@ -1,6 +1,7 @@
 from runtime.voice_worker import VoiceInputWorker
 from runtime.runtime_queue import RuntimeQueues
 from runtime.messages import ExecutionResult, RuntimeRequest
+from runtime.follow_up import FollowUpState
 
 import os
 import sys
@@ -29,6 +30,7 @@ heartbeat_stop_event = threading.Event()
 heartbeat_thread = None
 voice_worker = None
 runtime_queues = RuntimeQueues()
+follow_up_state = FollowUpState()
 execution_stop_event = threading.Event()
 execution_thread = None
 
@@ -327,6 +329,42 @@ def _execution_loop(stop_event):
             runtime_queues.requests.task_done()
         
         runtime_queues.events.put(execution_result)
+        
+def _event_loop(stop_event):
+    """Process runtime results until shutdown"""
+    while not stop_event.is_set():
+        runtime_event = runtime_queues.events.get(timeout=0.1)
+        
+        if runtime_event is None:
+            continue
+        
+        try:
+            if not isinstance(runtime_event, ExecutionResult):
+                continue
+            
+            if (
+                runtime_event.open_follow_up
+                and not runtime_event.cancelled
+                and runtime_event.error is None
+            ):
+                follow_up_state.open(
+                    voice_recognizer.get_follow_up_timeout_seconds()
+                )
+            else:
+                follow_up_state.close()
+                
+            if (
+                runtime_event.error is not None
+                and runtime_state.is_debug_enabled(default=False)
+            ):
+                print(
+                    "[RUNTIME] Request "
+                    f"{runtime_event.request_id} failed: "
+                    f"{runtime_event.error}"
+                )
+        
+        finally:
+            runtime_queues.events.task_done()
         
 def start_execution_thread():
     """Start the runitme request-processing thread."""
