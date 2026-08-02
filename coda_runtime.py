@@ -358,6 +358,7 @@ def start_voice_recognition(stop_event):
         commands, 
         mode='normal', 
         stop_event=stop_event,
+        request_queue=runtime_queues.requests,
         )
 
 
@@ -465,6 +466,8 @@ def main():
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
     start_heartbeat_thread()  # start heartbeat daemon for dashboard connection status
+    
+    start_execution_thread() # start the execution worker
 
     if manual_assisstant_input:
         print("MANUAL MODE ENABLED")
@@ -488,6 +491,7 @@ def main():
 
             if normalized_manual_message in ("quit", "exit"):
                 stop_voice_thread()
+                stop_execution_thread()
                 stop_heartbeat_thread()
                 print("Exiting C.O.D.A")
                 break
