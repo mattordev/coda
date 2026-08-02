@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import coda_runtime
-from runtime.messages import InputSource, RuntimeRequest
+from runtime.messages import ExecutionResult, InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueues
-
+from runtime.follow_up import FollowUpState
 
 class RuntimeExecutionTests(unittest.TestCase):
 
@@ -176,6 +176,174 @@ class RuntimeExecutionTests(unittest.TestCase):
 
             self.assertTrue(stop_event.is_set())
             self.assertFalse(first_thread.is_alive())
+    
+    def test_event_loop_opens_follow_up_from_execution_result(self):
+        queues = RuntimeQueues()
+        follow_up_state = FollowUpState()
+        stop_event = threading.Event()
+        opened = threading.Event()
+        real_open = follow_up_state.open
+
+        def open_follow_up(duration_seconds):
+            real_open(duration_seconds)
+            opened.set()
+
+        execution_result = ExecutionResult(
+            request_id="request-1",
+            handled=True,
+            open_follow_up=True,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(coda_runtime, "follow_up_state", follow_up_state),
+            patch.object(
+                follow_up_state,
+                "open",
+                side_effect=open_follow_up,
+            ),
+            patch.object(
+                coda_runtime.voice_recognizer,
+                "get_follow_up_timeout_seconds",
+                return_value=10.0,
+            ),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._event_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.events.put(execution_result)
+                self.assertTrue(opened.wait(timeout=1.0))
+                self.assertTrue(follow_up_state.is_active())
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        
+    def test_event_loop_closes_follow_up_for_normal_result(self):
+        queues = RuntimeQueues()
+        follow_up_state = FollowUpState()
+        stop_event = threading.Event()
+        closed = threading.Event()
+        real_close = follow_up_state.close
+
+        follow_up_state.open(duration_seconds=10.0)
+
+        def close_follow_up():
+            real_close()
+            closed.set()
+
+        execution_result = ExecutionResult(
+            request_id="request-1",
+            handled=True,
+            open_follow_up=False,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(coda_runtime, "follow_up_state", follow_up_state),
+            patch.object(
+                follow_up_state,
+                "close",
+                side_effect=close_follow_up,
+            ),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._event_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.events.put(execution_result)
+                self.assertTrue(closed.wait(timeout=1.0))
+                self.assertFalse(follow_up_state.is_active())
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        
+    def test_event_thread_starts_once_and_stops(self):
+        stop_event = threading.Event()
+        started = threading.Event()
+
+        def event_target(received_stop_event):
+            started.set()
+            received_stop_event.wait()
+
+        with (
+            patch.object(coda_runtime, "event_stop_event", stop_event),
+            patch.object(coda_runtime, "event_thread", None),
+            patch.object(coda_runtime, "_event_loop", event_target),
+        ):
+            coda_runtime.start_event_thread()
+            self.assertTrue(started.wait(timeout=1.0))
+
+            first_thread = coda_runtime.event_thread
+            coda_runtime.start_event_thread()
+
+            self.assertIs(coda_runtime.event_thread, first_thread)
+            self.assertTrue(first_thread.is_alive())
+
+            coda_runtime.stop_event_thread()
+
+            self.assertTrue(stop_event.is_set())
+            self.assertFalse(first_thread.is_alive())
+            
+    def test_event_loop_closes_follow_up_for_error_result(self):
+        queues = RuntimeQueues()
+        follow_up_state = FollowUpState()
+        stop_event = threading.Event()
+        closed = threading.Event()
+        real_close = follow_up_state.close
+
+        follow_up_state.open(duration_seconds=10.0)
+
+        def close_follow_up():
+            real_close()
+            closed.set()
+
+        execution_result = ExecutionResult(
+            request_id="request-1",
+            handled=False,
+            open_follow_up=True,
+            error="provider failed",
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(coda_runtime, "follow_up_state", follow_up_state),
+            patch.object(
+                follow_up_state,
+                "close",
+                side_effect=close_follow_up,
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=False,
+            ),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._event_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.events.put(execution_result)
+                self.assertTrue(closed.wait(timeout=1.0))
+                self.assertFalse(follow_up_state.is_active())
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 
 import os
 import re
-import time
 import http.client
 import speech_recognition as sr
 # import pocketsphinx5 as ps5
@@ -180,7 +179,7 @@ def run(
     recognizer = sr.Recognizer()
     recognizer.dynamic_energy_threshold = True
     recognizer.pause_threshold = _get_pause_threshold_seconds()
-    follow_up_active_until = 0.0
+    active_follow_up_state = follow_up_state or FollowUpState()
 
     try:
         microphone = _get_microphone()
@@ -207,12 +206,8 @@ def run(
             default=_voice_command_debug_enabled()
         )
 
-        if follow_up_active_until and time.monotonic() >= follow_up_active_until:
-            follow_up_active_until = 0.0
-            if debug_enabled:
-                print("[VOICE] Follow-up window expired.")
-
-        follow_up_active = time.monotonic() < follow_up_active_until
+        follow_up_active = active_follow_up_state.is_active()
+        
         current_mode = mode or "normal"
 
         if current_mode == "normal" and follow_up_active:
@@ -240,6 +235,7 @@ def run(
 
             speech_text = speech.strip()
             message = speech.lower()
+            follow_up_state = active_follow_up_state.is_active()
             has_wakeword = _has_wakeword(message, wakeword)
             wakeword_command_message = _strip_text_before_wakeword(
                 message,
@@ -270,7 +266,7 @@ def run(
 
             if follow_up_active:
                 if _is_follow_up_stop_phrase(message):
-                    follow_up_active_until = 0.0
+                    active_follow_up_state.close()
                     if debug_enabled:
                         print("[VOICE] Follow-up ended by user.")
                     continue
@@ -290,26 +286,26 @@ def run(
                     print(f"[VOICE] Wakeword detected. Parsed message: {command_message}")
             else:
                 print("[VOICE] Wakeword not detected. Ignoring phrase.")
-                follow_up_active_until = 0.0
+                active_follow_up_state.close()
                 continue
 
             if request_queue is not None:
                 _queue_runtime_request(command_message, request_queue)
-                follow_up_active_until = 0.0
+                active_follow_up_state.close()
                 continue    
 
             result = command.run(command_message, commands, debug=debug_enabled)
 
             if result.open_follow_up:
                 follow_up_timeout_seconds = get_follow_up_timeout_seconds()
-                follow_up_active_until = time.monotonic() + follow_up_timeout_seconds
+                active_follow_up_state.open(follow_up_timeout_seconds)
                 if debug_enabled:
                     print(
                         "[VOICE] Follow-up window opened for "
                         f"{round(follow_up_timeout_seconds, 1)} seconds."
                     )
             elif follow_up_active:
-                follow_up_active_until = 0.0
+                active_follow_up_state.close()
                 if debug_enabled:
                     print("[VOICE] Follow-up window closed.")
 
