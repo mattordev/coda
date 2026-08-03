@@ -121,13 +121,13 @@ def _is_follow_up_stop_phrase(message):
 
 def _get_microphone():
     names = sr.Microphone.list_microphone_names()
-    mic_index = os.getenv("CODA_MIC_INDEX")
+    mic_index = os.getenv("CODA_MIC_INDEX", "").strip()
     mic_name = os.getenv("CODA_MIC_NAME", "").strip().lower()
 
     if _list_mics_on_start():
         print_microphones()
 
-    if mic_index is not None:
+    if mic_index:
         try:
             mic_index = int(mic_index)
             if 0 <= mic_index < len(names):

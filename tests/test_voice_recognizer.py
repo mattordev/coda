@@ -1,3 +1,4 @@
+import os
 import unittest
 from threading import Event
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,6 @@ from utils.voice_recognizer import _queue_runtime_request
 
 
 class VoiceRecognizerTests(unittest.TestCase):
-
     def test_queues_voice_runtime_request(self):
         request_queue = RuntimeQueue()
 
@@ -120,6 +120,32 @@ class VoiceRecognizerTests(unittest.TestCase):
 
         self.assertFalse(follow_up_state.is_active())
         self.assertIsNone(request_queue.get(timeout=0.01))
+
+    def test_empty_microphone_index_allows_name_selection(self):
+        microphone_factory = MagicMock()
+        microphone_factory.list_microphone_names.return_value = [
+            "System default",
+            "Microphone (Yeti Orb)",
+        ]
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CODA_LIST_MICS_ON_START": "0",
+                    "CODA_MIC_INDEX": "",
+                    "CODA_MIC_NAME": "Yeti Orb",
+                },
+            ),
+            patch.object(
+                voice_recognizer.sr,
+                "Microphone",
+                microphone_factory,
+            ),
+        ):
+            voice_recognizer._get_microphone()
+
+        microphone_factory.assert_called_once_with(device_index=1)
 
 
 if __name__ == "__main__":
