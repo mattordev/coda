@@ -235,7 +235,7 @@ def run(
 
             speech_text = speech.strip()
             message = speech.lower()
-            follow_up_state = active_follow_up_state.is_active()
+            follow_up_active = active_follow_up_state.is_active()
             has_wakeword = _has_wakeword(message, wakeword)
             wakeword_command_message = _strip_text_before_wakeword(
                 message,

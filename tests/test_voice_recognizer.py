@@ -147,6 +147,55 @@ class VoiceRecognizerTests(unittest.TestCase):
 
         microphone_factory.assert_called_once_with(device_index=1)
 
+    def test_follow_up_opened_during_transcription_queues_message(self):
+        request_queue = RuntimeQueue()
+        follow_up_state = FollowUpState()
+        stop_event = Event()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        microphone = MagicMock()
+
+        def transcribe_audio(_recognizer, _audio):
+            follow_up_state.open(duration_seconds=10.0)
+            stop_event.set()
+            return "what about sunsets", "test provider"
+
+        with (
+            patch.object(
+                voice_recognizer.sr,
+                "Recognizer",
+                return_value=recognizer,
+            ),
+            patch.object(
+                voice_recognizer,
+                "_get_microphone",
+                return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer.stt_service,
+                "transcribe_audio",
+                side_effect=transcribe_audio,
+            ),
+            patch.object(
+                voice_recognizer.dashboard_state,
+                "record_user_message",
+            ),
+            patch.object(voice_recognizer, "display_message"),
+        ):
+            voice_recognizer.run(
+                ["coda"],
+                {},
+                stop_event=stop_event,
+                request_queue=request_queue,
+                follow_up_state=follow_up_state,
+            )
+
+        queued_request = request_queue.get(timeout=0.1)
+
+        self.assertIsNotNone(queued_request)
+        self.assertEqual(queued_request.message, "what about sunsets")
+        self.assertEqual(queued_request.source, InputSource.VOICE)
+
 
 if __name__ == "__main__":
     unittest.main()
