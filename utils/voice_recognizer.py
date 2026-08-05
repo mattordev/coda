@@ -101,6 +101,18 @@ def _queue_runtime_request(
         message=message,
         source=InputSource.VOICE,
     )
+
+    if runtime_state.is_debug_enabled(default=False):
+        request_label = (
+            f"{request.source.value} request "
+            f"{request.request_id[:8]}"
+        )
+        accepted_message = f"[RUNTIME] Accepted {request_label}"
+    else:
+        accepted_message = "[RUNTIME] Request accepted"
+
+    print(accepted_message, flush=True)
+
     request_queue.put(request)
     return request
 
@@ -213,7 +225,7 @@ def run(
         if current_mode == "normal" and follow_up_active:
             print('Waiting for follow-up', flush=True)
         elif current_mode == "normal":
-            print('Ready to accept commands', flush=True)
+            print('Listener ready for voice input', flush=True)
         elif current_mode == 'response':
             print('Waiting for response', flush=True)
 

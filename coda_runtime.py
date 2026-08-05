@@ -304,6 +304,29 @@ def _execution_loop(stop_event):
         if request is None:
             continue
         
+        request_label = (
+            f"{request.source.value} request "
+            f"{request.request_id[:8]}"
+        )
+
+        debug_enabled = runtime_state.is_debug_enabled(default=False)
+        execution_started_at = time.perf_counter()
+        
+        queue_duration = max(
+            0.0,
+            time.time() - request.created_at,
+        )
+        
+        if debug_enabled:
+            processing_message = (
+                f"[RUNTIME] Processing {request_label} "
+                f"after {queue_duration:.2f}s queued"
+            )
+        else:
+            processing_message = "[RUNTIME] Processing request"
+
+        print(processing_message, flush=True)
+        
         try:
             if request.cancel_event.is_set():
                 execution_result = ExecutionResult(
@@ -315,7 +338,7 @@ def _execution_loop(stop_event):
                 command_result = command.run(
                     request.message,
                     commands,
-                    debug=runtime_state.is_debug_enabled(default=False),
+                    debug=debug_enabled,
                 )
                 execution_result = _create_execution_result(
                     request,
@@ -329,7 +352,28 @@ def _execution_loop(stop_event):
             )
         finally:
             runtime_queues.requests.task_done()
-        
+            
+        if execution_result.cancelled:
+            outcome = "Cancelled"
+        elif execution_result.error is not None:
+            outcome = "Failed"
+        elif not execution_result.handled:
+            outcome = "Not handled"
+        else:
+            outcome = "Completed"
+
+        execution_duration = time.perf_counter() - execution_started_at
+
+        if debug_enabled:
+            outcome_message = (
+                f"[RUNTIME] {outcome} {request_label} "
+                f"in {execution_duration:.2f}s"
+            )
+        else:
+            outcome_message = f"[RUNTIME] Request {outcome.lower()}"
+
+        print(outcome_message, flush=True)
+                
         runtime_queues.events.put(execution_result)
         
 def _event_loop(stop_event):

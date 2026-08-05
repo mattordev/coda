@@ -14,15 +14,56 @@ class VoiceRecognizerTests(unittest.TestCase):
     def test_queues_voice_runtime_request(self):
         request_queue = RuntimeQueue()
 
-        request = _queue_runtime_request(
-            "where is the station",
-            request_queue,
-        )
+        with (
+            patch.object(
+                voice_recognizer.runtime_state,
+                "is_debug_enabled",
+                return_value=False,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            request = _queue_runtime_request(
+                "where is the station",
+                request_queue,
+            )
+
         queued_request = request_queue.get(timeout=0.1)
 
         self.assertIs(queued_request, request)
-        self.assertEqual(queued_request.message, "where is the station")
-        self.assertEqual(queued_request.source, InputSource.VOICE)
+        self.assertEqual(
+            queued_request.message,
+            "where is the station",
+        )
+        self.assertEqual(
+            queued_request.source,
+            InputSource.VOICE,
+        )
+        print_output.assert_called_once_with(
+            "[RUNTIME] Request accepted",
+            flush=True,
+        )
+
+    def test_debug_prints_request_details_when_queueing(self):
+        request_queue = RuntimeQueue()
+
+        with (
+            patch.object(
+                voice_recognizer.runtime_state,
+                "is_debug_enabled",
+                return_value=True,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            request = _queue_runtime_request(
+                "where is the station",
+                request_queue,
+            )
+
+        print_output.assert_called_once_with(
+            f"[RUNTIME] Accepted voice request "
+            f"{request.request_id[:8]}",
+            flush=True,
+        )
         
     def test_active_follow_up_queues_message_without_wakeword(self):
         request_queue = RuntimeQueue()

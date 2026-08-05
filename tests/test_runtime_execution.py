@@ -30,6 +30,22 @@ class RuntimeExecutionTests(unittest.TestCase):
                 "run",
                 return_value=command_result,
             ) as run_command,
+            patch.object(
+                coda_runtime.time,
+                "time",
+                return_value=request.created_at + 0.25,
+            ),
+            patch.object(
+                coda_runtime.time,
+                "perf_counter",
+                side_effect=[100.0, 102.5],
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=True,
+            ),
+            patch("builtins.print") as print_output,
         ):
             worker = threading.Thread(
                 target=coda_runtime._execution_loop,
@@ -48,6 +64,73 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(result.request_id, request.request_id)
         self.assertTrue(result.handled)
         self.assertFalse(worker.is_alive())
+
+        request_label = f"voice request {request.request_id[:8]}"
+
+        print_output.assert_any_call(
+            f"[RUNTIME] Processing {request_label} "
+            f"after 0.25s queued",
+            flush=True,
+        )
+        print_output.assert_any_call(
+            f"[RUNTIME] Completed {request_label} in 2.50s",
+            flush=True,
+        )
+
+    def test_execution_loop_reports_unhandled_request(self):
+        queues = RuntimeQueues()
+        stop_event = threading.Event()
+        request = RuntimeRequest(
+            message="unknown request",
+            source=InputSource.VOICE,
+        )
+        command_result = SimpleNamespace(
+            handled=False,
+            response_text=None,
+            open_follow_up=False,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                return_value=command_result,
+            ),
+            patch.object(
+                coda_runtime.time,
+                "perf_counter",
+                side_effect=[100.0, 100.5],
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=False,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.requests.put(request)
+                result = queues.events.get(timeout=1.0)
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertFalse(result.handled)
+        print_output.assert_any_call(
+            "[RUNTIME] Processing request",
+            flush=True,
+        )
+        print_output.assert_any_call(
+            "[RUNTIME] Request not handled",
+            flush=True,
+        )
         
     def test_execution_loop_skips_cancelled_request(self):
         queues = RuntimeQueues()
@@ -61,6 +144,17 @@ class RuntimeExecutionTests(unittest.TestCase):
         with (
             patch.object(coda_runtime, "runtime_queues", queues),
             patch.object(coda_runtime.command, "run") as run_command,
+            patch.object(
+                coda_runtime.time,
+                "perf_counter",
+                side_effect=[100.0, 100.0],
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=True,
+            ),
+            patch("builtins.print") as print_output,
         ):
             worker = threading.Thread(
                 target=coda_runtime._execution_loop,
@@ -79,6 +173,12 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(result.request_id, request.request_id)
         self.assertTrue(result.cancelled)
         self.assertFalse(result.handled)
+
+        request_label = f"voice request {request.request_id[:8]}"
+        print_output.assert_any_call(
+            f"[RUNTIME] Cancelled {request_label} in 0.00s",
+            flush=True,
+        )
     
     def test_execution_loop_continues_after_command_error(self):
         queues = RuntimeQueues()
@@ -107,6 +207,17 @@ class RuntimeExecutionTests(unittest.TestCase):
                     successful_result,
                 ],
             ),
+            patch.object(
+                coda_runtime.time,
+                "perf_counter",
+                side_effect=[100.0, 101.0, 200.0, 202.0],
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=True,
+            ),
+            patch("builtins.print") as print_output,
         ):
             worker = threading.Thread(
                 target=coda_runtime._execution_loop,
@@ -129,6 +240,14 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(first_result.error, "command failed")
         self.assertFalse(first_result.handled)
         self.assertEqual(second_result.request_id, second_request.request_id)
+
+        first_request_label = (
+            f"voice request {first_request.request_id[:8]}"
+        )
+        print_output.assert_any_call(
+            f"[RUNTIME] Failed {first_request_label} in 1.00s",
+            flush=True,
+        )
         
     def test_voice_recognition_uses_runtime_request_queue(self):
         stop_event = threading.Event()
