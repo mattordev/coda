@@ -4,6 +4,7 @@ import os
 import re
 import http.client
 import speech_recognition as sr
+from collections.abc import Callable
 # import pocketsphinx5 as ps5
 import utils.dashboard_state as dashboard_state
 import utils.on_command as command
@@ -184,6 +185,7 @@ def run(
     stop_event=None,
     request_queue: RuntimeQueue[RuntimeRequest] | None = None,
     follow_up_state: FollowUpState | None = None,
+    cancel_active_request: Callable[[], str | None] | None = None,
     **kwargs):
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
@@ -275,6 +277,15 @@ def run(
             display_message(f"Heard: {message}")
             if debug_enabled:
                 print(f"[VOICE] Speech provider used: {provider_used}")
+                
+            if (
+                has_wakeword
+                and _is_follow_up_stop_phrase(wakeword_command_message)
+                and cancel_active_request is not None
+            ):
+                active_follow_up_state.close()
+                cancel_active_request()
+                continue
 
             if follow_up_active:
                 if _is_follow_up_stop_phrase(message):

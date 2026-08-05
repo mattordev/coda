@@ -2,6 +2,7 @@ from runtime.voice_worker import VoiceInputWorker
 from runtime.runtime_queue import RuntimeQueues
 from runtime.messages import ExecutionResult, RuntimeRequest
 from runtime.follow_up import FollowUpState
+from runtime.active_request import ActiveRequestState
 
 import os
 import sys
@@ -35,6 +36,7 @@ execution_stop_event = threading.Event()
 execution_thread = None
 event_stop_event = threading.Event()
 event_thread = None
+active_request_state = ActiveRequestState()
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -283,17 +285,45 @@ def check_update_available(version_url):
 
     return False
 
+def cancel_active_request() -> str | None:
+    """Request cancellation of the active runtime request."""
+    request_id = active_request_state.cancel_active()
+    
+    if request_id is None:
+        print(
+            "[RUNTIME] No active request to cancel",
+            flush=True,
+        )
+        return None
+    
+    if runtime_state.is_debug_enabled(default=False):
+        message = (
+            "[RUNTIME] Cancellation requested for "
+            f"request {request_id[:8]}"
+        )
+    else:
+        message = "[RUNTIME] Cancellation requested"
+        
+    print(message, flush=True)
+    return request_id
+
 def _create_execution_result(
     request: RuntimeRequest,
     command_result,
 ) -> ExecutionResult:
-    """Convert a command result into a runtime execution result"""
+    """Convert a command result into a runtime execution result."""
+    if request.cancel_event.is_set():
+        return ExecutionResult(
+            request_id=request.request_id,
+            handled=False,
+            cancelled=True,
+        )
+
     return ExecutionResult(
         request_id=request.request_id,
         handled=command_result.handled,
         response_text=command_result.response_text,
         open_follow_up=command_result.open_follow_up,
-        cancelled=request.cancel_event.is_set(),
     )
     
 def _execution_loop(stop_event):
@@ -303,6 +333,8 @@ def _execution_loop(stop_event):
         
         if request is None:
             continue
+        
+        active_request_state.activate(request)
         
         request_label = (
             f"{request.source.value} request "
@@ -351,6 +383,7 @@ def _execution_loop(stop_event):
                 error=str(error),
             )
         finally:
+            active_request_state.clear(request.request_id)
             runtime_queues.requests.task_done()
             
         if execution_result.cancelled:
@@ -467,6 +500,7 @@ def start_voice_recognition(stop_event):
         stop_event=stop_event,
         request_queue=runtime_queues.requests,
         follow_up_state=follow_up_state,
+        cancel_active_request=cancel_active_request,
         )
 
 

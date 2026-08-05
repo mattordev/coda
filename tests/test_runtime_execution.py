@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import coda_runtime
+from runtime.active_request import ActiveRequestState
 from runtime.messages import ExecutionResult, InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueues
 from runtime.follow_up import FollowUpState
@@ -76,6 +77,199 @@ class RuntimeExecutionTests(unittest.TestCase):
             f"[RUNTIME] Completed {request_label} in 2.50s",
             flush=True,
         )
+
+    def test_execution_loop_tracks_active_request(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        stop_event = threading.Event()
+        request = RuntimeRequest(
+            message="connected",
+            source=InputSource.VOICE,
+        )
+        command_result = SimpleNamespace(
+            handled=True,
+            response_text=None,
+            open_follow_up=False,
+        )
+        observed_request_ids = []
+
+        def run_command(*_args, **_kwargs):
+            observed_request_ids.append(
+                active_state.active_request_id()
+            )
+            return command_result
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                side_effect=run_command,
+            ),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.requests.put(request)
+                queues.events.get(timeout=1.0)
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertEqual(
+            observed_request_ids,
+            [request.request_id],
+        )
+        self.assertIsNone(
+            active_state.active_request_id()
+        )
+
+    def test_cancel_active_request_signals_request(self):
+        active_state = ActiveRequestState()
+        request = RuntimeRequest(
+            message="long-running request",
+            source=InputSource.VOICE,
+        )
+        active_state.activate(request)
+
+        with (
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=False,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            cancelled_id = coda_runtime.cancel_active_request()
+
+        self.assertEqual(cancelled_id, request.request_id)
+        self.assertTrue(request.cancel_event.is_set())
+        print_output.assert_called_once_with(
+            "[RUNTIME] Cancellation requested",
+            flush=True,
+        )
+
+    def test_cancel_active_request_is_safe_when_idle(self):
+        active_state = ActiveRequestState()
+
+        with (
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            cancelled_id = coda_runtime.cancel_active_request()
+
+        self.assertIsNone(cancelled_id)
+        print_output.assert_called_once_with(
+            "[RUNTIME] No active request to cancel",
+            flush=True,
+        )
+
+    def test_cancellation_during_execution_does_not_affect_next_request(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        stop_event = threading.Event()
+        command_started = threading.Event()
+        allow_command_to_finish = threading.Event()
+
+        first_request = RuntimeRequest(
+            message="slow request",
+            source=InputSource.VOICE,
+        )
+        second_request = RuntimeRequest(
+            message="next request",
+            source=InputSource.VOICE,
+        )
+
+        cancelled_command_result = SimpleNamespace(
+            handled=True,
+            response_text="stale response",
+            open_follow_up=True,
+        )
+        next_command_result = SimpleNamespace(
+            handled=True,
+            response_text=None,
+            open_follow_up=False,
+        )
+
+        def run_command(message, *_args, **_kwargs):
+            if message == first_request.message:
+                command_started.set()
+                allow_command_to_finish.wait(timeout=1.0)
+                return cancelled_command_result
+
+            return next_command_result
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                side_effect=run_command,
+            ),
+            patch("builtins.print"),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.requests.put(first_request)
+                self.assertTrue(
+                    command_started.wait(timeout=1.0)
+                )
+
+                cancelled_id = active_state.cancel_active()
+                queues.requests.put(second_request)
+                allow_command_to_finish.set()
+
+                first_result = queues.events.get(timeout=1.0)
+                second_result = queues.events.get(timeout=1.0)
+            finally:
+                stop_event.set()
+                allow_command_to_finish.set()
+                worker.join(timeout=1.0)
+
+        self.assertEqual(
+            cancelled_id,
+            first_request.request_id,
+        )
+        self.assertTrue(first_result.cancelled)
+        self.assertFalse(first_result.handled)
+        self.assertIsNone(first_result.response_text)
+        self.assertFalse(first_result.open_follow_up)
+
+        self.assertEqual(
+            second_result.request_id,
+            second_request.request_id,
+        )
+        self.assertTrue(second_result.handled)
+        self.assertFalse(second_result.cancelled)
+        self.assertIsNone(active_state.active_request_id())
 
     def test_execution_loop_reports_unhandled_request(self):
         queues = RuntimeQueues()
@@ -267,6 +461,7 @@ class RuntimeExecutionTests(unittest.TestCase):
             stop_event=stop_event,
             request_queue=queues.requests,
             follow_up_state=coda_runtime.follow_up_state,
+            cancel_active_request=coda_runtime.cancel_active_request,
         )
         
     def test_execution_thread_starts_once_and_stops(self):

@@ -236,6 +236,57 @@ class VoiceRecognizerTests(unittest.TestCase):
         self.assertIsNotNone(queued_request)
         self.assertEqual(queued_request.message, "what about sunsets")
         self.assertEqual(queued_request.source, InputSource.VOICE)
+        
+    def test_wakeword_stop_cancels_without_queueing(self):
+        request_queue = RuntimeQueue()
+        follow_up_state = FollowUpState()
+        stop_event = Event()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        microphone = MagicMock()
+        cancel_active_request = MagicMock(
+            return_value="request-id",
+        )
+
+        def transcribe_audio(_recognizer, _audio):
+            stop_event.set()
+            return "coda stop", "test provider"
+
+        with (
+            patch.object(
+                voice_recognizer.sr,
+                "Recognizer",
+                return_value=recognizer,
+            ),
+            patch.object(
+                voice_recognizer,
+                "_get_microphone",
+                return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer.stt_service,
+                "transcribe_audio",
+                side_effect=transcribe_audio,
+            ),
+            patch.object(
+                voice_recognizer.dashboard_state,
+                "record_user_message",
+            ),
+            patch.object(voice_recognizer, "display_message"),
+        ):
+            voice_recognizer.run(
+                ["coda"],
+                {},
+                stop_event=stop_event,
+                request_queue=request_queue,
+                follow_up_state=follow_up_state,
+                cancel_active_request=cancel_active_request,
+            )
+
+        cancel_active_request.assert_called_once_with()
+        self.assertIsNone(
+            request_queue.get(timeout=0.01)
+        )
 
 
 if __name__ == "__main__":
