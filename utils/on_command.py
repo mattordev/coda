@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from threading import Event
 
 from ai.intents import (
     IntentDispatcher,
@@ -26,8 +27,8 @@ class CommandResult:
         return self.handled
 
 
-def run(message, commands, debug=False):
-    return on_command(message, commands, debug=debug)
+def run(message, commands, debug=False, cancel_event: Event | None = None):
+    return on_command(message, commands, debug=debug, cancel_event=cancel_event)
 
 
 def configure_intent_router(commands):
@@ -51,6 +52,19 @@ def reload_config():
 
 def _llm_fallback_enabled():
     return llm_service.llm_fallback_enabled()
+
+
+def _get_cancellation_result(
+    cancel_event: Event | None,
+    debug: bool,
+) -> CommandResult | None:
+    if cancel_event is None or not cancel_event.is_set():
+        return None
+
+    if debug:
+        print("[DEBUG] Command processing cancelled.")
+
+    return CommandResult(handled=False)
 
 
 def _dispatch_intent(
@@ -96,8 +110,12 @@ def _dispatch_intent(
     )
 
 
-def on_command(msg, commands, debug=False):
+def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     normalized_message = msg.strip()
+
+    cancelled_result = _get_cancellation_result(cancel_event, debug)
+    if cancelled_result is not None:
+        return cancelled_result
 
     if debug:
         print(f"[DEBUG] Raw message: {msg}")
@@ -121,6 +139,10 @@ def on_command(msg, commands, debug=False):
         debug=debug,
     )
 
+    cancelled_result = _get_cancellation_result(cancel_event, debug)
+    if cancelled_result is not None:
+        return cancelled_result
+
     if dispatch_result is not None:
         return dispatch_result
 
@@ -133,7 +155,14 @@ def on_command(msg, commands, debug=False):
     if not _llm_fallback_enabled():
         return CommandResult(handled=False)
 
-    response_text, error = route_request(normalized_message)
+    response_text, error = route_request(
+        normalized_message,
+        cancel_event=cancel_event,
+    )
+
+    cancelled_result = _get_cancellation_result(cancel_event, debug)
+    if cancelled_result is not None:
+        return cancelled_result
 
     if not error and not response_text:
         if debug:
@@ -142,7 +171,14 @@ def on_command(msg, commands, debug=False):
                 "Retrying once."
             )
 
-        response_text, error = route_request(normalized_message)
+        response_text, error = route_request(
+            normalized_message,
+            cancel_event=cancel_event,
+        )
+
+        cancelled_result = _get_cancellation_result(cancel_event, debug)
+        if cancelled_result is not None:
+            return cancelled_result
 
     if error:
         if debug:

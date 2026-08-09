@@ -182,6 +182,71 @@ class RuntimeExecutionTests(unittest.TestCase):
             flush=True,
         )
 
+    def test_normal_submission_does_not_cancel_active_request(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        active_request = RuntimeRequest(
+            message="active request",
+            source=InputSource.VOICE,
+        )
+        submitted_request = RuntimeRequest(
+            message="queued request",
+            source=InputSource.VOICE,
+        )
+        active_state.activate(active_request)
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+        ):
+            cancelled_id = coda_runtime.submit_runtime_request(
+                submitted_request
+            )
+
+        self.assertIsNone(cancelled_id)
+        self.assertFalse(active_request.cancel_event.is_set())
+        self.assertIs(
+            queues.requests.get(timeout=0.01),
+            submitted_request,
+        )
+
+    def test_replacement_submission_cancels_active_request(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        active_request = RuntimeRequest(
+            message="active request",
+            source=InputSource.VOICE,
+        )
+        replacement_request = RuntimeRequest(
+            message="replacement request",
+            source=InputSource.VOICE,
+            replace_active=True,
+        )
+        active_state.activate(active_request)
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+        ):
+            cancelled_id = coda_runtime.submit_runtime_request(
+                replacement_request
+            )
+
+        self.assertEqual(cancelled_id, active_request.request_id)
+        self.assertTrue(active_request.cancel_event.is_set())
+        self.assertIs(
+            queues.requests.get(timeout=0.01),
+            replacement_request,
+        )
+
     def test_cancellation_during_execution_does_not_affect_next_request(self):
         queues = RuntimeQueues()
         active_state = ActiveRequestState()
@@ -460,6 +525,7 @@ class RuntimeExecutionTests(unittest.TestCase):
             mode="normal",
             stop_event=stop_event,
             request_queue=queues.requests,
+            submit_request=coda_runtime.submit_runtime_request,
             follow_up_state=coda_runtime.follow_up_state,
             cancel_active_request=coda_runtime.cancel_active_request,
         )

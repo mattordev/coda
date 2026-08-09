@@ -1,4 +1,5 @@
 import unittest
+from threading import Event
 from unittest import mock
 
 from ai.providers import registry
@@ -11,6 +12,50 @@ import utils.llm_service as llm_service
 class PrivacyRoutingTests(unittest.TestCase):
     def tearDown(self):
         llm_service._reset_conversation()
+
+    def test_cancelled_request_does_not_start_provider(self):
+        cancel_event = Event()
+        cancel_event.set()
+
+        with mock.patch.object(
+            core,
+            "_call_provider_with_health",
+        ) as call_provider:
+            response, error = core._try_providers(
+                ["openai", "ollama"],
+                "cancelled request",
+                0.0,
+                cancel_event=cancel_event,
+            )
+
+        self.assertIsNone(response)
+        self.assertEqual(error, "Request cancelled.")
+        call_provider.assert_not_called()
+
+    def test_cancellation_after_provider_prevents_fallback(self):
+        cancel_event = Event()
+        attempted_providers = []
+
+        def call_provider(provider, *_args):
+            attempted_providers.append(provider)
+            cancel_event.set()
+            return None, "provider failed", False
+
+        with mock.patch.object(
+            core,
+            "_call_provider_with_health",
+            side_effect=call_provider,
+        ):
+            response, error = core._try_providers(
+                ["openai", "ollama"],
+                "cancel during provider",
+                0.0,
+                cancel_event=cancel_event,
+            )
+
+        self.assertIsNone(response)
+        self.assertEqual(error, "Request cancelled.")
+        self.assertEqual(attempted_providers, ["openai"])
 
     def test_cloud_messages_redact_sensitive_history(self):
         local_provider = registry.get_provider_module("ollama")

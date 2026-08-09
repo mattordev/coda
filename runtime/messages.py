@@ -20,6 +20,7 @@ class RuntimeRequest:
         repr=False,
         compare=False,
     )
+    replace_active: bool = False
     
 @dataclass(frozen=True)
 class ExecutionResult:

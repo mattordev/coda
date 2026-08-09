@@ -285,6 +285,15 @@ def check_update_available(version_url):
 
     return False
 
+def submit_runtime_request(request: RuntimeRequest) -> str | None:
+    cancelled_request_id = None
+
+    if request.replace_active:
+        cancelled_request_id = active_request_state.cancel_active()
+
+    runtime_queues.requests.put(request)
+    return cancelled_request_id
+
 def cancel_active_request() -> str | None:
     """Request cancellation of the active runtime request."""
     request_id = active_request_state.cancel_active()
@@ -371,6 +380,7 @@ def _execution_loop(stop_event):
                     request.message,
                     commands,
                     debug=debug_enabled,
+                    cancel_event=request.cancel_event,
                 )
                 execution_result = _create_execution_result(
                     request,
@@ -499,6 +509,7 @@ def start_voice_recognition(stop_event):
         mode='normal', 
         stop_event=stop_event,
         request_queue=runtime_queues.requests,
+        submit_request=submit_runtime_request,
         follow_up_state=follow_up_state,
         cancel_active_request=cancel_active_request,
         )

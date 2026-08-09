@@ -96,6 +96,7 @@ def _normalize_message(message):
 def _queue_runtime_request(
     message: str,
     request_queue: RuntimeQueue[RuntimeRequest],
+    submit_request: Callable[[RuntimeRequest], str | None] | None = None,
 ) -> RuntimeRequest:
     """Create and queue a voice runtime request"""
     request = RuntimeRequest(
@@ -114,7 +115,11 @@ def _queue_runtime_request(
 
     print(accepted_message, flush=True)
 
-    request_queue.put(request)
+    if submit_request is None:
+        request_queue.put(request)
+    else:
+        submit_request(request)
+
     return request
 
 
@@ -184,6 +189,7 @@ def run(
     commands, mode=None,
     stop_event=None,
     request_queue: RuntimeQueue[RuntimeRequest] | None = None,
+    submit_request: Callable[[RuntimeRequest], str | None] | None = None,
     follow_up_state: FollowUpState | None = None,
     cancel_active_request: Callable[[], str | None] | None = None,
     **kwargs):
@@ -313,7 +319,11 @@ def run(
                 continue
 
             if request_queue is not None:
-                _queue_runtime_request(command_message, request_queue)
+                _queue_runtime_request(
+                    command_message,
+                    request_queue,
+                    submit_request=submit_request,
+                )
                 active_follow_up_state.close()
                 continue    
 

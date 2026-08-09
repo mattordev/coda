@@ -1,4 +1,5 @@
 import os
+from threading import Event
 
 from ai.providers import registry
 from ai.privacy.detector import analyze_privacy
@@ -12,7 +13,17 @@ def _debug_print(*args, **kwargs):
     runtime_state.debug_print(*args, **kwargs)
 
 
-def _try_providers(providers: list[str], prompt: str, risk: float, privacy_result=None):
+def _is_cancelled(cancel_event: Event | None) -> bool:
+    return cancel_event is not None and cancel_event.is_set()
+
+
+def _try_providers(
+    providers: list[str],
+    prompt: str,
+    risk: float,
+    privacy_result=None,
+    cancel_event: Event | None = None,
+):
     """
     Attempt providers in order and return the first successful response.
 
@@ -22,9 +33,21 @@ def _try_providers(providers: list[str], prompt: str, risk: float, privacy_resul
     last_error = None
 
     for provider in providers:
+        if _is_cancelled(cancel_event):
+            _debug_print(
+                "[ROUTER] Request cancelled before next provider."
+            )
+            return None, "Request cancelled."
+
         _debug_print(f"[ROUTER] trying provider {provider}")
 
         response, error, skipped = _call_provider_with_health(provider, prompt, risk, privacy_result)
+
+        if _is_cancelled(cancel_event):
+            _debug_print(
+                "[ROUTER] Request cancelled after provider attempt."
+            )
+            return None, "Request cancelled."
 
         if skipped:
             _debug_print(f"[ROUTER] {provider} skipped due to recent failure.")
@@ -161,7 +184,10 @@ def get_provider_order(privacy_result):
     return cloud_providers + local_providers
 
 
-def route_request(prompt: str):
+def route_request(
+    prompt: str,
+    cancel_event: Event | None = None,
+):
     """
     Analyse privacy, choose provider order, and return the first good response.
 
@@ -187,7 +213,13 @@ def route_request(prompt: str):
 
         _debug_print("[ROUTER] High risk -> using LOCAL providers only")
 
-        response, error = _try_providers(providers, prompt, risk, privacy_result)
+        response, error = _try_providers(
+            providers,
+            prompt,
+            risk,
+            privacy_result,
+            cancel_event=cancel_event,
+        )
 
         if response:
             return response, None
@@ -202,7 +234,13 @@ def route_request(prompt: str):
 
         _debug_print(f"[ROUTER] Medium risk -> trying providers in order: {providers}")
 
-        response, error = _try_providers(providers, prompt, risk, privacy_result)
+        response, error = _try_providers(
+            providers,
+            prompt,
+            risk,
+            privacy_result,
+            cancel_event=cancel_event,
+        )
 
         if response:
             return response, None
@@ -218,7 +256,13 @@ def route_request(prompt: str):
     _debug_print(f"[DEBUG] Primary provider being checked: {providers[0]}")
     _debug_print(f"[ROUTER] Low risk -> trying providers in order: {providers}")
 
-    response, error = _try_providers(providers, prompt, risk, privacy_result)
+    response, error = _try_providers(
+        providers,
+        prompt,
+        risk,
+        privacy_result,
+        cancel_event=cancel_event,
+    )
 
     if response:
         return response, None
