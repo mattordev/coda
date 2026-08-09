@@ -4,6 +4,9 @@ import os
 from elevenlabs import generate, play, set_api_key
 import utils.dashboard_state as dashboard_state
 import utils.runtime_state as runtime_state
+from runtime.speech_playback import SpeechProvider
+from tts.elevenlabs_provider import ElevenLabsProvider
+from tts.pyttsx3_provider import Pyttsx3Provider
 
 try:
     from dotenv import load_dotenv
@@ -12,6 +15,8 @@ except ImportError:
 
 _api_key_loaded = False
 _eleven_labs_disabled = False
+_elevenlabs_provider: ElevenLabsProvider | None = None
+_pyttsx3_provider = Pyttsx3Provider()
 
 if load_dotenv is not None:
     load_dotenv()
@@ -50,12 +55,14 @@ def ensure_api_key_loaded():
 def reload_config():
     global _api_key_loaded
     global _eleven_labs_disabled
+    global _elevenlabs_provider
 
     if load_dotenv is not None:
         load_dotenv(override=True)
 
     _api_key_loaded = False
     _eleven_labs_disabled = False
+    _elevenlabs_provider = None
 
     return ensure_api_key_loaded()
 
@@ -89,6 +96,42 @@ def is_tts_available():
         return True
     except Exception:
         return False
+    
+def _generate_elevenlabs_audio(response: str) -> bytes:
+    global _eleven_labs_disabled
+    
+    if not ensure_api_key_loaded():
+        raise RuntimeError("ElevenLabs is not configured.")
+    
+    runtime_state.debug_print("Using Eleven labs for speech")
+    
+    try:
+        return generate(
+            text=response,
+            voice="N2lVS1w4EtoT3dr4eOWO",
+            model="eleven_flash_v2_5",
+        )
+    except Exception as error:
+        if "invalid api key" in str(error).lower():
+            _eleven_labs_disabled = True
+
+        raise
+    
+def resolve_speech_providers() -> list[SpeechProvider]:
+    global _elevenlabs_provider
+    
+    providers: list[SpeechProvider] = []
+    
+    if is_connected() and ensure_api_key_loaded():
+        if _elevenlabs_provider is None:
+            _elevenlabs_provider = ElevenLabsProvider(
+                _generate_elevenlabs_audio
+            )
+            
+        providers.append(_elevenlabs_provider)
+    
+    providers.append(_pyttsx3_provider)
+    return providers
 
 
 def speak_response(response):
@@ -98,12 +141,8 @@ def speak_response(response):
 
     if is_connected() and ensure_api_key_loaded():
         try:
-            runtime_state.debug_print("Using Eleven labs for speech")
-            audio = generate(
-                text=response,
-                voice="N2lVS1w4EtoT3dr4eOWO",
-                model="eleven_flash_v2_5",
-            )
+            audio = _generate_elevenlabs_audio(response)
+            
             play(audio)
             return True
         except Exception as e:
