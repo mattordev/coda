@@ -1,3 +1,4 @@
+import json
 import os
 
 import requests
@@ -125,7 +126,7 @@ def describe():
     return f"ollama (model: {model})"
 
 
-def generate(messages):
+def generate(messages, cancel_event=None):
     model, error = get_model()
     if error:
         return None, error
@@ -139,19 +140,45 @@ def generate(messages):
     )
 
     try:
-        response = requests.post(
+        with requests.post(
             f"{base_url}/api/chat",
             json={
                 "model": model,
                 "messages": messages,
-                "stream": False,
+                "stream": True,
             },
             timeout=timeout_seconds,
-        )
-        response.raise_for_status()
-        response_json = response.json()
-        message = response_json.get("message", {})
-        assistant_message = message.get("content") or response_json.get("response")
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            response_parts = []
+
+            for line in response.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    return None, "Request cancelled."
+
+                if not line:
+                    continue
+
+                response_json = json.loads(line)
+
+                provider_error = response_json.get("error")
+                if provider_error:
+                    return None, provider_error
+
+                message = response_json.get("message", {})
+                content = message.get("content") or response_json.get("response")
+
+                if content:
+                    response_parts.append(content)
+
+                if response_json.get("done"):
+                    break
+
+            if cancel_event is not None and cancel_event.is_set():
+                return None, "Request cancelled."
+
+            assistant_message = "".join(response_parts)
     except Timeout:
         if model_loaded:
             return None, (

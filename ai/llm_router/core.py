@@ -41,7 +41,13 @@ def _try_providers(
 
         _debug_print(f"[ROUTER] trying provider {provider}")
 
-        response, error, skipped = _call_provider_with_health(provider, prompt, risk, privacy_result)
+        response, error, skipped = _call_provider_with_health(
+            provider,
+            prompt,
+            risk,
+            privacy_result,
+            cancel_event=cancel_event,
+        )
 
         if _is_cancelled(cancel_event):
             _debug_print(
@@ -65,7 +71,13 @@ def _try_providers(
     return None, last_error
 
 
-def _call_provider_with_health(provider: str, prompt: str, risk: float, privacy_result=None):
+def _call_provider_with_health(
+    provider: str,
+    prompt: str,
+    risk: float,
+    privacy_result=None,
+    cancel_event: Event | None = None,
+):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.
 
@@ -84,6 +96,7 @@ def _call_provider_with_health(provider: str, prompt: str, risk: float, privacy_
         prompt,
         risk=risk,
         privacy_result=privacy_result,
+        cancel_event=cancel_event,
     )
     return response, error, False
 
@@ -224,6 +237,9 @@ def route_request(
         if response:
             return response, None
 
+        if error == "Request cancelled.":
+            return None, error
+
         return _high_risk_unavailable_message(), None
 
     # Sensitive request, try providers in policy order
@@ -244,6 +260,9 @@ def route_request(
 
         if response:
             return response, None
+
+        if error == "Request cancelled.":
+            return None, error
 
         _debug_print("[ROUTER] All providers failed -> giving up")
         return _provider_unavailable_message(), None
@@ -266,6 +285,9 @@ def route_request(
 
     if response:
         return response, None
+
+    if error == "Request cancelled.":
+        return None, error
 
     _debug_print("[ROUTER] All providers failed -> giving up")
     return _provider_unavailable_message(), None
