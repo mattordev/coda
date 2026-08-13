@@ -105,6 +105,10 @@ class RuntimeExecutionTests(unittest.TestCase):
                 "run",
                 return_value=command_result,
             ),
+            patch.object(
+                coda_runtime.dashboard_state,
+                "record_ai_response",
+            ) as record_ai_response,
             patch("builtins.print"),
         ):
             worker = threading.Thread(
@@ -125,6 +129,10 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(speech_task.request_id, request.request_id)
         self.assertEqual(speech_task.text, "General response")
         self.assertIs(speech_task.cancel_event, request.cancel_event)
+        record_ai_response.assert_called_once_with(
+            "General response",
+            source="tts",
+        )
 
     def test_execution_loop_tracks_active_request(self):
         queues = RuntimeQueues()

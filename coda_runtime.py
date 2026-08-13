@@ -431,11 +431,14 @@ def _execution_loop(stop_event):
                     request,
                     command_result,
                 )
-
                 if (
                     execution_result.response_text is not None
                     and not execution_result.cancelled
                 ):
+                    dashboard_state.record_ai_response(
+                        execution_result.response_text,
+                        source="tts",
+                    )
                     runtime_queues.speech.put(
                         SpeechTask(
                             request_id=request.request_id,
