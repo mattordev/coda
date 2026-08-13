@@ -201,14 +201,6 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
 
     print(f"CODA: {response_text}")
 
-    try:
-        import utils.speak_response as speak
-
-        speak.speak_response(response_text)
-    except Exception as exc:
-        if debug:
-            print(f"[DEBUG] Could not speak LLM response: {exc}")
-
     return CommandResult(
         handled=True,
         response_text=response_text,

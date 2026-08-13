@@ -5,6 +5,24 @@ import utils.speak_response as speech
 
 
 class SpeechProviderResolutionTests(unittest.TestCase):
+    def test_configured_submitter_receives_speech(self):
+        submitter = Mock(return_value=True)
+
+        with patch.object(
+            speech.dashboard_state,
+            "record_ai_response",
+        ) as record_response:
+            speech.configure_speech_submitter(submitter)
+
+            try:
+                submitted = speech.speak_response("hello")
+            finally:
+                speech.configure_speech_submitter(None)
+
+        self.assertTrue(submitted)
+        submitter.assert_called_once_with("hello")
+        record_response.assert_called_once_with("hello", source="tts")
+
     def test_offline_resolution_returns_local_provider_only(self):
         local_provider = Mock(name="local_provider")
 

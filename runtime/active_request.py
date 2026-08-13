@@ -38,3 +38,8 @@ class ActiveRequestState:
                 return None
             
             return self._request.request_id
+
+    def active_request(self) -> RuntimeRequest | None:
+        """Return the request currently owned by the execution worker."""
+        with self._lock:
+            return self._request

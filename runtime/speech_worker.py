@@ -88,6 +88,11 @@ class SpeechTaskProcessor:
             event_type=event_type,
             request_id=task.request_id,
             error=error,
+            open_follow_up=(
+                task.open_follow_up
+                if event_type == WorkerEventType.COMPLETED
+                else False
+            )
         )
         
         

@@ -43,6 +43,7 @@ class SpeechTask:
         repr=False,
         compare=False,
     )
+    open_follow_up: bool = False
     
 class WorkerName(str, Enum):
     VOICE_INPUT = "voice_input"
@@ -64,3 +65,4 @@ class WorkerEvent:
     request_id: str | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    open_follow_up: bool = False

@@ -7,6 +7,7 @@ import utils.runtime_state as runtime_state
 from runtime.speech_playback import SpeechProvider
 from tts.elevenlabs_provider import ElevenLabsProvider
 from tts.pyttsx3_provider import Pyttsx3Provider
+from typing import Callable
 
 try:
     from dotenv import load_dotenv
@@ -17,6 +18,10 @@ _api_key_loaded = False
 _eleven_labs_disabled = False
 _elevenlabs_provider: ElevenLabsProvider | None = None
 _pyttsx3_provider = Pyttsx3Provider()
+
+SpeechSubmitter = Callable[[str], bool]
+
+_speech_submitter: SpeechSubmitter | None = None
 
 if load_dotenv is not None:
     load_dotenv()
@@ -133,11 +138,21 @@ def resolve_speech_providers() -> list[SpeechProvider]:
     providers.append(_pyttsx3_provider)
     return providers
 
+def configure_speech_submitter(
+    submitter: SpeechSubmitter | None,
+) -> None:
+    """Configure asynchronous speech submission for the runtime."""
+    global _speech_submitter
+
+    _speech_submitter = submitter
 
 def speak_response(response):
     global _eleven_labs_disabled
 
     dashboard_state.record_ai_response(response, source="tts")
+
+    if _speech_submitter is not None:
+        return _speech_submitter(response)
 
     if is_connected() and ensure_api_key_loaded():
         try:

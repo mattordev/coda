@@ -19,6 +19,7 @@ class ActiveRequestStateTests(unittest.TestCase):
             state.active_request_id(),
             request.request_id,
         )
+        self.assertIs(state.active_request(), request)
 
     def test_cancel_active_sets_request_event(self):
         state = ActiveRequestState()

@@ -103,7 +103,6 @@ class IntentRuntimeTests(unittest.TestCase):
         self.assertEqual(command.requests[0].strategy, "local_classifier")
         route_request.assert_not_called()
 
-    @patch("utils.speak_response.speak_response")
     @patch.object(
         command_runtime,
         "route_request",
@@ -118,7 +117,6 @@ class IntentRuntimeTests(unittest.TestCase):
         self,
         _fallback_enabled,
         route_request,
-        speak_response,
     ):
         router = Mock()
         router.route.return_value = IntentResult(intent=None)
@@ -137,7 +135,6 @@ class IntentRuntimeTests(unittest.TestCase):
             "tell me something interesting",
             cancel_event=None,
         )
-        speak_response.assert_called_once_with("General response")
 
     @patch.object(command_runtime, "route_request")
     @patch.object(
