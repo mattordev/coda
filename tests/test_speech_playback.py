@@ -39,6 +39,56 @@ class FakeSpeechProvider:
         return self.session
 
 
+class FakeStreamingSpeechSession:
+    def __init__(self, chunks, pause_after_chunk=False):
+        self.chunks = chunks
+        self.pause_after_chunk = pause_after_chunk
+        self.played_chunks = []
+        self.chunk_played = threading.Event()
+        self.release_stream = threading.Event()
+        self.stop_called = threading.Event()
+
+    def play(self, cancel_event):
+        for chunk in self.chunks:
+            if cancel_event.is_set() or self.stop_called.is_set():
+                return False
+
+            self.played_chunks.append(chunk)
+            self.chunk_played.set()
+
+            if self.pause_after_chunk:
+                self.release_stream.wait(timeout=1.0)
+
+        return not cancel_event.is_set() and not self.stop_called.is_set()
+
+    def stop(self):
+        self.stop_called.set()
+        self.release_stream.set()
+
+
+class FakeStreamingSpeechProvider:
+    name = "future-streaming-provider"
+
+    def __init__(self, chunks, pause_after_chunk=False):
+        self.model = object()
+        self.chunks = chunks
+        self.pause_after_chunk = pause_after_chunk
+        self.sessions = []
+        self.session_created = threading.Event()
+
+    def is_available(self):
+        return True
+
+    def create_session(self, _text):
+        session = FakeStreamingSpeechSession(
+            self.chunks,
+            pause_after_chunk=self.pause_after_chunk,
+        )
+        self.sessions.append(session)
+        self.session_created.set()
+        return session
+
+
 class SpeechPlaybackControllerTests(unittest.TestCase):
     def test_cancelled_task_does_not_create_session(self):
         controller = SpeechPlaybackController()
@@ -94,6 +144,54 @@ class SpeechPlaybackControllerTests(unittest.TestCase):
         self.assertTrue(session.stop_called.is_set())
         self.assertEqual(playback_result, [False])
         self.assertFalse(controller.stop())
+
+    def test_streaming_provider_uses_existing_session_boundary(self):
+        controller = SpeechPlaybackController()
+        provider = FakeStreamingSpeechProvider([b"first", b"second"])
+
+        played = controller.play(
+            provider,
+            "stream this response",
+            threading.Event(),
+        )
+
+        self.assertTrue(played)
+        self.assertEqual(len(provider.sessions), 1)
+        self.assertEqual(
+            provider.sessions[0].played_chunks,
+            [b"first", b"second"],
+        )
+
+    def test_streaming_session_can_be_interrupted_between_chunks(self):
+        controller = SpeechPlaybackController()
+        provider = FakeStreamingSpeechProvider(
+            [b"first", b"second"],
+            pause_after_chunk=True,
+        )
+        cancel_event = threading.Event()
+        playback_result = []
+
+        worker = threading.Thread(
+            target=lambda: playback_result.append(
+                controller.play(
+                    provider,
+                    "interrupt this response",
+                    cancel_event,
+                )
+            )
+        )
+        worker.start()
+
+        self.assertTrue(provider.session_created.wait(timeout=1.0))
+        session = provider.sessions[0]
+        self.assertTrue(session.chunk_played.wait(timeout=1.0))
+        self.assertTrue(controller.stop())
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(session.played_chunks, [b"first"])
+        self.assertEqual(playback_result, [False])
+        self.assertTrue(cancel_event.is_set())
 
 
 if __name__ == "__main__":

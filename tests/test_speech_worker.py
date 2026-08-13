@@ -209,6 +209,54 @@ class SpeechWorkerTests(unittest.TestCase):
         self.assertEqual(events[1].error, "processor failed")
         self.assertEqual(processor.process.call_count, 2)
 
+    def test_worker_processes_next_task_after_cancellation(self):
+        queues = RuntimeQueues()
+        shutdown_event = threading.Event()
+        processor = Mock(spec=SpeechTaskProcessor)
+        cancelled_task = self._task("request-1")
+        next_task = self._task("request-2")
+        processor.process.side_effect = [
+            WorkerEvent(
+                worker=WorkerName.SPEECH,
+                event_type=WorkerEventType.CANCELLED,
+                request_id=cancelled_task.request_id,
+            ),
+            WorkerEvent(
+                worker=WorkerName.SPEECH,
+                event_type=WorkerEventType.COMPLETED,
+                request_id=next_task.request_id,
+            ),
+        ]
+        worker = SpeechWorker(
+            queues.speech,
+            queues.events,
+            processor,
+            shutdown_event,
+        )
+        worker.start()
+
+        try:
+            queues.speech.put(cancelled_task)
+            queues.speech.put(next_task)
+            events = [
+                queues.events.get(timeout=1.0)
+                for _ in range(4)
+            ]
+        finally:
+            worker.stop()
+
+        self.assertEqual(
+            [event.event_type for event in events],
+            [
+                WorkerEventType.STARTED,
+                WorkerEventType.CANCELLED,
+                WorkerEventType.STARTED,
+                WorkerEventType.COMPLETED,
+            ],
+        )
+        self.assertEqual(processor.process.call_count, 2)
+        self.assertFalse(worker.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()
