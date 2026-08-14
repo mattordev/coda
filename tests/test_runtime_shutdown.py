@@ -5,6 +5,7 @@ from unittest import mock
 import coda_runtime
 from runtime.active_request import ActiveRequestState
 from runtime.messages import InputSource, RuntimeRequest
+from runtime.runtime_queue import RuntimeQueues
 
 
 class RuntimeShutdownTests(unittest.TestCase):
@@ -94,6 +95,90 @@ class RuntimeShutdownTests(unittest.TestCase):
         self.assertTrue(first_result)
         self.assertFalse(second_result)
         stop_voice.assert_called_once_with(timeout_seconds=4.0)
+
+    def test_shutdown_cancels_active_work_without_starting_pending_request(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        execution_stop = threading.Event()
+        shutdown_started = threading.Event()
+        command_started = threading.Event()
+        active_request = RuntimeRequest(
+            message="active request",
+            source=InputSource.VOICE,
+        )
+        pending_request = RuntimeRequest(
+            message="pending request",
+            source=InputSource.VOICE,
+        )
+
+        def run_command(message, *_args, cancel_event=None, **_kwargs):
+            self.assertEqual(message, active_request.message)
+            command_started.set()
+            self.assertTrue(cancel_event.wait(timeout=1.0))
+            return mock.Mock(
+                handled=True,
+                response_text="cancelled response",
+                open_follow_up=True,
+            )
+
+        with mock.patch.object(
+            coda_runtime,
+            "runtime_queues",
+            queues,
+        ), mock.patch.object(
+            coda_runtime,
+            "active_request_state",
+            active_state,
+        ), mock.patch.object(
+            coda_runtime,
+            "execution_stop_event",
+            execution_stop,
+        ), mock.patch.object(
+            coda_runtime,
+            "shutdown_started",
+            shutdown_started,
+        ), mock.patch.object(
+            coda_runtime.command,
+            "run",
+            side_effect=run_command,
+        ) as run, mock.patch.object(
+            coda_runtime,
+            "stop_voice_thread",
+        ), mock.patch.object(
+            coda_runtime.speech,
+            "configure_speech_submitter",
+        ), mock.patch.object(
+            coda_runtime,
+            "stop_speech_thread",
+        ), mock.patch.object(
+            coda_runtime,
+            "stop_event_thread",
+        ), mock.patch.object(
+            coda_runtime,
+            "stop_heartbeat_thread",
+        ), mock.patch("builtins.print"):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(execution_stop,),
+            )
+
+            with mock.patch.object(coda_runtime, "execution_thread", worker):
+                worker.start()
+                queues.requests.put(active_request)
+                queues.requests.put(pending_request)
+                self.assertTrue(command_started.wait(timeout=1.0))
+
+                stopped = coda_runtime.shutdown_runtime(timeout_seconds=1.0)
+
+            result = queues.events.get(timeout=1.0)
+
+        self.assertTrue(stopped)
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.request_id, active_request.request_id)
+        self.assertTrue(active_request.cancel_event.is_set())
+        self.assertIs(queues.requests.get(timeout=0.01), pending_request)
+        run.assert_called_once()
+        self.assertFalse(worker.is_alive())
 
     def test_main_shuts_down_cleanly_after_keyboard_interrupt(self):
         shutdown_started = threading.Event()
