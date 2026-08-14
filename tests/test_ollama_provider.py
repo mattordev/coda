@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 from threading import Event
 from unittest import mock
@@ -103,6 +104,79 @@ class OllamaProviderTests(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual(error, "model failed")
+
+    def test_cancel_releases_blocked_request_creation(self):
+        request_started = Event()
+        release_request = Event()
+        cancel_event = Event()
+        results = []
+
+        def post(*_args, **_kwargs):
+            request_started.set()
+            release_request.wait(timeout=1.0)
+            return self._response([])
+
+        with mock.patch.object(
+            ollama,
+            "get_model",
+            return_value=("test-model", None),
+        ), mock.patch.object(
+            ollama,
+            "is_model_loaded",
+            return_value=True,
+        ), mock.patch.object(ollama.requests, "post", side_effect=post):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    ollama.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(request_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_request.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
+
+    def test_cancel_releases_blocked_next_stream_line(self):
+        line_wait_started = Event()
+        release_line = Event()
+        cancel_event = Event()
+        results = []
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+
+        def lines(**_kwargs):
+            line_wait_started.set()
+            release_line.wait(timeout=1.0)
+            return
+            yield  # pragma: no cover
+
+        response.iter_lines.side_effect = lines
+
+        with mock.patch.object(
+            ollama,
+            "get_model",
+            return_value=("test-model", None),
+        ), mock.patch.object(
+            ollama,
+            "is_model_loaded",
+            return_value=True,
+        ), mock.patch.object(ollama.requests, "post", return_value=response):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    ollama.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(line_wait_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_line.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
 
 
 if __name__ == "__main__":

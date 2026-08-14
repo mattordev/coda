@@ -1,3 +1,4 @@
+import threading
 import unittest
 from threading import Event
 from types import SimpleNamespace
@@ -102,6 +103,79 @@ class OpenAIProviderTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(error, "stream failed")
         stream.close.assert_called_once_with()
+
+    def test_cancel_releases_blocked_stream_creation(self):
+        create_started = Event()
+        release_create = Event()
+        cancel_event = Event()
+        stream = mock.MagicMock()
+        openai_module, client = self._openai(stream)
+
+        def create(**_kwargs):
+            create_started.set()
+            release_create.wait(timeout=1.0)
+            return stream
+
+        client.chat.completions.create.side_effect = create
+        results = []
+
+        with mock.patch.object(
+            openai_provider,
+            "openai",
+            openai_module,
+        ), mock.patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    openai_provider.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(create_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_create.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
+
+    def test_cancel_releases_blocked_next_chunk(self):
+        next_chunk_started = Event()
+        release_chunk = Event()
+        cancel_event = Event()
+
+        class BlockedStream:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                next_chunk_started.set()
+                release_chunk.wait(timeout=1.0)
+                raise StopIteration
+
+            def close(self):
+                release_chunk.set()
+
+        openai_module, _client = self._openai(BlockedStream())
+        results = []
+
+        with mock.patch.object(
+            openai_provider,
+            "openai",
+            openai_module,
+        ), mock.patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    openai_provider.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(next_chunk_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_chunk.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
 
 
 if __name__ == "__main__":

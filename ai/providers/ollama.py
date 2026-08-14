@@ -4,6 +4,8 @@ import os
 import requests
 from requests.exceptions import Timeout
 
+from ai.providers.cancellable import run_cancellable
+
 _model_cache = None
 _preferred_models = (
     "nemotron-3-nano:4b",
@@ -126,6 +128,49 @@ def describe():
     return f"ollama (model: {model})"
 
 
+def _generate_stream(
+    base_url,
+    model,
+    messages,
+    timeout_seconds,
+    cancel_event,
+):
+    with requests.post(
+        f"{base_url}/api/chat",
+        json={
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        },
+        timeout=timeout_seconds,
+        stream=True,
+    ) as response:
+        response.raise_for_status()
+        response_parts = []
+
+        for line in response.iter_lines(decode_unicode=True):
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Request cancelled.")
+
+            if not line:
+                continue
+
+            response_json = json.loads(line)
+            provider_error = response_json.get("error")
+            if provider_error:
+                return None, provider_error
+
+            message = response_json.get("message", {})
+            content = message.get("content") or response_json.get("response")
+            if content:
+                response_parts.append(content)
+
+            if response_json.get("done"):
+                break
+
+        return "".join(response_parts), None
+
+
 def generate(messages, cancel_event=None):
     model, error = get_model()
     if error:
@@ -138,60 +183,40 @@ def generate(messages, cancel_event=None):
         if model_loaded
         else get_cold_start_timeout_seconds()
     )
-
-    try:
-        with requests.post(
-            f"{base_url}/api/chat",
-            json={
-                "model": model,
-                "messages": messages,
-                "stream": True,
-            },
-            timeout=timeout_seconds,
-            stream=True,
-        ) as response:
-            response.raise_for_status()
-            response_parts = []
-
-            for line in response.iter_lines(decode_unicode=True):
-                if cancel_event is not None and cancel_event.is_set():
-                    return None, "Request cancelled."
-
-                if not line:
-                    continue
-
-                response_json = json.loads(line)
-
-                provider_error = response_json.get("error")
-                if provider_error:
-                    return None, provider_error
-
-                message = response_json.get("message", {})
-                content = message.get("content") or response_json.get("response")
-
-                if content:
-                    response_parts.append(content)
-
-                if response_json.get("done"):
-                    break
-
-            if cancel_event is not None and cancel_event.is_set():
-                return None, "Request cancelled."
-
-            assistant_message = "".join(response_parts)
-    except Timeout:
-        if model_loaded:
-            return None, (
-                f"Ollama timed out after {timeout_seconds} seconds while using "
-                f"loaded model {model}."
-            )
-
-        return None, (
+    if model_loaded:
+        timeout_message = (
+            f"Ollama timed out after {timeout_seconds} seconds while using "
+            f"loaded model {model}."
+        )
+    else:
+        timeout_message = (
             f"Ollama timed out after {timeout_seconds} seconds while starting "
             f"model {model}. The model may still be loading; try again in a "
             "moment or increase CODA_OLLAMA_COLD_START_TIMEOUT."
         )
+
+    try:
+        result = run_cancellable(
+            lambda: _generate_stream(
+                base_url,
+                model,
+                messages,
+                timeout_seconds,
+                cancel_event,
+            ),
+            cancel_event,
+            timeout_seconds,
+            timeout_message,
+        )
+    except InterruptedError:
+        return None, "Request cancelled."
+    except Timeout:
+        return None, timeout_message
     except Exception as exc:
         return None, str(exc)
+
+    assistant_message, provider_error = result
+    if provider_error:
+        return None, provider_error
 
     return (assistant_message or "").strip(), None

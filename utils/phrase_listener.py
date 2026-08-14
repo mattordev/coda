@@ -69,6 +69,7 @@ def listen_for_phrase(
 
     while True:
         frames = deque()
+        frame_blocks = deque()
         phrase_state = None
         overlapped_capture = False
 
@@ -93,16 +94,22 @@ def listen_for_phrase(
                 break
 
             frames.append(buffer)
+            frame_blocks.append(
+                (
+                    blocks_capture(buffer_state)
+                    or blocks_capture(post_read_state)
+                )
+                if blocks_capture is not None
+                else False
+            )
             if len(frames) > non_speaking_buffer_count:
                 frames.popleft()
+                frame_blocks.popleft()
 
             energy = audioop.rms(buffer, source.SAMPLE_WIDTH)
             if energy > recognizer.energy_threshold:
                 phrase_state = buffer_state
-                if blocks_capture is not None:
-                    overlapped_capture = (
-                        overlapped_capture or blocks_capture(buffer_state)
-                    )
+                overlapped_capture = any(frame_blocks)
                 break
 
             if recognizer.dynamic_energy_threshold:

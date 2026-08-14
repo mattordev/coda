@@ -197,6 +197,32 @@ class PhraseListenerTests(unittest.TestCase):
         self.assertIsNotNone(captured)
         self.assertTrue(captured.overlapped_capture)
 
+    def test_discards_playback_overlap_before_retained_preroll(self):
+        quiet = _pcm_buffer(0)
+        speech = _pcm_buffer(400)
+        speech_playing = True
+
+        def finish_playback_before_phrase(read_count):
+            nonlocal speech_playing
+            if read_count == 2:
+                speech_playing = False
+
+        source = FakeAudioSource(
+            [quiet, quiet, speech, speech, speech, quiet, quiet, quiet],
+            before_read=finish_playback_before_phrase,
+        )
+
+        captured = listen_for_phrase(
+            _recognizer(),
+            source,
+            lambda: speech_playing,
+            blocks_capture=lambda state: state,
+        )
+
+        self.assertIsNotNone(captured)
+        self.assertFalse(captured.started_with)
+        self.assertFalse(captured.overlapped_capture)
+
     def test_stop_event_exits_before_reading_another_buffer(self):
         stop_event = Event()
 
