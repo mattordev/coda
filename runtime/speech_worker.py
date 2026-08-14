@@ -1,5 +1,8 @@
-from typing import Callable
 from threading import Event, Thread
+from typing import Callable
+
+import utils.runtime_state as runtime_state
+
 from runtime.runtime_queue import RuntimeQueue, SpeechTaskQueue
 
 from runtime.messages import (
@@ -35,7 +38,7 @@ class SpeechTaskProcessor:
         
         errors = []
         
-        for provider in self._resolve_providers():
+        for provider_index, provider in enumerate(self._resolve_providers()):
             if task.cancel_event.is_set():
                 return self._event(task, WorkerEventType.CANCELLED)
             
@@ -50,16 +53,28 @@ class SpeechTaskProcessor:
                     task.cancel_event,
                 )
             except Exception as error:
-                errors.append(f"{provider.name}: {error}")
+                provider_error = f"{provider.name}: {error}"
+                errors.append(provider_error)
+                runtime_state.debug_print(
+                    f"[TTS] {provider_error}. Trying next provider."
+                )
                 continue
             
             if task.cancel_event.is_set():
                 return self._event(task, WorkerEventType.CANCELLED)
             
             if played:
+                if provider_index > 0:
+                    runtime_state.debug_print(
+                        f"[TTS] Fallback provider {provider.name} succeeded."
+                    )
                 return self._event(task, WorkerEventType.COMPLETED)
             
-            errors.append(f"{provider.name}: playback did not complete.")
+            provider_error = f"{provider.name}: playback did not complete."
+            errors.append(provider_error)
+            runtime_state.debug_print(
+                f"[TTS] {provider_error} Trying next provider."
+            )
             
         error_message = (
             "; ".join(errors)

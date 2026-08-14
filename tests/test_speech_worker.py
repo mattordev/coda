@@ -1,6 +1,6 @@
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from runtime.messages import (
     SpeechTask,
@@ -68,7 +68,8 @@ class SpeechTaskProcessorTests(unittest.TestCase):
             task.cancel_event,
         )
 
-    def test_provider_error_falls_back_to_next_provider(self):
+    @patch("runtime.speech_worker.runtime_state.debug_print")
+    def test_provider_error_falls_back_to_next_provider(self, debug_print):
         first = FakeProvider("first")
         second = FakeProvider("second")
         controller = Mock(spec=SpeechPlaybackController)
@@ -85,6 +86,12 @@ class SpeechTaskProcessorTests(unittest.TestCase):
 
         self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
         self.assertEqual(controller.play.call_count, 2)
+        debug_print.assert_any_call(
+            "[TTS] first: playback failed. Trying next provider."
+        )
+        debug_print.assert_any_call(
+            "[TTS] Fallback provider second succeeded."
+        )
 
     def test_cancellation_during_playback_prevents_fallback(self):
         first = FakeProvider("first")
