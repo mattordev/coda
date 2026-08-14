@@ -1,6 +1,6 @@
 GNU AGPLv3
 
-Copyright (C) 2022 Matthew Roberts
+Copyright (C) 2022-2026 Matthew Roberts (mattordev)
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

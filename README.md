@@ -201,4 +201,4 @@ Commands are self-registering modules that own their intent metadata and
 
 CODA is licensed under the GNU AGPLv3. See [LICENCE.md](LICENCE.md).
 
-Copyright (C) 2022 Matthew Roberts
+Copyright (C) 2022-2026 Matthew Roberts (mattordev)
