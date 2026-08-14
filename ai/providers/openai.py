@@ -1,6 +1,6 @@
 import os
 
-from ai.providers.cancellable import run_cancellable
+from ai.providers.cancellable import CancellationScope, run_cancellable
 
 try:
     import openai
@@ -30,12 +30,15 @@ def _get_timeout_seconds():
         return 45.0
 
 
-def _generate_stream(client, model, messages, cancel_event):
+def _generate_stream(client, model, messages, cancel_event, scope):
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
         stream=True,
     )
+    close_stream = getattr(stream, "close", None)
+    if callable(close_stream):
+        close_stream = scope.add(close_stream)
     response_parts = []
 
     try:
@@ -50,7 +53,6 @@ def _generate_stream(client, model, messages, cancel_event):
             if content:
                 response_parts.append(content)
     finally:
-        close_stream = getattr(stream, "close", None)
         if callable(close_stream):
             close_stream()
 
@@ -71,17 +73,27 @@ def generate(messages, cancel_event=None):
         
     try:
         client = openai.OpenAI(api_key=api_key)
-        assistant_message = run_cancellable(
-            lambda: _generate_stream(
-                client,
-                model,
-                messages,
+        scope = CancellationScope()
+        close_client = getattr(client, "close", None)
+        if callable(close_client):
+            close_client = scope.add(close_client)
+        try:
+            assistant_message = run_cancellable(
+                lambda: _generate_stream(
+                    client,
+                    model,
+                    messages,
+                    cancel_event,
+                    scope,
+                ),
                 cancel_event,
-            ),
-            cancel_event,
-            _get_timeout_seconds(),
-            "OpenAI generation timed out.",
-        )
+                _get_timeout_seconds(),
+                "OpenAI generation timed out.",
+                on_abandon=scope.cancel,
+            )
+        finally:
+            if callable(close_client):
+                close_client()
     except InterruptedError:
         return None, "Request cancelled."
     except Exception as exc:

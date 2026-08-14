@@ -21,6 +21,8 @@ class OllamaProviderTests(unittest.TestCase):
             {"message": {"content": "hello "}, "done": False},
             {"message": {"content": "world"}, "done": True},
         ])
+        session = mock.MagicMock()
+        session.post.return_value = response
 
         with mock.patch.object(
             ollama,
@@ -32,13 +34,13 @@ class OllamaProviderTests(unittest.TestCase):
             return_value=True,
         ), mock.patch.object(
             ollama.requests,
-            "post",
-            return_value=response,
-        ) as post:
+            "Session",
+            return_value=session,
+        ):
             result, error = ollama.generate([{"role": "user", "content": "hi"}])
 
         self.assertEqual((result, error), ("hello world", None))
-        post.assert_called_once_with(
+        session.post.assert_called_once_with(
             f"{ollama.get_base_url()}/api/chat",
             json={
                 "model": "test-model",
@@ -60,6 +62,8 @@ class OllamaProviderTests(unittest.TestCase):
         response = mock.MagicMock()
         response.__enter__.return_value = response
         response.iter_lines.side_effect = streamed_lines
+        session = mock.MagicMock()
+        session.post.return_value = response
 
         with mock.patch.object(
             ollama,
@@ -71,8 +75,8 @@ class OllamaProviderTests(unittest.TestCase):
             return_value=True,
         ), mock.patch.object(
             ollama.requests,
-            "post",
-            return_value=response,
+            "Session",
+            return_value=session,
         ):
             result, error = ollama.generate(
                 [{"role": "user", "content": "hi"}],
@@ -86,6 +90,8 @@ class OllamaProviderTests(unittest.TestCase):
         response = self._response([
             {"error": "model failed", "done": True},
         ])
+        session = mock.MagicMock()
+        session.post.return_value = response
 
         with mock.patch.object(
             ollama,
@@ -97,8 +103,8 @@ class OllamaProviderTests(unittest.TestCase):
             return_value=True,
         ), mock.patch.object(
             ollama.requests,
-            "post",
-            return_value=response,
+            "Session",
+            return_value=session,
         ):
             result, error = ollama.generate([{"role": "user", "content": "hi"}])
 
@@ -116,6 +122,9 @@ class OllamaProviderTests(unittest.TestCase):
             release_request.wait(timeout=1.0)
             return self._response([])
 
+        session = mock.MagicMock()
+        session.post.side_effect = post
+
         with mock.patch.object(
             ollama,
             "get_model",
@@ -124,7 +133,11 @@ class OllamaProviderTests(unittest.TestCase):
             ollama,
             "is_model_loaded",
             return_value=True,
-        ), mock.patch.object(ollama.requests, "post", side_effect=post):
+        ), mock.patch.object(
+            ollama.requests,
+            "Session",
+            return_value=session,
+        ):
             worker = threading.Thread(
                 target=lambda: results.append(
                     ollama.generate([], cancel_event=cancel_event)
@@ -138,6 +151,7 @@ class OllamaProviderTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(results, [(None, "Request cancelled.")])
+        session.close.assert_called()
 
     def test_cancel_releases_blocked_next_stream_line(self):
         line_wait_started = Event()
@@ -154,6 +168,8 @@ class OllamaProviderTests(unittest.TestCase):
             yield  # pragma: no cover
 
         response.iter_lines.side_effect = lines
+        session = mock.MagicMock()
+        session.post.return_value = response
 
         with mock.patch.object(
             ollama,
@@ -163,7 +179,11 @@ class OllamaProviderTests(unittest.TestCase):
             ollama,
             "is_model_loaded",
             return_value=True,
-        ), mock.patch.object(ollama.requests, "post", return_value=response):
+        ), mock.patch.object(
+            ollama.requests,
+            "Session",
+            return_value=session,
+        ):
             worker = threading.Thread(
                 target=lambda: results.append(
                     ollama.generate([], cancel_event=cancel_event)
@@ -177,6 +197,82 @@ class OllamaProviderTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(results, [(None, "Request cancelled.")])
+        response.close.assert_called()
+
+    def test_cancel_releases_blocked_model_list_probe(self):
+        probe_started = Event()
+        release_probe = Event()
+        cancel_event = Event()
+        results = []
+        session = mock.MagicMock()
+
+        def get(*_args, **_kwargs):
+            probe_started.set()
+            release_probe.wait(timeout=1.0)
+            return mock.MagicMock()
+
+        session.get.side_effect = get
+
+        with mock.patch.object(
+            ollama.requests,
+            "Session",
+            return_value=session,
+        ), mock.patch.object(ollama, "_model_cache", None), mock.patch.dict(
+            "os.environ",
+            {"CODA_OLLAMA_MODEL": ""},
+        ):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    ollama.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(probe_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_probe.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
+        session.close.assert_called()
+
+    def test_cancel_releases_blocked_loaded_model_probe(self):
+        probe_started = Event()
+        release_probe = Event()
+        cancel_event = Event()
+        results = []
+        session = mock.MagicMock()
+
+        def get(*_args, **_kwargs):
+            probe_started.set()
+            release_probe.wait(timeout=1.0)
+            return mock.MagicMock()
+
+        session.get.side_effect = get
+
+        with mock.patch.object(
+            ollama,
+            "get_model",
+            return_value=("test-model", None),
+        ), mock.patch.object(
+            ollama.requests,
+            "Session",
+            return_value=session,
+        ):
+            worker = threading.Thread(
+                target=lambda: results.append(
+                    ollama.generate([], cancel_event=cancel_event)
+                )
+            )
+            worker.start()
+            self.assertTrue(probe_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+            release_probe.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [(None, "Request cancelled.")])
+        session.close.assert_called()
 
 
 if __name__ == "__main__":

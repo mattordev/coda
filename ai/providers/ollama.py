@@ -4,7 +4,7 @@ import os
 import requests
 from requests.exceptions import Timeout
 
-from ai.providers.cancellable import run_cancellable
+from ai.providers.cancellable import CancellationScope, run_cancellable
 
 _model_cache = None
 _preferred_models = (
@@ -45,7 +45,7 @@ def reload_config():
     _model_cache = None
 
 
-def get_model():
+def get_model(http_client=requests):
     global _model_cache
 
     configured_model = get_configured_model()
@@ -58,7 +58,7 @@ def get_model():
     base_url = get_base_url()
 
     try:
-        response = requests.get(
+        response = http_client.get(
             f"{base_url}/api/tags",
             timeout=min(get_timeout_seconds(), 10),
         )
@@ -99,11 +99,11 @@ def get_model():
     return _model_cache, None
 
 
-def is_model_loaded(model_name):
+def is_model_loaded(model_name, http_client=requests):
     base_url = get_base_url()
 
     try:
-        response = requests.get(
+        response = http_client.get(
             f"{base_url}/api/ps",
             timeout=min(get_timeout_seconds(), 10),
         )
@@ -129,13 +129,15 @@ def describe():
 
 
 def _generate_stream(
+    http_client,
     base_url,
     model,
     messages,
     timeout_seconds,
     cancel_event,
+    scope,
 ):
-    with requests.post(
+    with http_client.post(
         f"{base_url}/api/chat",
         json={
             "model": model,
@@ -145,6 +147,7 @@ def _generate_stream(
         timeout=timeout_seconds,
         stream=True,
     ) as response:
+        close_response = scope.add(response.close)
         response.raise_for_status()
         response_parts = []
 
@@ -168,16 +171,17 @@ def _generate_stream(
             if response_json.get("done"):
                 break
 
+        close_response()
         return "".join(response_parts), None
 
 
-def generate(messages, cancel_event=None):
-    model, error = get_model()
+def _generate_request(messages, cancel_event, http_client, scope):
+    model, error = get_model(http_client)
     if error:
         return None, error
 
     base_url = get_base_url()
-    model_loaded = is_model_loaded(model)
+    model_loaded = is_model_loaded(model, http_client)
     timeout_seconds = (
         get_timeout_seconds()
         if model_loaded
@@ -196,17 +200,14 @@ def generate(messages, cancel_event=None):
         )
 
     try:
-        result = run_cancellable(
-            lambda: _generate_stream(
-                base_url,
-                model,
-                messages,
-                timeout_seconds,
-                cancel_event,
-            ),
-            cancel_event,
+        result = _generate_stream(
+            http_client,
+            base_url,
+            model,
+            messages,
             timeout_seconds,
-            timeout_message,
+            cancel_event,
+            scope,
         )
     except InterruptedError:
         return None, "Request cancelled."
@@ -220,3 +221,33 @@ def generate(messages, cancel_event=None):
         return None, provider_error
 
     return (assistant_message or "").strip(), None
+
+
+def generate(messages, cancel_event=None):
+    session = requests.Session()
+    scope = CancellationScope()
+    close_session = scope.add(session.close)
+    timeout_seconds = (
+        get_cold_start_timeout_seconds()
+        + (2 * min(get_timeout_seconds(), 10))
+    )
+
+    try:
+        return run_cancellable(
+            lambda: _generate_request(
+                messages,
+                cancel_event,
+                session,
+                scope,
+            ),
+            cancel_event,
+            timeout_seconds,
+            "Ollama request timed out.",
+            on_abandon=scope.cancel,
+        )
+    except InterruptedError:
+        return None, "Request cancelled."
+    except Exception as exc:
+        return None, str(exc)
+    finally:
+        close_session()

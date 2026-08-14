@@ -137,10 +137,12 @@ class OpenAIProviderTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(results, [(None, "Request cancelled.")])
+        client.close.assert_called()
 
     def test_cancel_releases_blocked_next_chunk(self):
         next_chunk_started = Event()
         release_chunk = Event()
+        stream_closed = Event()
         cancel_event = Event()
 
         class BlockedStream:
@@ -153,6 +155,7 @@ class OpenAIProviderTests(unittest.TestCase):
                 raise StopIteration
 
             def close(self):
+                stream_closed.set()
                 release_chunk.set()
 
         openai_module, _client = self._openai(BlockedStream())
@@ -176,6 +179,7 @@ class OpenAIProviderTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(results, [(None, "Request cancelled.")])
+        self.assertTrue(stream_closed.is_set())
 
 
 if __name__ == "__main__":
