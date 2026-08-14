@@ -43,13 +43,11 @@ The active roadmap is maintained in the
 
 - [v1.2.0 - Provider Routing & Privacy](https://github.com/mattordev/coda/milestone/1)
 - [v1.3.0 - Intent Routing & Command System](https://github.com/mattordev/coda/milestone/2)
-
-### In Progress
-
 - [v1.4.0 - Concurrent Runtime & Interruptible Responses](https://github.com/mattordev/coda/milestone/3)
 
 ### Future Milestones
 
+- [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 - [v1.6.0 - Semantic Intent Matching](https://github.com/mattordev/coda/milestone/5)
 
@@ -197,7 +195,7 @@ Commands are self-registering modules that own their intent metadata and
 - [Command Modules](docs/command-modules.md)
 - [Intent Routing](docs/intent-routing.md)
 - [Main Program Flow](docs/main-program-flow.md)
-- [Concurrent Runtime Design](docs/concurrent-runtime.md)
+- [Concurrent Runtime](docs/concurrent-runtime.md)
 
 ## Licence
 

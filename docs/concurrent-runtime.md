@@ -1,241 +1,311 @@
 # Concurrent Runtime
 
-This document describes the proposed runtime model for CODA v1.4.0. It is a
-design for the work in this milestone, not a description of the current
-implementation.
+CODA v1.4 separates voice input, request execution, speech playback and
+runtime-event handling so the assistant can keep listening while other work is
+active. This document describes the implemented runtime and its extension
+points for contributors.
 
-## Why the Runtime Is Changing
-
-CODA already starts voice recognition on a separate thread. That thread still
-handles the complete request, though:
-
-```text
-Microphone
-  -> speech recognition
-  -> intent routing
-  -> command or LLM execution
-  -> speech playback
-  -> listen again
-```
-
-While a command, LLM provider or speech system is busy, the voice thread cannot
-listen for an interruption. Manual mode has the same problem because it runs a
-command directly from the main loop.
-
-The new runtime separates input, execution and output without changing how a
-normal command is written.
-
-## Proposed Flow
+## Architecture at a Glance
 
 ```mermaid
 flowchart LR
-    Voice[Voice input] --> Requests[Request queue]
-    Manual[Manual input] --> Requests
+    Voice[Voice-input worker] --> Requests[Request queue]
     Requests --> Execution[Execution worker]
-    Execution --> Command[Command]
+    Execution --> Intent[Intent routing and commands]
     Execution --> LLM[LLM fallback]
-    Command --> SpeechQueue[Speech queue]
+    Intent --> SpeechQueue[Speech queue]
     LLM --> SpeechQueue
     SpeechQueue --> Speech[Speech worker]
-
-    Coordinator[Runtime coordinator] -. lifecycle and cancellation .-> Voice
-    Coordinator -. lifecycle and cancellation .-> Execution
-    Coordinator -. lifecycle and cancellation .-> Speech
-    Execution --> Events[Runtime event queue]
+    Execution --> Events[Event queue]
     Speech --> Events
-    Events --> Coordinator
+    Events --> EventWorker[Event worker]
+    EventWorker --> FollowUp[Follow-up state]
+
+    Main[Main runtime coordinator] -. start, stop and cancel .-> Voice
+    Main -. start, stop and cancel .-> Execution
+    Main -. start, stop and cancel .-> Speech
+
+    Manual[Manual input] -. current synchronous path .-> Intent
 ```
 
-The first version should use Python threads, `queue.Queue` and
-`threading.Event`. CODA's microphone, provider and speech libraries already use
-blocking calls, so moving the whole application to `asyncio` is not required.
+The implementation uses Python threads, `queue.Queue` and `threading.Event`.
+There is one execution worker and one speech worker, which preserves request
+and conversation ordering without requiring the provider and audio libraries
+to become asynchronous.
 
-## Runtime Coordinator
+## Runtime Ownership
 
-The coordinator owns the runtime lifecycle. It should:
+`coda_runtime.py` coordinates lifecycle and shared runtime state. It starts the
+workers, owns the queues, tracks the active request and provides the public
+submission and cancellation functions. Work itself remains in the appropriate
+subsystem.
 
-- Create and start workers.
-- Own the runtime queues.
-- Track the active request and input mode.
-- Create cancellation signals for active work.
-- Ignore results from requests that have been replaced or cancelled.
-- Stop and join workers during shutdown.
+| Component | Owns | Must not own |
+| --- | --- | --- |
+| Main coordinator | Lifecycle, input mode, queues and shutdown | Recognition, command work or playback |
+| Voice-input worker | Microphone, recognition and wake-word handling | Command execution |
+| Execution worker | One active request, intent routing, commands and LLM fallback | Microphone or audio playback |
+| Speech worker | TTS provider selection and ordered playback | Request routing |
+| Event worker | Result handling and follow-up state transitions | Command or provider execution |
+| Heartbeat worker | Dashboard liveness updates | Request state |
 
-The coordinator should coordinate work rather than perform speech recognition,
-command execution, provider calls or speech playback itself.
+Thread-safe state is kept behind small boundaries:
+
+- `ActiveRequestState` protects active-request ownership and cancellation.
+- `FollowUpState` protects the voice follow-up deadline.
+- `SpeechPlaybackController` protects the active provider session.
+- `RuntimeQueue` wraps `queue.Queue` for worker communication.
 
 ## Workers
 
 ### Voice-input worker
 
-The voice-input worker owns the microphone and recognizer. It should:
+`VoiceInputWorker` runs `utils.voice_recognizer.run()` on the
+`coda-voice-input` thread. Recognition records the transcript, applies
+wake-word and follow-up rules, then creates a `RuntimeRequest`. It submits that
+request without running the command itself and immediately returns to
+listening.
 
-- Listen for and transcribe speech.
-- Detect wake words and interruption phrases.
-- Submit accepted input to the request queue.
-- Return to listening without executing the request itself.
-
-Manual input should submit the same request type. It may remain a lightweight
-main-thread input adapter initially; it must not call commands directly once the
-execution worker is introduced.
+The voice recognizer also handles wake-word stop phrases. A phrase such as
+`coda stop` calls the coordinator's cancellation boundary instead of creating
+a normal request.
 
 ### Execution worker
 
-The execution worker owns request processing. It should:
+The `coda-execution` thread consumes the request queue in FIFO order. For each
+request it:
 
-- Consume requests in order.
-- Run intent routing and command dispatch.
-- Use the LLM fallback when no intent handles the request.
-- Publish completion, failure and cancellation events.
+1. Claims the request through `ActiveRequestState`.
+2. Calls `utils.on_command.run()` with the request's cancellation event.
+3. Runs intent detection and dispatches a matched command, or uses LLM
+   fallback when nothing matches.
+4. Converts the command outcome into an `ExecutionResult`.
+5. Queues response text for speech only when the request was not cancelled.
+6. Clears active ownership and publishes the result to the event queue.
 
-The first version should have one execution worker. This keeps command and
-conversation history ordered while still allowing listening and speech playback
-to operate independently.
+Only one request executes at a time. Additional requests remain queued unless
+a caller deliberately submits a replacement request.
 
 ### Speech worker
 
-The speech worker owns TTS playback. It should:
+The `coda-speech` thread consumes `SpeechTask` objects in FIFO order. A
+`SpeechTaskProcessor` tries the configured TTS providers, while
+`SpeechPlaybackController` owns the current provider session and exposes a
+provider-neutral stop operation.
 
-- Consume speech tasks in order.
-- Track the active playback operation.
-- Stop playback when the active request is cancelled.
-- Recover after provider errors or interrupted playback.
-- Remain ready for the next speech task.
+The worker publishes `STARTED`, followed by `COMPLETED`, `CANCELLED` or
+`FAILED`. Provider failures are isolated to the task, so the worker remains
+available for later speech.
 
-The existing heartbeat can remain an independent background service. It should
-eventually be started and stopped through the coordinator so shutdown has one
-clear owner.
+Commands use `utils.speak_response.speak_response()` rather than talking to
+the speech worker directly. During normal runtime startup that function is
+configured with `submit_speech_response()`, so command speech becomes a
+`SpeechTask` associated with the active request. Standalone callers retain the
+synchronous fallback when no submitter is configured.
 
-## Runtime Messages
+### Event and heartbeat workers
 
-The exact classes will be introduced with the runtime queue, but the design
-expects these messages:
+The `coda-events` thread consumes both `ExecutionResult` and `WorkerEvent`
+objects. It closes follow-up state when speech starts and opens the requested
+follow-up window after successful speech completion. When an execution result
+requests follow-up without queueing response speech, the event worker can open
+the window immediately. Cancellation and failure keep it closed.
 
-### `RuntimeRequest`
+The heartbeat worker remains separate and periodically updates dashboard
+liveness. It does not participate in request processing.
 
-- Unique request ID.
-- Original message text.
-- Input source, such as `manual` or `voice`.
-- Creation time.
-- Per-request cancellation event.
+## Messages and Queues
 
-### `ExecutionResult`
+The runtime uses immutable dataclasses from `runtime/messages.py`.
 
-- Request ID.
-- Whether the request was handled.
-- Optional response text.
-- Whether a follow-up window should open.
-- Optional error information.
+| Message | Important fields | Purpose |
+| --- | --- | --- |
+| `RuntimeRequest` | Message, source, unique ID, creation time, cancellation event, replacement flag | Input waiting for execution |
+| `ExecutionResult` | Request ID, handled, response text, follow-up, cancelled, error | Final execution outcome |
+| `SpeechTask` | Request ID, text, the same cancellation event, follow-up | Ordered speech work |
+| `WorkerEvent` | Worker, event type, request ID, error, follow-up | Worker lifecycle result |
 
-### `SpeechTask`
+`RuntimeQueues` contains three independent FIFO queues:
 
-- Request ID.
-- Text to speak.
-- Per-request cancellation event.
+- `requests`: voice input to the execution worker.
+- `speech`: response text to the speech worker.
+- `events`: execution and speech outcomes to the event worker.
 
-### `WorkerEvent`
+Workers use bounded `get(timeout=...)` waits. This avoids busy-waiting while
+still allowing a shutdown event to be noticed when a queue is empty. Every
+retrieved message is paired with `task_done()` in a `finally` block.
 
-- Worker name.
-- Event type, such as started, completed, cancelled or failed.
-- Related request ID when applicable.
-- Optional error information.
+## Request Lifecycle
 
-The initial implementation may combine `ExecutionResult` and `WorkerEvent` if
-that keeps the queue API smaller. Request IDs and cancellation signals should
-remain present either way.
+The normal voice request path is:
 
-## Queues
+```text
+speech recognised
+  -> wake word or follow-up accepted
+  -> RuntimeRequest created
+  -> request queue
+  -> execution worker claims request
+  -> intent command or LLM fallback
+  -> optional SpeechTask
+  -> speech worker and provider session
+  -> worker events
+  -> follow-up state updated
+```
 
-The proposed runtime uses three queues:
+The request ID correlates execution, speech and events. The same
+`threading.Event` instance is carried from `RuntimeRequest` into `SpeechTask`
+and into interruptible LLM provider calls. A new request receives a new event,
+so cancellation is scoped to one request.
 
-- The request queue carries input to the execution worker.
-- The speech queue carries text to the speech worker.
-- The event queue carries results and worker state back to the coordinator.
+`RuntimeRequest.replace_active=True` provides the programmatic replacement
+boundary: submitting that request first signals the active request and then
+queues the replacement. Ordinary voice submissions currently queue normally;
+they do not set `replace_active`, and voice-triggered replacement is not
+currently implemented.
 
-Workers should wait on queues rather than repeatedly checking them in a busy
-loop. Shutdown must also wake workers that are waiting for queue items.
+## Cancellation and Interruption
 
-## Shared-state Ownership
+Cancellation is cooperative because Python cannot safely kill a worker thread.
+The runtime therefore propagates one per-request event through every boundary
+that can observe it.
 
-Workers communicate through queues, events and coordinator methods. They should
-not directly modify another worker's internal state.
+When cancellation is requested:
 
-- The coordinator owns lifecycle, input mode, active request and cancellation.
-- The voice-input worker owns the microphone and speech recognizer.
-- The execution worker owns the request it is currently processing.
-- The speech worker owns the TTS engine and current playback.
-- Dashboard and runtime-state modules expose observable state and must protect
-  shared writes where concurrent access is possible.
+1. `ActiveRequestState.cancel_active()` sets the active request's event.
+2. `SpeechPlaybackController.stop()` sets the active speech event and stops the
+   provider session.
+3. Intent/LLM handling checks the event before and after dispatch and provider
+   attempts.
+4. OpenAI and Ollama use provider streaming internally, close the active
+   response when the event is set and discard partial text.
+5. `llm_service` removes the pending user turn instead of committing a
+   cancelled response to conversation history.
+6. A cancelled execution result does not queue its final `response_text` for
+   speech or record that final response in the dashboard.
+7. The event worker keeps follow-up state closed.
 
-State exposed by the coordinator should be read or changed through a small,
-thread-safe API rather than through public global variables.
+Cancellation is not a provider failure and does not trigger another provider.
+After cancellation, the same workers can process the next request normally.
+If cancellation happens after execution has completed and speech has started,
+it stops playback but does not retract response text already stored in
+conversation history or dashboard state.
 
-## Cancellation
+Command modules do not currently receive the runtime cancellation event in
+their `IntentRequest`. The execution layer suppresses a command's late result,
+but arbitrary blocking command code cannot be forcibly stopped. A command can
+also call `speak_response()` during dispatch, before the execution layer's
+final cancellation check; speech or dashboard text already submitted that way
+is not retracted. Keep command work bounded; a command that needs cooperative
+interruption requires an explicit extension to the command contract.
 
-The runtime needs two separate cancellation levels:
+The optional local intent classifier also does not yet receive the request
+cancellation event. Cancellation is observed immediately after classification
+returns. Conversational OpenAI and Ollama generation is interruptible.
 
-- A shutdown event tells every worker that CODA is exiting.
-- A per-request cancellation event tells workers to abandon the active request.
+## Graceful Shutdown
 
-Cancellation is cooperative. Python cannot safely kill a running thread, and
-some provider calls may not support stopping an in-flight request. Workers
-should check cancellation before and after blocking operations where possible.
+Both manual `quit`/`exit` and Ctrl+C leave through `shutdown_runtime()`. A lock
+and event make the operation idempotent, so a repeated shutdown request does
+nothing rather than stopping resources twice.
 
-Every request receives a unique ID. If a cancelled provider call eventually
-returns, the coordinator compares its ID with the active request and ignores the
-stale result. A stale result must not be spoken or added as the current response.
+The implemented order is:
 
-The provider-specific work needed to stop network generation or audio playback
-belongs in the later interruption cards.
+1. Close follow-up state.
+2. Stop voice input so no new requests are accepted.
+3. Signal the active request's cancellation event.
+4. Signal and join the execution worker.
+5. Disconnect new speech submission.
+6. Stop active playback, signal and join the speech worker.
+7. Signal and join the event worker.
+8. Signal and join the heartbeat worker.
 
-## Shutdown
+Each join has a timeout. Once the execution worker observes its shutdown
+signal, queued requests left behind the active request remain unprocessed,
+while active interruptible work receives its normal cancellation signal.
+Ctrl+C therefore exits without a traceback and leaves the runtime ready for a
+clean process restart.
 
-A normal shutdown should happen in this order:
+## How Commands Interact with the Runtime
 
-1. Stop accepting new requests.
-2. Set the global shutdown event.
-3. Cancel the active request.
-4. Wake workers waiting on queues.
-5. Stop active speech playback and release audio resources.
-6. Join each worker with a timeout.
-7. Report any worker that did not stop cleanly.
-
-The coordinator should perform this sequence for manual exit, runtime errors and
-other supported shutdown paths.
-
-## Command Interface
-
-Commands keep their existing drop-in structure:
+A command keeps the normal drop-in contract:
 
 ```python
-INTENT = Intent(...)
+from ai.intents import Intent, IntentRequest
+import utils.speak_response as speech
+
+
+INTENT = Intent(
+    name="greet",
+    description="Greet the user.",
+    examples=("Say hello.",),
+)
 
 
 def run(request: IntentRequest) -> bool:
-    ...
+    speech.speak_response("Hello!")
+    return True
 ```
 
-Commands do not need to know about threads or queues. Intent routing and command
-dispatch move onto the execution worker, but the dispatcher continues calling
-`run(request)` in the same way.
+In voice mode, the execution worker calls this function. `speak_response()`
+submits speech asynchronously and associates it with the active runtime
+request. The command should return `True` when handled and `False` when it could
+not complete; it should not create a runtime worker, manipulate queues or own a
+TTS provider.
 
-`speak_response()` becomes the boundary for speech. When the concurrent runtime
-is active it can submit a `SpeechTask`; tests and standalone callers can retain
-the current synchronous fallback. Existing commands therefore do not need to
-manage a speech worker themselves.
+General LLM chat differs slightly: `utils.on_command` returns response text to
+the execution worker, which records and queues it after the final cancellation
+check.
 
-## Initial Limitations
+Manual mode currently calls `command.run()` synchronously on the main thread.
+It uses the same intent and command system, and command speech still enters the
+configured speech worker, but manual command execution itself does not travel
+through the request queue. This is an implementation limitation, not a pattern
+new runtime integrations should copy.
 
-- Commands and LLM requests execute one at a time.
-- Cancellation cannot forcibly terminate arbitrary Python code.
-- A provider response may finish after cancellation, but its stale result will
-  be ignored.
-- Provider-specific streaming and cancellation are separate pieces of work.
-- Reliable interruption while CODA is speaking may depend on microphone and
-  echo-cancellation behaviour outside the runtime coordinator.
-- Background command execution and task prioritisation are not part of the
-  first implementation.
+See [Command Modules](command-modules.md) for the full command contract and
+[Intent Routing](intent-routing.md) for strategy and dispatch behaviour.
 
-This design gives CODA a responsive runtime without making command development
-more complicated. The next implementation step is the thread-safe runtime queue
-and its message types.
+## Main Files
+
+| File | Responsibility |
+| --- | --- |
+| `coda_runtime.py` | Coordinator, worker lifecycle, request execution, events, cancellation and shutdown |
+| `runtime/messages.py` | Immutable runtime message contracts |
+| `runtime/runtime_queue.py` | Typed queue wrappers and queue set |
+| `runtime/active_request.py` | Thread-safe active request ownership |
+| `runtime/follow_up.py` | Thread-safe voice follow-up deadline |
+| `runtime/voice_worker.py` | Voice thread lifecycle |
+| `runtime/speech_worker.py` | Speech processing and worker lifecycle |
+| `runtime/speech_playback.py` | Provider-neutral active playback ownership |
+| `utils/voice_recognizer.py` | Recognition, wake words, stop phrases and request submission |
+| `utils/on_command.py` | Intent dispatch, LLM fallback and cancellation checkpoints |
+| `utils/speak_response.py` | Command-facing asynchronous speech boundary |
+
+## Tests and Current Limits
+
+Run the runtime-focused tests with:
+
+```powershell
+python -m unittest `
+  tests.test_runtime_queue `
+  tests.test_runtime_execution `
+  tests.test_runtime_coordination `
+  tests.test_runtime_shutdown `
+  tests.test_speech_worker `
+  tests.test_voice_worker -v
+```
+
+The tests cover FIFO communication, request identity across workers,
+cancellation and recovery, worker exceptions, interruptible speech, graceful
+shutdown and pending work. They coordinate with events and queues instead of
+depending on fixed sleeps.
+
+Current limits include:
+
+- One command or LLM request executes at a time.
+- One speech task plays at a time.
+- Ordinary submissions queue rather than replacing active work.
+- Manual command execution remains synchronous.
+- Arbitrary command code and local intent classification are not interruptible.
+- Provider tokens are accumulated internally; incremental display and speech
+  are future work.
