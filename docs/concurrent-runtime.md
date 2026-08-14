@@ -68,6 +68,11 @@ wake-word and follow-up rules, then creates a `RuntimeRequest`. It submits that
 request without running the command itself and immediately returns to
 listening.
 
+Follow-up eligibility is captured when listening begins rather than after
+speech-to-text completes. Audio captured before a new follow-up window opens is
+discarded without closing that new window, preventing delayed transcription of
+CODA's own speech from becoming a wakeword-free request.
+
 The voice recognizer also handles wake-word stop phrases. A phrase such as
 `coda stop` calls the coordinator's cancellation boundary instead of creating
 a normal request.
@@ -235,6 +240,10 @@ signal, queued requests left behind the active request remain unprocessed,
 while active interruptible work receives its normal cancellation signal.
 Ctrl+C therefore exits without a traceback and leaves the runtime ready for a
 clean process restart.
+
+If the voice listener outlives a mode-switch join timeout, a request to return
+to voice mode is retained and starts only after the old listener exits. This
+avoids both a missing listener and overlapping microphone workers.
 
 ## How Commands Interact with the Runtime
 

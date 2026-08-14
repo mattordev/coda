@@ -26,6 +26,11 @@ The voice worker owns microphone capture and speech-to-text. It records the
 transcript, applies wake-word and follow-up rules, then submits a
 `RuntimeRequest` to the shared request queue.
 
+Follow-up permission is based on the state when listening began. A transcript
+captured before the window opened is ignored without closing the newly opened
+window, which prevents delayed TTS audio from feeding back into the request
+queue.
+
 The execution worker processes queued requests one at a time. It runs intent
 routing and command dispatch, or LLM fallback for unmatched input. Responses
 are submitted to the speech worker, while execution and speech outcomes are
@@ -33,7 +38,8 @@ published to the event worker for follow-up-state handling.
 
 The main thread remains available for the Ctrl+B mode toggle. If the global
 keyboard hook is unavailable, CODA disables only that toggle and continues in
-voice mode.
+voice mode. If a stopped listener is still exiting when voice mode is requested
+again, the voice worker defers the restart until that listener has finished.
 
 ## Manual Mode
 

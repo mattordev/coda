@@ -65,7 +65,7 @@ class VoiceRecognizerTests(unittest.TestCase):
             flush=True,
         )
         
-    def test_active_follow_up_queues_message_without_wakeword(self):
+    def test_follow_up_active_at_capture_queues_after_window_closes(self):
         request_queue = RuntimeQueue()
         follow_up_state = FollowUpState()
         stop_event = Event()
@@ -76,6 +76,7 @@ class VoiceRecognizerTests(unittest.TestCase):
         follow_up_state.open(duration_seconds=10.0)
 
         def transcribe_audio(_recognizer, _audio):
+            follow_up_state.close()
             stop_event.set()
             return "connected", "test provider"
 
@@ -188,7 +189,7 @@ class VoiceRecognizerTests(unittest.TestCase):
 
         microphone_factory.assert_called_once_with(device_index=1)
 
-    def test_follow_up_opened_during_transcription_queues_message(self):
+    def test_follow_up_opened_after_capture_does_not_queue_message(self):
         request_queue = RuntimeQueue()
         follow_up_state = FollowUpState()
         stop_event = Event()
@@ -220,7 +221,7 @@ class VoiceRecognizerTests(unittest.TestCase):
             patch.object(
                 voice_recognizer.dashboard_state,
                 "record_user_message",
-            ),
+            ) as record_user_message,
             patch.object(voice_recognizer, "display_message"),
         ):
             voice_recognizer.run(
@@ -231,11 +232,13 @@ class VoiceRecognizerTests(unittest.TestCase):
                 follow_up_state=follow_up_state,
             )
 
-        queued_request = request_queue.get(timeout=0.1)
-
-        self.assertIsNotNone(queued_request)
-        self.assertEqual(queued_request.message, "what about sunsets")
-        self.assertEqual(queued_request.source, InputSource.VOICE)
+        self.assertIsNone(request_queue.get(timeout=0.01))
+        self.assertTrue(follow_up_state.is_active())
+        record_user_message.assert_called_once_with(
+            "what about sunsets",
+            source="test provider",
+            tags=["pre_follow_up_audio"],
+        )
         
     def test_wakeword_stop_cancels_without_queueing(self):
         request_queue = RuntimeQueue()

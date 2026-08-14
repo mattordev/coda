@@ -240,6 +240,9 @@ def run(
         try:
             recognizer.pause_threshold = _get_pause_threshold_seconds()
             with microphone as source:
+                follow_up_active_at_capture = (
+                    active_follow_up_state.is_active()
+                )
                 audio = recognizer.listen(
                     source,
                     timeout=_get_listen_timeout_seconds(),
@@ -255,7 +258,11 @@ def run(
 
             speech_text = speech.strip()
             message = speech.lower()
-            follow_up_active = active_follow_up_state.is_active()
+            follow_up_active = follow_up_active_at_capture
+            follow_up_opened_after_capture = (
+                not follow_up_active_at_capture
+                and active_follow_up_state.is_active()
+            )
             has_wakeword = _has_wakeword(message, wakeword)
             wakeword_command_message = _strip_text_before_wakeword(
                 message,
@@ -271,6 +278,8 @@ def run(
                 event_tags.append("wakeword_detected")
                 if not wakeword_command_message:
                     event_tags.append("wakeword_only")
+            elif follow_up_opened_after_capture:
+                event_tags.append("pre_follow_up_audio")
             else:
                 event_tags.append("unrelated_speech")
 
@@ -314,6 +323,13 @@ def run(
                 if debug_enabled:
                     print(f"[VOICE] Wakeword detected. Parsed message: {command_message}")
             else:
+                if follow_up_opened_after_capture:
+                    print(
+                        "[VOICE] Audio captured before follow-up opened. "
+                        "Ignoring phrase."
+                    )
+                    continue
+
                 print("[VOICE] Wakeword not detected. Ignoring phrase.")
                 active_follow_up_state.close()
                 continue
