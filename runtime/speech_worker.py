@@ -1,6 +1,6 @@
 from typing import Callable
 from threading import Event, Thread
-from runtime.runtime_queue import RuntimeQueue
+from runtime.runtime_queue import RuntimeQueue, SpeechTaskQueue
 
 from runtime.messages import (
     SpeechTask,
@@ -73,9 +73,11 @@ class SpeechTaskProcessor:
             error=error_message,
         )
     
-    def stop(self) -> bool:
+    def stop(self, expected_cancel_event: Event | None = None) -> bool:
         """Stop the currently active playback session."""
-        return self._playback_controller.stop()
+        return self._playback_controller.stop(
+            expected_cancel_event=expected_cancel_event,
+        )
     
     @staticmethod
     def _event(
@@ -101,7 +103,7 @@ class SpeechWorker:
 
     def __init__(
         self,
-        task_queue: RuntimeQueue[SpeechTask],
+        task_queue: SpeechTaskQueue,
         event_queue: RuntimeQueue[WorkerEvent],
         processor: SpeechTaskProcessor,
         shutdown_event: Event,
@@ -126,6 +128,7 @@ class SpeechWorker:
 
     def stop(self, timeout: float = 4.0) -> None:
         self._shutdown_event.set()
+        self._task_queue.cancel_all()
         self._processor.stop()
 
         if self._thread is not None and self._thread.is_alive():
@@ -162,4 +165,4 @@ class SpeechWorker:
 
                 self._event_queue.put(result)
             finally:
-                self._task_queue.task_done()
+                self._task_queue.complete(task)

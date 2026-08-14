@@ -41,24 +41,25 @@ Manual input still requires a wake word. The main loop handles:
 
 - `quit` or `exit`: return through graceful shutdown.
 - `voice` or `/voice`: switch to voice mode and start the voice worker.
-- A wake-word request: strip the wake word and call the shared command and
-  intent pipeline synchronously.
+- A wake-word request: strip the wake word, create an `InputSource.MANUAL`
+  `RuntimeRequest` and submit it to the shared request queue.
 
 Manual commands use the same intent registry and LLM fallback, but their
-execution currently bypasses the runtime request queue. Speech requested by a
-command still uses the configured speech worker.
+execution is serialised with voice requests on the execution worker. Command
+speech and manual LLM replies both use the configured speech worker.
 
 ## Cancellation
 
 In voice mode, a wake-word stop phrase calls the runtime cancellation boundary.
-It signals the event belonging to the active request and stops any active
-speech session. Interruptible OpenAI and Ollama calls close their response
-streams and discard partial provider output. A cancelled queued LLM result does
-not add partial text to conversation history, dashboard output, speech playback
-or provider fallback. A command can submit speech while its body is running,
-so cancellation does not retract command output already queued or recorded.
-Cancelling playback after execution has completed likewise does not retract
-text that was already recorded.
+It signals the event belonging to the active request and the oldest outstanding
+speech task before stopping that task's active provider session. Speech remains
+cancellable while it is queued, resolving a provider or playing. Interruptible
+OpenAI and Ollama calls close their response streams and discard partial
+provider output. A cancelled execution result does not add partial text to
+conversation history, dashboard output, speech playback or provider fallback.
+After execution has completed, cancelling its tracked speech prevents or stops
+the audio but does not retract text already recorded in conversation history or
+dashboard state. The same applies to command speech recorded before submission.
 
 ## Shutdown
 
@@ -66,7 +67,7 @@ Manual exit and Ctrl+C both execute the idempotent `shutdown_runtime()` path:
 
 1. Close follow-up state and stop voice input.
 2. Cancel active execution and join the execution worker.
-3. Disconnect speech submission and stop speech playback.
+3. Disconnect speech submission, cancel outstanding speech and stop playback.
 4. Stop the event worker.
 5. Stop the heartbeat worker.
 
@@ -77,7 +78,7 @@ Every worker join is bounded by a timeout. Ctrl+C is handled without exposing a
 
 - Voice transcripts: `voice_recognizer` calls
   `dashboard_state.record_user_message()`.
-- Queued voice LLM responses: the execution path calls
+- Queued LLM responses: the execution path calls
   `dashboard_state.record_ai_response()` before speech submission.
 - Command speech: `speak_response()` records the response before queueing it.
 - Liveness: the heartbeat worker calls

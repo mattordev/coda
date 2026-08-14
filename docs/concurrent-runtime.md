@@ -25,7 +25,7 @@ flowchart LR
     Main -. start, stop and cancel .-> Execution
     Main -. start, stop and cancel .-> Speech
 
-    Manual[Manual input] -. current synchronous path .-> Intent
+    Manual[Manual input] --> Requests
 ```
 
 The implementation uses Python threads, `queue.Queue` and `threading.Event`.
@@ -53,6 +53,8 @@ Thread-safe state is kept behind small boundaries:
 
 - `ActiveRequestState` protects active-request ownership and cancellation.
 - `FollowUpState` protects the voice follow-up deadline.
+- `SpeechTaskQueue` retains cancellable ownership of queued, resolving and
+  playing speech until the worker completes each task.
 - `SpeechPlaybackController` protects the active provider session.
 - `RuntimeQueue` wraps `queue.Queue` for worker communication.
 
@@ -91,7 +93,9 @@ a caller deliberately submits a replacement request.
 The `coda-speech` thread consumes `SpeechTask` objects in FIFO order. A
 `SpeechTaskProcessor` tries the configured TTS providers, while
 `SpeechPlaybackController` owns the current provider session and exposes a
-provider-neutral stop operation.
+provider-neutral stop operation. `SpeechTaskQueue` retains each task from
+submission through completion, so cancellation can still reach speech waiting
+in the queue or resolving a provider before playback starts.
 
 The worker publishes `STARTED`, followed by `COMPLETED`, `CANCELLED` or
 `FAILED`. Provider failures are isolated to the task, so the worker remains
@@ -127,20 +131,22 @@ The runtime uses immutable dataclasses from `runtime/messages.py`.
 
 `RuntimeQueues` contains three independent FIFO queues:
 
-- `requests`: voice input to the execution worker.
+- `requests`: voice and manual input to the execution worker.
 - `speech`: response text to the speech worker.
 - `events`: execution and speech outcomes to the event worker.
 
 Workers use bounded `get(timeout=...)` waits. This avoids busy-waiting while
-still allowing a shutdown event to be noticed when a queue is empty. Every
-retrieved message is paired with `task_done()` in a `finally` block.
+still allowing a shutdown event to be noticed when a queue is empty. Generic
+queue messages are paired with `task_done()`, while the speech worker calls
+`SpeechTaskQueue.complete()` to release cancellable ownership and mark the item
+done.
 
 ## Request Lifecycle
 
-The normal voice request path is:
+The normal request path is:
 
 ```text
-speech recognised
+voice recognised or manual text entered
   -> wake word or follow-up accepted
   -> RuntimeRequest created
   -> request queue
@@ -172,22 +178,26 @@ that can observe it.
 When cancellation is requested:
 
 1. `ActiveRequestState.cancel_active()` sets the active request's event.
-2. `SpeechPlaybackController.stop()` sets the active speech event and stops the
-   provider session.
-3. Intent/LLM handling checks the event before and after dispatch and provider
+2. `SpeechTaskQueue.cancel_current()` signals the oldest outstanding speech
+   task, whether it is queued, resolving providers or playing.
+3. `SpeechPlaybackController.stop()` stops the active provider session only
+   when it belongs to that selected task, so a later response cannot be stopped
+   during a worker handoff.
+4. Intent/LLM handling checks the event before and after dispatch and provider
    attempts.
-4. OpenAI and Ollama use provider streaming internally, close the active
+5. OpenAI and Ollama use provider streaming internally, close the active
    response when the event is set and discard partial text.
-5. `llm_service` removes the pending user turn instead of committing a
+6. `llm_service` removes the pending user turn instead of committing a
    cancelled response to conversation history.
-6. A cancelled execution result does not queue its final `response_text` for
+7. A cancelled execution result does not queue its final `response_text` for
    speech or record that final response in the dashboard.
-7. The event worker keeps follow-up state closed.
+8. The event worker keeps follow-up state closed.
 
 Cancellation is not a provider failure and does not trigger another provider.
 After cancellation, the same workers can process the next request normally.
-If cancellation happens after execution has completed and speech has started,
-it stops playback but does not retract response text already stored in
+If cancellation happens after execution has completed, the tracked speech task
+is still signalled while it is queued, resolving a provider or playing. This
+prevents or stops audio, but does not retract response text already stored in
 conversation history or dashboard state.
 
 Command modules do not currently receive the runtime cancellation event in
@@ -215,7 +225,8 @@ The implemented order is:
 3. Signal the active request's cancellation event.
 4. Signal and join the execution worker.
 5. Disconnect new speech submission.
-6. Stop active playback, signal and join the speech worker.
+6. Cancel outstanding speech, stop active playback, signal and join the speech
+   worker.
 7. Signal and join the event worker.
 8. Signal and join the heartbeat worker.
 
@@ -246,21 +257,21 @@ def run(request: IntentRequest) -> bool:
     return True
 ```
 
-In voice mode, the execution worker calls this function. `speak_response()`
-submits speech asynchronously and associates it with the active runtime
-request. The command should return `True` when handled and `False` when it could
-not complete; it should not create a runtime worker, manipulate queues or own a
-TTS provider.
+In either input mode, the execution worker calls this function.
+`speak_response()` submits speech asynchronously and associates it with the
+active runtime request. The command should return `True` when handled and
+`False` when it could not complete; it should not create a runtime worker,
+manipulate queues or own a TTS provider.
 
 General LLM chat differs slightly: `utils.on_command` returns response text to
 the execution worker, which records and queues it after the final cancellation
 check.
 
-Manual mode currently calls `command.run()` synchronously on the main thread.
-It uses the same intent and command system, and command speech still enters the
-configured speech worker, but manual command execution itself does not travel
-through the request queue. This is an implementation limitation, not a pattern
-new runtime integrations should copy.
+Manual mode validates and strips the wake word on the main thread, then creates
+an `InputSource.MANUAL` request and submits it to the shared request queue. The
+execution worker therefore serialises manual and voice commands, preserves
+conversation ordering and hands manual LLM replies to the speech worker through
+the same response path.
 
 See [Command Modules](command-modules.md) for the full command contract and
 [Intent Routing](intent-routing.md) for strategy and dispatch behaviour.
@@ -271,7 +282,7 @@ See [Command Modules](command-modules.md) for the full command contract and
 | --- | --- |
 | `coda_runtime.py` | Coordinator, worker lifecycle, request execution, events, cancellation and shutdown |
 | `runtime/messages.py` | Immutable runtime message contracts |
-| `runtime/runtime_queue.py` | Typed queue wrappers and queue set |
+| `runtime/runtime_queue.py` | Typed queue wrappers, tracked speech ownership and queue set |
 | `runtime/active_request.py` | Thread-safe active request ownership |
 | `runtime/follow_up.py` | Thread-safe voice follow-up deadline |
 | `runtime/voice_worker.py` | Voice thread lifecycle |
@@ -305,7 +316,6 @@ Current limits include:
 - One command or LLM request executes at a time.
 - One speech task plays at a time.
 - Ordinary submissions queue rather than replacing active work.
-- Manual command execution remains synchronous.
 - Arbitrary command code and local intent classification are not interruptible.
 - Provider tokens are accumulated internally; incremental display and speech
   are future work.

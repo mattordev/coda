@@ -62,11 +62,17 @@ class SpeechPlaybackController:
                     self._active_session = None
                     self._active_cancel_event = None
                     
-    def stop(self) -> bool:
+    def stop(self, expected_cancel_event: Event | None = None) -> bool:
         with self._lock:
             session = self._active_session
             cancel_event = self._active_cancel_event
-            
+
+            if (
+                expected_cancel_event is not None
+                and cancel_event is not expected_cancel_event
+            ):
+                return False
+
         if session is None:
             return False
 

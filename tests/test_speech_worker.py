@@ -257,6 +257,92 @@ class SpeechWorkerTests(unittest.TestCase):
         self.assertEqual(processor.process.call_count, 2)
         self.assertFalse(worker.is_alive())
 
+    def test_worker_cancels_task_during_provider_resolution(self):
+        queues = RuntimeQueues()
+        shutdown_event = threading.Event()
+        resolver_entered = threading.Event()
+        release_resolver = threading.Event()
+        provider = FakeProvider("available")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.return_value = True
+        task = self._task("request-1")
+
+        def resolve_providers():
+            resolver_entered.set()
+            release_resolver.wait(timeout=1.0)
+            return [provider]
+
+        processor = SpeechTaskProcessor(
+            resolve_providers,
+            controller,
+        )
+        worker = SpeechWorker(
+            queues.speech,
+            queues.events,
+            processor,
+            shutdown_event,
+        )
+        worker.start()
+
+        try:
+            queues.speech.put(task)
+            started = queues.events.get(timeout=1.0)
+            self.assertTrue(resolver_entered.wait(timeout=1.0))
+
+            cancelled_outstanding = queues.speech.cancel_current()
+            release_resolver.set()
+            cancelled = queues.events.get(timeout=1.0)
+        finally:
+            release_resolver.set()
+            worker.stop()
+
+        self.assertTrue(cancelled_outstanding)
+        self.assertTrue(task.cancel_event.is_set())
+        self.assertEqual(started.event_type, WorkerEventType.STARTED)
+        self.assertEqual(cancelled.event_type, WorkerEventType.CANCELLED)
+        controller.play.assert_not_called()
+        self.assertFalse(worker.is_alive())
+
+    def test_worker_stop_cancels_all_outstanding_tasks(self):
+        queues = RuntimeQueues()
+        shutdown_event = threading.Event()
+        processing_started = threading.Event()
+        processor = Mock(spec=SpeechTaskProcessor)
+        current_task = self._task("request-1")
+        queued_task = self._task("request-2")
+
+        def process(task):
+            processing_started.set()
+            task.cancel_event.wait(timeout=1.0)
+            return WorkerEvent(
+                worker=WorkerName.SPEECH,
+                event_type=WorkerEventType.CANCELLED,
+                request_id=task.request_id,
+            )
+
+        processor.process.side_effect = process
+        worker = SpeechWorker(
+            queues.speech,
+            queues.events,
+            processor,
+            shutdown_event,
+        )
+        worker.start()
+
+        try:
+            queues.speech.put(current_task)
+            queues.speech.put(queued_task)
+            self.assertTrue(processing_started.wait(timeout=1.0))
+            worker.stop(timeout=1.0)
+        finally:
+            if worker.is_alive():
+                worker.stop(timeout=1.0)
+
+        self.assertTrue(current_task.cancel_event.is_set())
+        self.assertTrue(queued_task.cancel_event.is_set())
+        processor.stop.assert_called_once_with()
+        self.assertFalse(worker.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()

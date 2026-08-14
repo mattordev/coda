@@ -1,7 +1,12 @@
 import threading
 import unittest
 
-from runtime.runtime_queue import RuntimeQueue, RuntimeQueues
+from runtime.messages import SpeechTask
+from runtime.runtime_queue import (
+    RuntimeQueue,
+    RuntimeQueues,
+    SpeechTaskQueue,
+)
 
 
 class RuntimeQueueTests(unittest.TestCase):
@@ -66,6 +71,72 @@ class RuntimeQueueTests(unittest.TestCase):
         self.assertTrue(join_finished.wait(timeout=1.0))
         waiter.join(timeout=1.0)
         self.assertFalse(waiter.is_alive())
+
+    def test_speech_queue_cancels_queued_and_dequeued_tasks(self):
+        speech_queue = SpeechTaskQueue()
+        resolving_task = SpeechTask(
+            request_id="resolving-request",
+            text="resolving response",
+            cancel_event=threading.Event(),
+        )
+        queued_task = SpeechTask(
+            request_id="queued-request",
+            text="queued response",
+            cancel_event=threading.Event(),
+        )
+        speech_queue.put(resolving_task)
+        speech_queue.put(queued_task)
+
+        claimed_task = speech_queue.get(timeout=0.01)
+        self.assertIs(claimed_task, resolving_task)
+
+        self.assertTrue(speech_queue.cancel_all())
+        self.assertTrue(resolving_task.cancel_event.is_set())
+        self.assertTrue(queued_task.cancel_event.is_set())
+
+        speech_queue.complete(resolving_task)
+        self.assertIs(speech_queue.get(timeout=0.01), queued_task)
+        speech_queue.complete(queued_task)
+
+    def test_speech_queue_cancels_only_oldest_outstanding_task(self):
+        speech_queue = SpeechTaskQueue()
+        current_task = SpeechTask(
+            request_id="current-request",
+            text="current response",
+            cancel_event=threading.Event(),
+        )
+        later_task = SpeechTask(
+            request_id="later-request",
+            text="later response",
+            cancel_event=threading.Event(),
+        )
+        speech_queue.put(current_task)
+        speech_queue.put(later_task)
+
+        self.assertIs(speech_queue.get(timeout=0.01), current_task)
+        self.assertTrue(speech_queue.cancel_current())
+
+        self.assertTrue(current_task.cancel_event.is_set())
+        self.assertFalse(later_task.cancel_event.is_set())
+
+        speech_queue.complete(current_task)
+        self.assertIs(speech_queue.get(timeout=0.01), later_task)
+        speech_queue.complete(later_task)
+
+    def test_completed_speech_task_is_no_longer_cancellable(self):
+        speech_queue = SpeechTaskQueue()
+        task = SpeechTask(
+            request_id="completed-request",
+            text="completed response",
+            cancel_event=threading.Event(),
+        )
+        speech_queue.put(task)
+
+        self.assertIs(speech_queue.get(timeout=0.01), task)
+        speech_queue.complete(task)
+
+        self.assertFalse(speech_queue.cancel_all())
+        self.assertFalse(task.cancel_event.is_set())
 
 
 if __name__ == "__main__":

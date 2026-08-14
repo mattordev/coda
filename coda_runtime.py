@@ -340,7 +340,18 @@ def submit_runtime_request(request: RuntimeRequest) -> str | None:
 def cancel_active_request() -> str | None:
     """Request cancellation of the active runtime request."""
     request_id = active_request_state.cancel_active()
-    speech_cancelled = speech_processor.stop()
+    speech_cancel_event = runtime_queues.speech.cancel_current()
+    playback_cancelled = (
+        speech_processor.stop(
+            expected_cancel_event=speech_cancel_event,
+        )
+        if speech_cancel_event is not None
+        else False
+    )
+    speech_cancelled = (
+        speech_cancel_event is not None
+        or playback_cancelled
+    )
 
     if request_id is None and not speech_cancelled:
         print(
@@ -379,7 +390,10 @@ def _create_execution_result(
         request_id=request.request_id,
         handled=command_result.handled,
         response_text=command_result.response_text,
-        open_follow_up=command_result.open_follow_up,
+        open_follow_up=(
+            command_result.open_follow_up
+            and request.source == InputSource.VOICE
+        ),
     )
     
 def _execution_loop(stop_event):
@@ -802,11 +816,11 @@ def _run_runtime():
                 print("[MANUAL] Wakeword detected without follow-up text.")
                 continue
 
-            # Debug output enabled in manual mode so command matching is visible.
-            command.run(
-                command_message,
-                commands,
-                debug=runtime_state.is_debug_enabled(default=False),
+            submit_runtime_request(
+                RuntimeRequest(
+                    message=command_message,
+                    source=InputSource.MANUAL,
+                )
             )
         else:
             if keyboard_toggle_available:

@@ -9,6 +9,7 @@ from runtime.messages import (
     ExecutionResult,
     InputSource,
     RuntimeRequest,
+    SpeechTask,
     WorkerEvent,
     WorkerEventType,
     WorkerName,
@@ -85,12 +86,12 @@ class RuntimeExecutionTests(unittest.TestCase):
             flush=True,
         )
 
-    def test_execution_loop_queues_response_for_speech(self):
+    def test_execution_loop_queues_manual_response_without_voice_follow_up(self):
         queues = RuntimeQueues()
         stop_event = threading.Event()
         request = RuntimeRequest(
             message="tell me something",
-            source=InputSource.VOICE,
+            source=InputSource.MANUAL,
         )
         command_result = SimpleNamespace(
             handled=True,
@@ -126,13 +127,58 @@ class RuntimeExecutionTests(unittest.TestCase):
                 worker.join(timeout=1.0)
 
         self.assertEqual(result.response_text, "General response")
+        self.assertFalse(result.open_follow_up)
         self.assertEqual(speech_task.request_id, request.request_id)
         self.assertEqual(speech_task.text, "General response")
         self.assertIs(speech_task.cancel_event, request.cancel_event)
+        self.assertFalse(speech_task.open_follow_up)
         record_ai_response.assert_called_once_with(
             "General response",
             source="tts",
         )
+
+    def test_execution_loop_preserves_voice_follow_up_on_speech_task(self):
+        queues = RuntimeQueues()
+        stop_event = threading.Event()
+        request = RuntimeRequest(
+            message="tell me something",
+            source=InputSource.VOICE,
+        )
+        command_result = SimpleNamespace(
+            handled=True,
+            response_text="Voice response",
+            open_follow_up=True,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                return_value=command_result,
+            ),
+            patch.object(
+                coda_runtime.dashboard_state,
+                "record_ai_response",
+            ),
+            patch("builtins.print"),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.requests.put(request)
+                result = queues.events.get(timeout=1.0)
+                speech_task = queues.speech.get(timeout=1.0)
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertTrue(result.open_follow_up)
+        self.assertTrue(speech_task.open_follow_up)
 
     def test_execution_loop_tracks_active_request(self):
         queues = RuntimeQueues()
@@ -221,7 +267,7 @@ class RuntimeExecutionTests(unittest.TestCase):
 
         self.assertEqual(cancelled_id, request.request_id)
         self.assertTrue(request.cancel_event.is_set())
-        speech_processor.stop.assert_called_once_with()
+        speech_processor.stop.assert_not_called()
         print_output.assert_called_once_with(
             "[RUNTIME] Cancellation requested",
             flush=True,
@@ -248,18 +294,26 @@ class RuntimeExecutionTests(unittest.TestCase):
             cancelled_id = coda_runtime.cancel_active_request()
 
         self.assertIsNone(cancelled_id)
-        speech_processor.stop.assert_called_once_with()
+        speech_processor.stop.assert_not_called()
         print_output.assert_called_once_with(
             "[RUNTIME] No active request to cancel",
             flush=True,
         )
 
     def test_cancel_active_request_stops_speech_when_execution_is_idle(self):
+        queues = RuntimeQueues()
         active_state = ActiveRequestState()
         speech_processor = Mock()
         speech_processor.stop.return_value = True
+        speech_task = SpeechTask(
+            request_id="speech-request",
+            text="response",
+            cancel_event=threading.Event(),
+        )
+        queues.speech.put(speech_task)
 
         with (
+            patch.object(coda_runtime, "runtime_queues", queues),
             patch.object(
                 coda_runtime,
                 "active_request_state",
@@ -280,13 +334,17 @@ class RuntimeExecutionTests(unittest.TestCase):
             cancelled_id = coda_runtime.cancel_active_request()
 
         self.assertIsNone(cancelled_id)
-        speech_processor.stop.assert_called_once_with()
+        self.assertTrue(speech_task.cancel_event.is_set())
+        speech_processor.stop.assert_called_once_with(
+            expected_cancel_event=speech_task.cancel_event,
+        )
         print_output.assert_called_once_with(
             "[RUNTIME] Speech cancellation requested",
             flush=True,
         )
 
     def test_cancel_active_request_stops_execution_and_speech(self):
+        queues = RuntimeQueues()
         active_state = ActiveRequestState()
         speech_processor = Mock()
         speech_processor.stop.return_value = True
@@ -295,8 +353,15 @@ class RuntimeExecutionTests(unittest.TestCase):
             source=InputSource.VOICE,
         )
         active_state.activate(request)
+        speech_task = SpeechTask(
+            request_id=request.request_id,
+            text="response",
+            cancel_event=request.cancel_event,
+        )
+        queues.speech.put(speech_task)
 
         with (
+            patch.object(coda_runtime, "runtime_queues", queues),
             patch.object(
                 coda_runtime,
                 "active_request_state",
@@ -318,9 +383,82 @@ class RuntimeExecutionTests(unittest.TestCase):
 
         self.assertEqual(cancelled_id, request.request_id)
         self.assertTrue(request.cancel_event.is_set())
-        speech_processor.stop.assert_called_once_with()
+        speech_processor.stop.assert_called_once_with(
+            expected_cancel_event=request.cancel_event,
+        )
         print_output.assert_called_once_with(
             "[RUNTIME] Cancellation requested",
+            flush=True,
+        )
+
+    def test_cancel_after_speech_enqueue_before_worker_pickup(self):
+        queues = RuntimeQueues()
+        active_state = ActiveRequestState()
+        speech_processor = Mock()
+        speech_processor.stop.return_value = False
+        stop_event = threading.Event()
+        request = RuntimeRequest(
+            message="tell me something",
+            source=InputSource.VOICE,
+        )
+        command_result = SimpleNamespace(
+            handled=True,
+            response_text="Queued response",
+            open_follow_up=True,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime,
+                "active_request_state",
+                active_state,
+            ),
+            patch.object(
+                coda_runtime,
+                "speech_processor",
+                speech_processor,
+            ),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                return_value=command_result,
+            ),
+            patch.object(
+                coda_runtime.dashboard_state,
+                "record_ai_response",
+            ),
+            patch.object(
+                coda_runtime.runtime_state,
+                "is_debug_enabled",
+                return_value=True,
+            ),
+            patch("builtins.print") as print_output,
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._execution_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.requests.put(request)
+                result = queues.events.get(timeout=1.0)
+                cancelled_id = coda_runtime.cancel_active_request()
+                speech_task = queues.speech.get(timeout=1.0)
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        self.assertEqual(result.request_id, request.request_id)
+        self.assertIsNone(active_state.active_request_id())
+        self.assertIsNone(cancelled_id)
+        self.assertTrue(speech_task.cancel_event.is_set())
+        speech_processor.stop.assert_called_once_with(
+            expected_cancel_event=request.cancel_event,
+        )
+        print_output.assert_any_call(
+            "[RUNTIME] Speech cancellation requested",
             flush=True,
         )
 
@@ -739,6 +877,58 @@ class RuntimeExecutionTests(unittest.TestCase):
             follow_up_state=coda_runtime.follow_up_state,
             cancel_active_request=coda_runtime.cancel_active_request,
         )
+
+    def test_manual_input_uses_runtime_request_queue(self):
+        with (
+            patch.object(coda_runtime, "commands", {}),
+            patch.object(coda_runtime, "wakewords", []),
+            patch.object(coda_runtime, "manual_assisstant_input", False),
+            patch.object(
+                coda_runtime,
+                "_apply_cli_microphone_flags",
+                return_value=True,
+            ),
+            patch.object(
+                coda_runtime,
+                "check_update_available",
+                return_value=False,
+            ),
+            patch.object(
+                coda_runtime,
+                "load_commands",
+                return_value={},
+            ),
+            patch.object(
+                coda_runtime,
+                "load_wakewords",
+                return_value=["coda"],
+            ),
+            patch.object(coda_runtime.command, "configure_intent_router"),
+            patch.object(coda_runtime, "start_heartbeat_thread"),
+            patch.object(coda_runtime, "start_execution_thread"),
+            patch.object(coda_runtime, "start_event_thread"),
+            patch.object(coda_runtime, "start_speech_thread"),
+            patch.object(coda_runtime.speech, "configure_speech_submitter"),
+            patch.object(
+                coda_runtime,
+                "submit_runtime_request",
+            ) as submit_request,
+            patch.object(coda_runtime.command, "run") as run_command,
+            patch(
+                "builtins.input",
+                side_effect=["coda tell me something", "quit"],
+            ),
+            patch("builtins.print"),
+        ):
+            coda_runtime._run_runtime()
+
+        run_command.assert_not_called()
+        submit_request.assert_called_once()
+        submitted_request = submit_request.call_args.args[0]
+        self.assertIsInstance(submitted_request, RuntimeRequest)
+        self.assertEqual(submitted_request.message, "tell me something")
+        self.assertEqual(submitted_request.source, InputSource.MANUAL)
+        self.assertFalse(submitted_request.replace_active)
         
     def test_execution_thread_starts_once_and_stops(self):
         stop_event = threading.Event()

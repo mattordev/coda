@@ -145,6 +145,74 @@ class SpeechPlaybackControllerTests(unittest.TestCase):
         self.assertEqual(playback_result, [False])
         self.assertFalse(controller.stop())
 
+    def test_stop_ignores_mismatched_expected_cancel_event(self):
+        controller = SpeechPlaybackController()
+        session = FakeSpeechSession(block=True)
+        provider = FakeSpeechProvider(session)
+        active_cancel_event = threading.Event()
+        stale_cancel_event = threading.Event()
+        stale_cancel_event.set()
+        playback_result = []
+
+        worker = threading.Thread(
+            target=lambda: playback_result.append(
+                controller.play(
+                    provider,
+                    "newer response",
+                    active_cancel_event,
+                )
+            )
+        )
+        worker.start()
+
+        try:
+            self.assertTrue(session.play_started.wait(timeout=1.0))
+            self.assertFalse(
+                controller.stop(
+                    expected_cancel_event=stale_cancel_event,
+                )
+            )
+            self.assertFalse(active_cancel_event.is_set())
+            self.assertFalse(session.stop_called.is_set())
+            self.assertTrue(worker.is_alive())
+        finally:
+            controller.stop(
+                expected_cancel_event=active_cancel_event,
+            )
+            worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(playback_result, [False])
+
+    def test_stop_interrupts_matching_expected_cancel_event(self):
+        controller = SpeechPlaybackController()
+        session = FakeSpeechSession(block=True)
+        provider = FakeSpeechProvider(session)
+        cancel_event = threading.Event()
+        playback_result = []
+
+        worker = threading.Thread(
+            target=lambda: playback_result.append(
+                controller.play(
+                    provider,
+                    "matching response",
+                    cancel_event,
+                )
+            )
+        )
+        worker.start()
+
+        self.assertTrue(session.play_started.wait(timeout=1.0))
+        self.assertTrue(
+            controller.stop(expected_cancel_event=cancel_event)
+        )
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(cancel_event.is_set())
+        self.assertTrue(session.stop_called.is_set())
+        self.assertEqual(playback_result, [False])
+
     def test_streaming_provider_uses_existing_session_boundary(self):
         controller = SpeechPlaybackController()
         provider = FakeStreamingSpeechProvider([b"first", b"second"])
