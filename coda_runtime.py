@@ -52,6 +52,8 @@ speech_worker = SpeechWorker(
     speech_processor,
     speech_stop_event,
 )
+shutdown_lock = threading.Lock()
+shutdown_started = threading.Event()
 
 
 
@@ -673,6 +675,26 @@ def stop_heartbeat_thread(timeout_seconds=2.0):
         heartbeat_thread.join(timeout=timeout_seconds)
 
 
+def shutdown_runtime(timeout_seconds=4.0):
+    """Cancel active work and stop every runtime worker exactly once."""
+    with shutdown_lock:
+        if shutdown_started.is_set():
+            return False
+        shutdown_started.set()
+
+    follow_up_state.close()
+    stop_voice_thread(timeout_seconds=timeout_seconds)
+
+    active_request_state.cancel_active()
+    stop_execution_thread(timeout_seconds=timeout_seconds)
+
+    speech.configure_speech_submitter(None)
+    stop_speech_thread(timeout_seconds=timeout_seconds)
+    stop_event_thread(timeout_seconds=timeout_seconds)
+    stop_heartbeat_thread(timeout_seconds=timeout_seconds)
+    return True
+
+
 # runs first time setup if command/wakeword files are missing. can be called whenever safely as resets program flow.
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
@@ -697,7 +719,7 @@ def json_dict_to_string_array(jsonData):
 #####################
 
 
-def main():
+def _run_runtime():
     global commands
     global wakewords
     global manual_assisstant_input
@@ -759,14 +781,7 @@ def main():
             normalized_manual_message = manual_message.lower()
 
             if normalized_manual_message in ("quit", "exit"):
-                stop_voice_thread()
-                stop_execution_thread()
-                speech.configure_speech_submitter(None)
-                stop_speech_thread()
-                stop_event_thread()
-                stop_heartbeat_thread()
-                print("Exiting C.O.D.A")
-                break
+                return
 
             if normalized_manual_message in ("voice", "/voice"):
                 manual_assisstant_input = False
@@ -809,6 +824,20 @@ def main():
                     print("Restart with -m or --manual to use manual mode.")
 
             time.sleep(0.05)
+
+
+def main():
+    """Run CODA and guarantee runtime cleanup on every exit path."""
+    shutdown_started.clear()
+
+    try:
+        _run_runtime()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        shutdown_runtime()
+
+    print("Exiting C.O.D.A")
 
 
 if __name__ == "__main__":
