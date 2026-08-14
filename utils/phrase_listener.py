@@ -26,6 +26,7 @@ class CapturedPhrase(Generic[CaptureState]):
 
     audio: sr.AudioData
     started_with: CaptureState
+    overlapped_capture: bool = False
 
 
 def listen_for_phrase(
@@ -36,6 +37,7 @@ def listen_for_phrase(
     timeout: float | None = None,
     phrase_time_limit: float | None = None,
     stop_event: Event | None = None,
+    blocks_capture: Callable[[CaptureState], bool] | None = None,
 ) -> CapturedPhrase[CaptureState] | None:
     """Listen using SpeechRecognition's VAD and retain accepted start state.
 
@@ -68,6 +70,7 @@ def listen_for_phrase(
     while True:
         frames = deque()
         phrase_state = None
+        overlapped_capture = False
 
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -81,6 +84,11 @@ def listen_for_phrase(
 
             buffer_state = capture_state()
             buffer = source.stream.read(source.CHUNK)
+            post_read_state = capture_state()
+            if blocks_capture is not None:
+                overlapped_capture = (
+                    overlapped_capture or blocks_capture(post_read_state)
+                )
             if not buffer:
                 break
 
@@ -91,6 +99,10 @@ def listen_for_phrase(
             energy = audioop.rms(buffer, source.SAMPLE_WIDTH)
             if energy > recognizer.energy_threshold:
                 phrase_state = buffer_state
+                if blocks_capture is not None:
+                    overlapped_capture = (
+                        overlapped_capture or blocks_capture(buffer_state)
+                    )
                 break
 
             if recognizer.dynamic_energy_threshold:
@@ -119,7 +131,18 @@ def listen_for_phrase(
             ):
                 break
 
+            buffer_state = capture_state()
+            if blocks_capture is not None:
+                overlapped_capture = (
+                    overlapped_capture or blocks_capture(buffer_state)
+                )
+
             buffer = source.stream.read(source.CHUNK)
+            post_read_state = capture_state()
+            if blocks_capture is not None:
+                overlapped_capture = (
+                    overlapped_capture or blocks_capture(post_read_state)
+                )
             if not buffer:
                 break
 
@@ -161,4 +184,8 @@ def listen_for_phrase(
         source.SAMPLE_RATE,
         source.SAMPLE_WIDTH,
     )
-    return CapturedPhrase(audio=audio, started_with=phrase_state)
+    return CapturedPhrase(
+        audio=audio,
+        started_with=phrase_state,
+        overlapped_capture=overlapped_capture,
+    )

@@ -177,6 +177,8 @@ cloud-safe conversation rules.
 - `CODA_FOLLOWUP_TIMEOUT` controls how long an LLM voice follow-up can omit the
   wake word.
 - `ELEVENLABS_API_KEY` enables ElevenLabs speech output.
+- `CODA_ELEVENLABS_TIMEOUT` bounds audio generation before CODA falls back to
+  another speech provider (default: 30 seconds).
 
 The remaining provider, privacy, speech and model options are documented in
 [`docs/.env.example`](docs/.env.example).

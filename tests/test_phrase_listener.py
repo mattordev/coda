@@ -137,15 +137,65 @@ class PhraseListenerTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(captured)
-        self.assertEqual(
-            captured_states,
-            ["noise", "noise", "accepted"],
-        )
+        self.assertEqual(captured_states[0], "noise")
+        self.assertEqual(captured_states[-1], "accepted")
+        self.assertIn("accepted", captured_states)
         self.assertEqual(captured.started_with, "accepted")
         self.assertEqual(
             captured.audio.frame_data,
             speech + speech + speech + quiet,
         )
+
+    def test_records_playback_that_starts_after_phrase_onset(self):
+        speech = _pcm_buffer(400)
+        quiet = _pcm_buffer(0)
+        speech_playing = False
+
+        def start_playback_mid_capture(read_count):
+            nonlocal speech_playing
+            if read_count == 2:
+                speech_playing = True
+
+        source = FakeAudioSource(
+            [speech, speech, speech, quiet, quiet, quiet],
+            before_read=start_playback_mid_capture,
+        )
+
+        captured = listen_for_phrase(
+            _recognizer(),
+            source,
+            lambda: speech_playing,
+            blocks_capture=lambda state: state,
+        )
+
+        self.assertIsNotNone(captured)
+        self.assertFalse(captured.started_with)
+        self.assertTrue(captured.overlapped_capture)
+
+    def test_records_playback_starting_during_final_capture_read(self):
+        speech = _pcm_buffer(400)
+        quiet = _pcm_buffer(0)
+        speech_playing = False
+
+        def start_playback_in_final_read(read_count):
+            nonlocal speech_playing
+            if read_count == 4:
+                speech_playing = True
+
+        source = FakeAudioSource(
+            [speech, speech, speech, b""],
+            before_read=start_playback_in_final_read,
+        )
+
+        captured = listen_for_phrase(
+            _recognizer(),
+            source,
+            lambda: speech_playing,
+            blocks_capture=lambda state: state,
+        )
+
+        self.assertIsNotNone(captured)
+        self.assertTrue(captured.overlapped_capture)
 
     def test_stop_event_exits_before_reading_another_buffer(self):
         stop_event = Event()

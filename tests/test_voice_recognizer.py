@@ -22,6 +22,7 @@ def _captured_phrase(
             follow_up_active=follow_up_active,
             speech_playing=speech_playing,
         ),
+        overlapped_capture=speech_playing,
     )
 
 
@@ -344,10 +345,12 @@ class VoiceRecognizerTests(unittest.TestCase):
         microphone = MagicMock()
         playback_active = True
 
-        def capture_phrase(_recognizer, _source, capture_state, **_kwargs):
+        def capture_phrase(_recognizer, _source, capture_state, **kwargs):
+            state = capture_state()
             return CapturedPhrase(
                 audio=object(),
-                started_with=capture_state(),
+                started_with=state,
+                overlapped_capture=kwargs["blocks_capture"](state),
             )
 
         def transcribe_audio(_recognizer, _audio):
@@ -400,7 +403,7 @@ class VoiceRecognizerTests(unittest.TestCase):
             tags=["wakeword_detected", "assistant_playback"],
         )
         print_output.assert_any_call(
-            "[VOICE] Audio began during CODA speech. Ignoring phrase."
+            "[VOICE] Audio overlapped CODA speech. Ignoring phrase."
         )
 
     def test_wakeword_stop_cancels_during_playback(self):

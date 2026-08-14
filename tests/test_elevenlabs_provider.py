@@ -43,6 +43,59 @@ class ElevenLabsProviderTests(unittest.TestCase):
         popen.assert_not_called()
 
     @patch("tts.elevenlabs_provider.Popen")
+    def test_cancellation_interrupts_wait_for_generation(self, popen):
+        generation_started = threading.Event()
+        release_generation = threading.Event()
+        cancel_event = threading.Event()
+
+        def generate_audio(_text):
+            generation_started.set()
+            release_generation.wait(timeout=1.0)
+            return b"audio"
+
+        session = ElevenLabsSession(
+            text="hello",
+            generate_audio=generate_audio,
+            ffplay_path="ffplay",
+        )
+        results = []
+        worker = threading.Thread(
+            target=lambda: results.append(session.play(cancel_event))
+        )
+        worker.start()
+
+        self.assertTrue(generation_started.wait(timeout=1.0))
+        cancel_event.set()
+        worker.join(timeout=0.5)
+        release_generation.set()
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [False])
+        popen.assert_not_called()
+
+    @patch.dict("os.environ", {"CODA_ELEVENLABS_TIMEOUT": "0.1"})
+    def test_generation_timeout_bounds_provider_wait(self):
+        generation_started = threading.Event()
+        release_generation = threading.Event()
+
+        def generate_audio(_text):
+            generation_started.set()
+            release_generation.wait(timeout=1.0)
+            return b"audio"
+
+        session = ElevenLabsSession(
+            text="hello",
+            generate_audio=generate_audio,
+            ffplay_path="ffplay",
+        )
+
+        with self.assertRaisesRegex(TimeoutError, "generation timed out"):
+            session.play(threading.Event())
+
+        self.assertTrue(generation_started.is_set())
+        release_generation.set()
+
+    @patch("tts.elevenlabs_provider.Popen")
     def test_completed_ffplay_session_returns_success(self, popen):
         process = Mock()
         process.poll.side_effect = [None, 0]

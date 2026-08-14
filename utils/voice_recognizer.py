@@ -266,6 +266,7 @@ def run(
                     timeout=_get_listen_timeout_seconds(),
                     phrase_time_limit=_get_phrase_time_limit_seconds(),
                     stop_event=stop_event,
+                    blocks_capture=lambda state: state.speech_playing,
                 )
 
             if captured_phrase is None:
@@ -308,7 +309,7 @@ def run(
             else:
                 event_tags.append("unrelated_speech")
 
-            if capture_state.speech_playing:
+            if captured_phrase.overlapped_capture:
                 event_tags.append("assistant_playback")
 
             dashboard_state.record_user_message(
@@ -330,9 +331,9 @@ def run(
                 cancel_active_request()
                 continue
 
-            if capture_state.speech_playing:
+            if captured_phrase.overlapped_capture:
                 print(
-                    "[VOICE] Audio began during CODA speech. "
+                    "[VOICE] Audio overlapped CODA speech. "
                     "Ignoring phrase."
                 )
                 continue

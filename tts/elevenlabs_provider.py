@@ -1,12 +1,23 @@
+import os
 import shutil
 from pathlib import Path
+from queue import Empty, Queue
 from subprocess import DEVNULL, Popen, TimeoutExpired
 from tempfile import NamedTemporaryFile
-from threading import Event, Lock
+from threading import Event, Lock, Thread
+import time
 from typing import Callable
 
 
 AudioGenerator = Callable[[str], bytes]
+
+
+def _generation_timeout_seconds() -> float:
+    raw_value = os.getenv("CODA_ELEVENLABS_TIMEOUT", "30")
+    try:
+        return max(0.1, float(raw_value))
+    except ValueError:
+        return 30.0
 
 
 class ElevenLabsProvider:
@@ -53,7 +64,33 @@ class ElevenLabsSession:
         self._playing = False
 
     def play(self, cancel_event: Event) -> bool:
-        audio = self._generate_audio(self._text)
+        results = Queue(maxsize=1)
+
+        def generate() -> None:
+            try:
+                results.put((self._generate_audio(self._text), None))
+            except Exception as error:  # provider errors are re-raised below
+                results.put((None, error))
+
+        Thread(target=generate, daemon=True).start()
+        deadline = time.monotonic() + _generation_timeout_seconds()
+
+        while True:
+            if cancel_event.is_set():
+                return False
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("ElevenLabs generation timed out.")
+
+            try:
+                audio, error = results.get(timeout=min(0.05, remaining))
+                break
+            except Empty:
+                continue
+
+        if error is not None:
+            raise error
 
         if cancel_event.is_set():
             return False
