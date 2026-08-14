@@ -876,6 +876,9 @@ class RuntimeExecutionTests(unittest.TestCase):
             submit_request=coda_runtime.submit_runtime_request,
             follow_up_state=coda_runtime.follow_up_state,
             cancel_active_request=coda_runtime.cancel_active_request,
+            is_speech_playing=(
+                coda_runtime.speech_playback_controller.is_playing
+            ),
         )
 
     def test_manual_input_uses_runtime_request_queue(self):

@@ -8,20 +8,28 @@ class FakeSpeechSession:
     def __init__(self, block=False):
         self.block = block
         self.play_started = threading.Event()
+        self.playing = threading.Event()
         self.release_playback = threading.Event()
         self.stop_called = threading.Event()
 
     def play(self, cancel_event):
         self.play_started.set()
+        self.playing.set()
 
-        if self.block:
-            self.release_playback.wait(timeout=1.0)
+        try:
+            if self.block:
+                self.release_playback.wait(timeout=1.0)
 
-        return not self.stop_called.is_set() and not cancel_event.is_set()
+            return not self.stop_called.is_set() and not cancel_event.is_set()
+        finally:
+            self.playing.clear()
 
     def stop(self):
         self.stop_called.set()
         self.release_playback.set()
+
+    def is_playing(self):
+        return self.playing.is_set()
 
 
 class FakeSpeechProvider:
@@ -37,6 +45,30 @@ class FakeSpeechProvider:
     def create_session(self, text):
         self.created_texts.append(text)
         return self.session
+
+
+class BlockingSpeechProvider(FakeSpeechProvider):
+    def __init__(self, session):
+        super().__init__(session)
+        self.create_started = threading.Event()
+        self.release_create = threading.Event()
+
+    def create_session(self, text):
+        self.create_started.set()
+        self.release_create.wait(timeout=1.0)
+        return super().create_session(text)
+
+
+class FailingSpeechSession(FakeSpeechSession):
+    def play(self, _cancel_event):
+        self.play_started.set()
+        self.playing.set()
+
+        try:
+            self.release_playback.wait(timeout=1.0)
+            raise RuntimeError("playback failed")
+        finally:
+            self.playing.clear()
 
 
 class FakeStreamingSpeechSession:
@@ -65,6 +97,9 @@ class FakeStreamingSpeechSession:
         self.stop_called.set()
         self.release_stream.set()
 
+    def is_playing(self):
+        return self.chunk_played.is_set() and not self.release_stream.is_set()
+
 
 class FakeStreamingSpeechProvider:
     name = "future-streaming-provider"
@@ -90,6 +125,74 @@ class FakeStreamingSpeechProvider:
 
 
 class SpeechPlaybackControllerTests(unittest.TestCase):
+    def test_provider_session_creation_is_not_reported_as_playback(self):
+        controller = SpeechPlaybackController()
+        session = FakeSpeechSession()
+        provider = BlockingSpeechProvider(session)
+
+        worker = threading.Thread(
+            target=lambda: controller.play(
+                provider,
+                "hello",
+                threading.Event(),
+            )
+        )
+        worker.start()
+
+        self.assertTrue(provider.create_started.wait(timeout=1.0))
+        self.assertFalse(controller.is_playing())
+        provider.release_create.set()
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(controller.is_playing())
+
+    def test_is_playing_tracks_audible_session(self):
+        controller = SpeechPlaybackController()
+        session = FakeSpeechSession(block=True)
+        provider = FakeSpeechProvider(session)
+
+        worker = threading.Thread(
+            target=lambda: controller.play(
+                provider,
+                "hello",
+                threading.Event(),
+            )
+        )
+        worker.start()
+
+        self.assertTrue(session.play_started.wait(timeout=1.0))
+        self.assertTrue(controller.is_playing())
+        session.release_playback.set()
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(controller.is_playing())
+
+    def test_is_playing_is_cleared_after_session_exception(self):
+        controller = SpeechPlaybackController()
+        session = FailingSpeechSession()
+        provider = FakeSpeechProvider(session)
+        errors = []
+
+        def play():
+            try:
+                controller.play(provider, "hello", threading.Event())
+            except RuntimeError as error:
+                errors.append(error)
+
+        worker = threading.Thread(target=play)
+        worker.start()
+
+        self.assertTrue(session.play_started.wait(timeout=1.0))
+        self.assertTrue(controller.is_playing())
+        session.release_playback.set()
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(str(errors[0]), "playback failed")
+        self.assertFalse(controller.is_playing())
+
     def test_cancelled_task_does_not_create_session(self):
         controller = SpeechPlaybackController()
         session = FakeSpeechSession()
@@ -143,6 +246,7 @@ class SpeechPlaybackControllerTests(unittest.TestCase):
         self.assertTrue(cancel_event.is_set())
         self.assertTrue(session.stop_called.is_set())
         self.assertEqual(playback_result, [False])
+        self.assertFalse(controller.is_playing())
         self.assertFalse(controller.stop())
 
     def test_stop_ignores_mismatched_expected_cancel_event(self):

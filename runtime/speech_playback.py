@@ -14,6 +14,10 @@ class SpeechSession(Protocol):
         """Stop this session's active playback."""
         ...
 
+    def is_playing(self) -> bool:
+        """Return whether this session is starting or producing speech."""
+        ...
+
 
 class SpeechProvider(Protocol):
     """Create speech sessions without exposing provider details"""
@@ -81,3 +85,9 @@ class SpeechPlaybackController:
         
         session.stop()
         return True
+
+    def is_playing(self) -> bool:
+        """Return whether the active session is starting or producing audio."""
+        with self._lock:
+            session = self._active_session
+            return session is not None and session.is_playing()

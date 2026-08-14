@@ -68,14 +68,25 @@ wake-word and follow-up rules, then creates a `RuntimeRequest`. It submits that
 request without running the command itself and immediately returns to
 listening.
 
-Follow-up eligibility is captured when listening begins rather than after
-speech-to-text completes. Audio captured before a new follow-up window opens is
-discarded without closing that new window, preventing delayed transcription of
-CODA's own speech from becoming a wakeword-free request.
+Follow-up eligibility and audible speech-playback state are captured when the
+accepted microphone phrase begins rather than when `listen()` begins or after
+speech-to-text completes. Short noise candidates do not keep their snapshots;
+the state is captured again when SpeechRecognition accepts a later phrase.
+Wakeword-free audio that began before a new follow-up window opened is
+discarded without closing that new window.
 
-The voice recognizer also handles wake-word stop phrases. A phrase such as
-`coda stop` calls the coordinator's cancellation boundary instead of creating
-a normal request.
+CODA pins SpeechRecognition 3.17.0, but its `listen(stream=True)` iterator
+yields candidate audio before the minimum phrase length is known and does not
+identify candidates that are subsequently rejected. The small
+`utils.phrase_listener` adapter therefore mirrors the library's non-streaming
+voice-activity-detection loop so it can retain only the accepted phrase's
+start-state snapshot while preserving normal `AudioData` assembly.
+
+Audio that began while CODA was audibly playing speech is tagged and ignored,
+preventing assistant playback echoed through the microphone from becoming a
+new request. The exemption is an exact wake-word stop command: a phrase such
+as `coda stop` still calls the coordinator's cancellation boundary before the
+playback-echo filter instead of creating a normal request.
 
 ### Execution worker
 
@@ -297,6 +308,7 @@ See [Command Modules](command-modules.md) for the full command contract and
 | `runtime/voice_worker.py` | Voice thread lifecycle |
 | `runtime/speech_worker.py` | Speech processing and worker lifecycle |
 | `runtime/speech_playback.py` | Provider-neutral active playback ownership |
+| `utils/phrase_listener.py` | SpeechRecognition VAD adapter and accepted phrase-start state |
 | `utils/voice_recognizer.py` | Recognition, wake words, stop phrases and request submission |
 | `utils/on_command.py` | Intent dispatch, LLM fallback and cancellation checkpoints |
 | `utils/speak_response.py` | Command-facing asynchronous speech boundary |

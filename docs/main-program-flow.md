@@ -26,10 +26,20 @@ The voice worker owns microphone capture and speech-to-text. It records the
 transcript, applies wake-word and follow-up rules, then submits a
 `RuntimeRequest` to the shared request queue.
 
-Follow-up permission is based on the state when listening began. A transcript
-captured before the window opened is ignored without closing the newly opened
-window, which prevents delayed TTS audio from feeding back into the request
-queue.
+Follow-up permission and audible playback state are snapshotted when the
+accepted phrase begins. They are not taken when the listener first starts
+waiting or after transcription finishes. CODA's phrase-aware adapter mirrors
+SpeechRecognition 3.17.0's non-streaming voice-activity detection because the
+library's streaming iterator exposes short candidates without reporting when
+one is rejected. This lets CODA replace the snapshot after noise and associate
+the final `AudioData` with the accepted phrase-start buffer's state.
+
+A wakeword-free phrase that began before the follow-up window opened is ignored
+without closing the newly opened window. A phrase that began while CODA was
+audibly speaking is also ignored, preventing assistant playback echoed through
+the microphone from feeding back into the request queue. An exact wake-word
+stop command, such as `coda stop`, is deliberately handled before this echo
+filter so spoken cancellation remains available during playback.
 
 The execution worker processes queued requests one at a time. It runs intent
 routing and command dispatch, or LLM fallback for unmatched input. Responses

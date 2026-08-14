@@ -636,7 +636,8 @@ def start_voice_recognition(stop_event):
         submit_request=submit_runtime_request,
         follow_up_state=follow_up_state,
         cancel_active_request=cancel_active_request,
-        )
+        is_speech_playing=speech_playback_controller.is_playing,
+    )
 
 
 def start_voice_thread():

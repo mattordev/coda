@@ -92,6 +92,8 @@ class Pyttsx3Session:
         self._text = text
         self._engine = engine
         self._stop_event = Event()
+        self._lock = Lock()
+        self._playing = False
 
     def play(self, cancel_event: Event) -> bool:
         if cancel_event.is_set():
@@ -102,6 +104,9 @@ class Pyttsx3Session:
         loop_started = False
 
         try:
+            with self._lock:
+                self._playing = True
+
             self._engine.startLoop(False)
             loop_started = True
 
@@ -120,8 +125,16 @@ class Pyttsx3Session:
 
                 self._stop_event.wait(timeout=0.01)
         finally:
+            with self._lock:
+                self._playing = False
+
             if loop_started:
                 self._engine.endLoop()
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    def is_playing(self) -> bool:
+        """Return whether the engine loop is starting or producing speech."""
+        with self._lock:
+            return self._playing

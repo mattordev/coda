@@ -7,7 +7,22 @@ from runtime.follow_up import FollowUpState
 from runtime.messages import InputSource
 from runtime.runtime_queue import RuntimeQueue
 from utils import voice_recognizer
-from utils.voice_recognizer import _queue_runtime_request
+from utils.phrase_listener import CapturedPhrase
+from utils.voice_recognizer import VoiceCaptureState, _queue_runtime_request
+
+
+def _captured_phrase(
+    *,
+    follow_up_active=False,
+    speech_playing=False,
+):
+    return CapturedPhrase(
+        audio=object(),
+        started_with=VoiceCaptureState(
+            follow_up_active=follow_up_active,
+            speech_playing=speech_playing,
+        ),
+    )
 
 
 class VoiceRecognizerTests(unittest.TestCase):
@@ -92,6 +107,13 @@ class VoiceRecognizerTests(unittest.TestCase):
                 return_value=microphone,
             ),
             patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(
+                    follow_up_active=True,
+                ),
+            ),
+            patch.object(
                 voice_recognizer.stt_service,
                 "transcribe_audio",
                 side_effect=transcribe_audio,
@@ -99,7 +121,7 @@ class VoiceRecognizerTests(unittest.TestCase):
             patch.object(
                 voice_recognizer.dashboard_state,
                 "record_user_message",
-            ),
+            ) as record_user_message,
             patch.object(voice_recognizer, "display_message"),
         ):
             voice_recognizer.run(
@@ -115,6 +137,11 @@ class VoiceRecognizerTests(unittest.TestCase):
         self.assertIsNotNone(queued_request)
         self.assertEqual(queued_request.message, "connected")
         self.assertEqual(queued_request.source, InputSource.VOICE)
+        record_user_message.assert_called_once_with(
+            "connected",
+            source="test provider",
+            tags=["follow_up"],
+        )
     
     def test_follow_up_stop_phrase_closes_window_without_queueing(self):
         request_queue = RuntimeQueue()
@@ -140,6 +167,13 @@ class VoiceRecognizerTests(unittest.TestCase):
                 voice_recognizer,
                 "_get_microphone",
                 return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(
+                    follow_up_active=True,
+                ),
             ),
             patch.object(
                 voice_recognizer.stt_service,
@@ -214,6 +248,11 @@ class VoiceRecognizerTests(unittest.TestCase):
                 return_value=microphone,
             ),
             patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(),
+            ),
+            patch.object(
                 voice_recognizer.stt_service,
                 "transcribe_audio",
                 side_effect=transcribe_audio,
@@ -267,6 +306,11 @@ class VoiceRecognizerTests(unittest.TestCase):
                 return_value=microphone,
             ),
             patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(),
+            ),
+            patch.object(
                 voice_recognizer.stt_service,
                 "transcribe_audio",
                 side_effect=transcribe_audio,
@@ -289,6 +333,182 @@ class VoiceRecognizerTests(unittest.TestCase):
         cancel_active_request.assert_called_once_with()
         self.assertIsNone(
             request_queue.get(timeout=0.01)
+        )
+
+    def test_playback_echo_is_ignored_after_playback_ends(self):
+        request_queue = RuntimeQueue()
+        follow_up_state = FollowUpState()
+        stop_event = Event()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        microphone = MagicMock()
+        playback_active = True
+
+        def capture_phrase(_recognizer, _source, capture_state, **_kwargs):
+            return CapturedPhrase(
+                audio=object(),
+                started_with=capture_state(),
+            )
+
+        def transcribe_audio(_recognizer, _audio):
+            nonlocal playback_active
+            playback_active = False
+            stop_event.set()
+            return "coda system status", "test provider"
+
+        with (
+            patch.object(
+                voice_recognizer.sr,
+                "Recognizer",
+                return_value=recognizer,
+            ),
+            patch.object(
+                voice_recognizer,
+                "_get_microphone",
+                return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                side_effect=capture_phrase,
+            ),
+            patch.object(
+                voice_recognizer.stt_service,
+                "transcribe_audio",
+                side_effect=transcribe_audio,
+            ),
+            patch.object(
+                voice_recognizer.dashboard_state,
+                "record_user_message",
+            ) as record_user_message,
+            patch.object(voice_recognizer, "display_message"),
+            patch("builtins.print") as print_output,
+        ):
+            voice_recognizer.run(
+                ["coda"],
+                {},
+                stop_event=stop_event,
+                request_queue=request_queue,
+                follow_up_state=follow_up_state,
+                is_speech_playing=lambda: playback_active,
+            )
+
+        self.assertIsNone(request_queue.get(timeout=0.01))
+        record_user_message.assert_called_once_with(
+            "coda system status",
+            source="test provider",
+            tags=["wakeword_detected", "assistant_playback"],
+        )
+        print_output.assert_any_call(
+            "[VOICE] Audio began during CODA speech. Ignoring phrase."
+        )
+
+    def test_wakeword_stop_cancels_during_playback(self):
+        request_queue = RuntimeQueue()
+        stop_event = Event()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        microphone = MagicMock()
+        cancel_active_request = MagicMock(return_value="request-id")
+
+        def transcribe_audio(_recognizer, _audio):
+            stop_event.set()
+            return "coda stop", "test provider"
+
+        with (
+            patch.object(
+                voice_recognizer.sr,
+                "Recognizer",
+                return_value=recognizer,
+            ),
+            patch.object(
+                voice_recognizer,
+                "_get_microphone",
+                return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(speech_playing=True),
+            ),
+            patch.object(
+                voice_recognizer.stt_service,
+                "transcribe_audio",
+                side_effect=transcribe_audio,
+            ),
+            patch.object(
+                voice_recognizer.dashboard_state,
+                "record_user_message",
+            ),
+            patch.object(voice_recognizer, "display_message"),
+        ):
+            voice_recognizer.run(
+                ["coda"],
+                {},
+                stop_event=stop_event,
+                request_queue=request_queue,
+                cancel_active_request=cancel_active_request,
+                is_speech_playing=lambda: True,
+            )
+
+        cancel_active_request.assert_called_once_with()
+        self.assertIsNone(request_queue.get(timeout=0.01))
+
+    def test_playback_echo_does_not_close_new_follow_up(self):
+        request_queue = RuntimeQueue()
+        follow_up_state = FollowUpState()
+        stop_event = Event()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        microphone = MagicMock()
+
+        def transcribe_audio(_recognizer, _audio):
+            follow_up_state.open(duration_seconds=10.0)
+            stop_event.set()
+            return "coda system status", "test provider"
+
+        with (
+            patch.object(
+                voice_recognizer.sr,
+                "Recognizer",
+                return_value=recognizer,
+            ),
+            patch.object(
+                voice_recognizer,
+                "_get_microphone",
+                return_value=microphone,
+            ),
+            patch.object(
+                voice_recognizer,
+                "listen_for_phrase",
+                return_value=_captured_phrase(speech_playing=True),
+            ),
+            patch.object(
+                voice_recognizer.stt_service,
+                "transcribe_audio",
+                side_effect=transcribe_audio,
+            ),
+            patch.object(
+                voice_recognizer.dashboard_state,
+                "record_user_message",
+            ) as record_user_message,
+            patch.object(voice_recognizer, "display_message"),
+        ):
+            voice_recognizer.run(
+                ["coda"],
+                {},
+                stop_event=stop_event,
+                request_queue=request_queue,
+                follow_up_state=follow_up_state,
+                is_speech_playing=lambda: True,
+            )
+
+        self.assertIsNone(request_queue.get(timeout=0.01))
+        self.assertTrue(follow_up_state.is_active())
+        record_user_message.assert_called_once_with(
+            "coda system status",
+            source="test provider",
+            tags=["wakeword_detected", "assistant_playback"],
         )
 
 

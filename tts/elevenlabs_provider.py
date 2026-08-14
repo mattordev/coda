@@ -50,6 +50,7 @@ class ElevenLabsSession:
         self._ffplay_path = ffplay_path
         self._lock = Lock()
         self._process: Popen | None = None
+        self._playing = False
 
     def play(self, cancel_event: Event) -> bool:
         audio = self._generate_audio(self._text)
@@ -67,6 +68,9 @@ class ElevenLabsSession:
         process = None
 
         try:
+            with self._lock:
+                self._playing = True
+
             process = Popen(
                 [
                     self._ffplay_path,
@@ -91,6 +95,7 @@ class ElevenLabsSession:
             return process.returncode == 0
         finally:
             with self._lock:
+                self._playing = False
                 if self._process is process:
                     self._process = None
 
@@ -111,3 +116,8 @@ class ElevenLabsSession:
             process.wait(timeout=1.0)
         except OSError:
             pass
+
+    def is_playing(self) -> bool:
+        """Return whether ffplay is starting or producing audible speech."""
+        with self._lock:
+            return self._playing

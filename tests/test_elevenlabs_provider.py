@@ -61,6 +61,100 @@ class ElevenLabsProviderTests(unittest.TestCase):
         self.assertEqual(command[0], "ffplay")
         self.assertIn("-autoexit", command)
         self.assertFalse(Path(command[-1]).exists())
+        self.assertFalse(session.is_playing())
+
+    @patch("tts.elevenlabs_provider.Popen")
+    def test_session_reports_only_live_ffplay_as_playing(self, popen):
+        generation_started = threading.Event()
+        release_generation = threading.Event()
+        process_started = threading.Event()
+        process_finished = threading.Event()
+
+        class ControlledProcess:
+            returncode = None
+
+            def poll(self):
+                if process_finished.is_set():
+                    self.returncode = 0
+                    return 0
+
+                return None
+
+        process = ControlledProcess()
+
+        def generate_audio(_text):
+            generation_started.set()
+            release_generation.wait(timeout=1.0)
+            return b"audio"
+
+        def start_process(*_args, **_kwargs):
+            process_started.set()
+            return process
+
+        popen.side_effect = start_process
+        session = ElevenLabsSession(
+            text="hello",
+            generate_audio=generate_audio,
+            ffplay_path="ffplay",
+        )
+        results = []
+        worker = threading.Thread(
+            target=lambda: results.append(
+                session.play(threading.Event())
+            )
+        )
+        worker.start()
+
+        self.assertTrue(generation_started.wait(timeout=1.0))
+        self.assertFalse(session.is_playing())
+        release_generation.set()
+        self.assertTrue(process_started.wait(timeout=1.0))
+        self.assertTrue(session.is_playing())
+        process_finished.set()
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, [True])
+        self.assertFalse(session.is_playing())
+
+    @patch("tts.elevenlabs_provider.Popen")
+    def test_playing_covers_blocked_ffplay_start_and_clears_on_error(
+        self,
+        popen,
+    ):
+        process_starting = threading.Event()
+        release_process_start = threading.Event()
+        errors = []
+
+        def fail_process_start(*_args, **_kwargs):
+            process_starting.set()
+            release_process_start.wait(timeout=1.0)
+            raise RuntimeError("ffplay failed to start")
+
+        popen.side_effect = fail_process_start
+        session = ElevenLabsSession(
+            text="hello",
+            generate_audio=lambda _text: b"audio",
+            ffplay_path="ffplay",
+        )
+
+        def play():
+            try:
+                session.play(threading.Event())
+            except RuntimeError as error:
+                errors.append(error)
+
+        worker = threading.Thread(target=play)
+        worker.start()
+
+        self.assertTrue(process_starting.wait(timeout=1.0))
+        self.assertTrue(session.is_playing())
+        release_process_start.set()
+        worker.join(timeout=1.0)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(str(errors[0]), "ffplay failed to start")
+        self.assertFalse(session.is_playing())
 
     @patch("tts.elevenlabs_provider.Popen")
     def test_cancellation_terminates_active_ffplay(self, popen):
@@ -81,6 +175,19 @@ class ElevenLabsProviderTests(unittest.TestCase):
         self.assertFalse(played)
         process.terminate.assert_called_once()
         process.wait.assert_called_once_with(timeout=1.0)
+        self.assertFalse(session.is_playing())
+
+    def test_generation_exception_never_reports_playback(self):
+        session = ElevenLabsSession(
+            text="hello",
+            generate_audio=Mock(side_effect=RuntimeError("generation failed")),
+            ffplay_path="ffplay",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "generation failed"):
+            session.play(threading.Event())
+
+        self.assertFalse(session.is_playing())
 
     def test_stop_kills_ffplay_when_terminate_times_out(self):
         process = Mock()

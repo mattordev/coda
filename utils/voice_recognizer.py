@@ -5,6 +5,7 @@ import re
 import http.client
 import speech_recognition as sr
 from collections.abc import Callable
+from dataclasses import dataclass
 # import pocketsphinx5 as ps5
 import utils.dashboard_state as dashboard_state
 import utils.on_command as command
@@ -13,9 +14,19 @@ import utils.stt_service as stt_service
 from runtime.messages import InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueue
 from runtime.follow_up import FollowUpState
+from utils.phrase_listener import listen_for_phrase
 
 # Wakeword is our list of trigger words, commands is the commands list and type defines whether the voicerecognition is in response to a question.
 # Currently not using `wakewords.json` or `commands.json` but will be in the future
+
+
+@dataclass(frozen=True)
+class VoiceCaptureState:
+    """Runtime state observed when microphone speech begins."""
+
+    follow_up_active: bool
+    speech_playing: bool
+
 
 def _get_float_env(name, default):
     value = os.getenv(name)
@@ -192,6 +203,7 @@ def run(
     submit_request: Callable[[RuntimeRequest], str | None] | None = None,
     follow_up_state: FollowUpState | None = None,
     cancel_active_request: Callable[[], str | None] | None = None,
+    is_speech_playing: Callable[[], bool] | None = None,
     **kwargs):
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
@@ -240,14 +252,27 @@ def run(
         try:
             recognizer.pause_threshold = _get_pause_threshold_seconds()
             with microphone as source:
-                follow_up_active_at_capture = (
-                    active_follow_up_state.is_active()
-                )
-                audio = recognizer.listen(
+                captured_phrase = listen_for_phrase(
+                    recognizer,
                     source,
+                    lambda: VoiceCaptureState(
+                        follow_up_active=active_follow_up_state.is_active(),
+                        speech_playing=(
+                            is_speech_playing()
+                            if is_speech_playing is not None
+                            else False
+                        ),
+                    ),
                     timeout=_get_listen_timeout_seconds(),
                     phrase_time_limit=_get_phrase_time_limit_seconds(),
+                    stop_event=stop_event,
                 )
+
+            if captured_phrase is None:
+                return
+
+            audio = captured_phrase.audio
+            capture_state = captured_phrase.started_with
 
             if stop_event is not None and stop_event.is_set():
                 return
@@ -258,9 +283,9 @@ def run(
 
             speech_text = speech.strip()
             message = speech.lower()
-            follow_up_active = follow_up_active_at_capture
+            follow_up_active = capture_state.follow_up_active
             follow_up_opened_after_capture = (
-                not follow_up_active_at_capture
+                not follow_up_active
                 and active_follow_up_state.is_active()
             )
             has_wakeword = _has_wakeword(message, wakeword)
@@ -283,6 +308,9 @@ def run(
             else:
                 event_tags.append("unrelated_speech")
 
+            if capture_state.speech_playing:
+                event_tags.append("assistant_playback")
+
             dashboard_state.record_user_message(
                 speech_text,
                 source=provider_used,
@@ -300,6 +328,13 @@ def run(
             ):
                 active_follow_up_state.close()
                 cancel_active_request()
+                continue
+
+            if capture_state.speech_playing:
+                print(
+                    "[VOICE] Audio began during CODA speech. "
+                    "Ignoring phrase."
+                )
                 continue
 
             if follow_up_active:
