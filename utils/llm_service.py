@@ -1,4 +1,5 @@
 import os
+from threading import Event
 
 from ai.providers import registry
 from ai.privacy.sanitizer import sanitize_text
@@ -219,6 +220,7 @@ def _generate_provider_response(
     user_text,
     risk=0.0,
     privacy_result=None,
+    cancel_event: Event | None = None,
 ):
     """
     Add the user message, call the provider, then store the assistant reply.
@@ -226,6 +228,18 @@ def _generate_provider_response(
     Assistant replies are analysed too, because generated text can contain
     sensitive values that should not be carried raw into later cloud calls.
     """
+    if cancel_event is not None and cancel_event.is_set():
+        return None, "Request cancelled."
+
+    original_history = list(conversation_log)
+
+    def cancel_and_restore():
+        if cancel_event is None or not cancel_event.is_set():
+            return False
+
+        conversation_log[:] = original_history
+        return True
+
     conversation_log.append(
         _new_message(
             "user",
@@ -236,16 +250,22 @@ def _generate_provider_response(
     )
 
     messages = _build_messages_for_provider(provider_name)
-    response, error = provider_module.generate(messages)
+    response, error = provider_module.generate(messages, cancel_event=cancel_event)
+
+    if cancel_and_restore():
+        return None, "Request cancelled."
 
     if error:
-        conversation_log.pop()
+        conversation_log[:] = original_history
         return None, error
 
     response = (response or "").strip()
     if response:
         assistant_privacy_result = analyze_privacy(response)
         assistant_risk = max(risk, assistant_privacy_result["risk"])
+
+        if cancel_and_restore():
+            return None, "Request cancelled."
 
         if assistant_risk > assistant_privacy_result["risk"]:
             assistant_privacy_result = {
@@ -266,7 +286,14 @@ def _generate_provider_response(
                 privacy_result=assistant_privacy_result,
             )
         )
+
+        if cancel_and_restore():
+            return None, "Request cancelled."
+
         _trim_conversation()
+
+    if cancel_and_restore():
+        return None, "Request cancelled."
 
     return response, None
 
@@ -277,7 +304,13 @@ def describe_llm_fallback():
     return f"cloud: {cloud_providers}; local: {local_providers}"
 
 
-def call_provider(provider_name, prompt, risk=0.0, privacy_result=None):
+def call_provider(
+    provider_name,
+    prompt,
+    risk=0.0,
+    privacy_result=None,
+    cancel_event: Event | None = None,
+):
     provider_name = registry.normalize_provider_name(provider_name)
     provider_module = registry.get_provider_module(provider_name)
 
@@ -291,6 +324,7 @@ def call_provider(provider_name, prompt, risk=0.0, privacy_result=None):
         prompt,
         risk=risk,
         privacy_result=privacy_result,
+        cancel_event=cancel_event,
     )
 
 
