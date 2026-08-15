@@ -9,8 +9,8 @@ from tests.intent_fixtures import create_test_registry
 
 
 class IntentFactoryTests(unittest.TestCase):
-    @patch("ai.intents.factory.ollama_provider.generate")
-    def test_enabled_classifier_falls_back_to_ollama(self, generate):
+    @patch("ai.providers.ollama.generate")
+    def test_enabled_classifier_uses_selected_local_provider(self, generate):
         generate.return_value = (
             json.dumps({"intent": "maps", "confidence": 0.9}),
             None,
@@ -18,7 +18,10 @@ class IntentFactoryTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {"CODA_INTENT_LOCAL_CLASSIFIER": "1"},
+            {
+                "CODA_INTENT_LOCAL_CLASSIFIER": "1",
+                "CODA_LOCAL_PROVIDERS": "ollama",
+            },
         ):
             router = create_router(create_test_registry())
             result = router.route("find the station")
@@ -28,11 +31,14 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         generate.assert_called_once()
 
-    @patch("ai.intents.factory.ollama_provider.generate")
+    @patch("ai.providers.ollama.generate")
     def test_disabled_classifier_uses_rules_only(self, generate):
         with patch.dict(
             os.environ,
-            {"CODA_INTENT_LOCAL_CLASSIFIER": "0"},
+            {
+                "CODA_INTENT_LOCAL_CLASSIFIER": "0",
+                "CODA_LOCAL_PROVIDERS": "ollama",
+            },
         ):
             router = create_router(create_test_registry())
             result = router.route("find the station")
@@ -40,11 +46,14 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertFalse(result.matched)
         generate.assert_not_called()
 
-    @patch("ai.intents.factory.ollama_provider.generate")
+    @patch("ai.providers.ollama.generate")
     def test_exact_match_skips_enabled_classifier(self, generate):
         with patch.dict(
             os.environ,
-            {"CODA_INTENT_LOCAL_CLASSIFIER": "1"},
+            {
+                "CODA_INTENT_LOCAL_CLASSIFIER": "1",
+                "CODA_LOCAL_PROVIDERS": "ollama",
+            },
         ):
             router = create_router(create_test_registry())
             result = router.route("maps")
@@ -53,11 +62,14 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertEqual(result.strategy, "exact_match")
         generate.assert_not_called()
 
-    @patch("ai.intents.factory.ollama_provider.generate")
+    @patch("ai.providers.ollama.generate")
     def test_command_prefix_skips_enabled_classifier(self, generate):
         with patch.dict(
             os.environ,
-            {"CODA_INTENT_LOCAL_CLASSIFIER": "1"},
+            {
+                "CODA_INTENT_LOCAL_CLASSIFIER": "1",
+                "CODA_LOCAL_PROVIDERS": "ollama",
+            },
         ):
             router = create_router(create_test_registry())
             result = router.route("maps London")
@@ -67,7 +79,7 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         generate.assert_not_called()
 
-    @patch("ai.intents.factory.ollama_provider.generate")
+    @patch("ai.providers.ollama.generate")
     def test_example_match_skips_enabled_classifier(self, generate):
         registry = create_test_registry()
         registry.register(
@@ -80,7 +92,10 @@ class IntentFactoryTests(unittest.TestCase):
 
         with patch.dict(
             os.environ,
-            {"CODA_INTENT_LOCAL_CLASSIFIER": "1"},
+            {
+                "CODA_INTENT_LOCAL_CLASSIFIER": "1",
+                "CODA_LOCAL_PROVIDERS": "ollama",
+            },
         ):
             router = create_router(registry)
             result = router.route("WHAT'S THE TIME!")

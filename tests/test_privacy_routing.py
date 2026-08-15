@@ -302,16 +302,41 @@ class PrivacyRoutingTests(unittest.TestCase):
             privacy_result=None,
             cancel_event=None,
         ):
-            # Make sure the router keeps the richer detector output, not just the score.
-            captured.append((provider, risk, privacy_result["categories"]))
+            # Make sure the router keeps the richer detector output,
+            # not just the score.
+            captured.append(
+                (
+                    provider,
+                    risk,
+                    privacy_result["categories"],
+                )
+            )
             return "ok", None
 
-        with mock.patch.object(core.logger, "should_skip_provider", return_value=False), \
-             mock.patch.object(core.logger, "log_attempt"), \
-             mock.patch.object(core.llm_service, "call_provider", side_effect=fake_call_provider):
-            response, error = core.route_request("email me at test@example.com")
+        with mock.patch.object(
+            core,
+            "get_provider_order",
+            return_value=["ollama"],
+        ), mock.patch.object(
+            core.logger,
+            "should_skip_provider",
+            return_value=False,
+        ), mock.patch.object(
+            core.logger,
+            "log_attempt",
+        ), mock.patch.object(
+            core.llm_service,
+            "call_provider",
+            side_effect=fake_call_provider,
+        ):
+            response, error = core.route_request(
+                "email me at test@example.com"
+            )
 
-        self.assertEqual((response, error), ("ok", None))
+        self.assertEqual(
+            (response, error),
+            ("ok", None),
+        )
         self.assertEqual(
             captured,
             [
