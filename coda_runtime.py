@@ -1,3 +1,12 @@
+from runtime.voice_worker import VoiceInputWorker
+from runtime.runtime_queue import RuntimeQueues
+from runtime.messages import ExecutionResult, InputSource, RuntimeRequest, SpeechTask, WorkerEvent, WorkerEventType, WorkerName
+from runtime.follow_up import FollowUpState
+from runtime.active_request import ActiveRequestState
+from runtime.speech_playback import SpeechPlaybackController
+from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
+import utils.speak_response as speech
+
 import os
 import sys
 import json
@@ -21,10 +30,33 @@ commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
 version_url = 'https://raw.githubusercontent.com/mattordev/coda/main/version.json'
 manual_assisstant_input = False
-voice_stop_event = threading.Event()
-voice_thread = None
 heartbeat_stop_event = threading.Event()
 heartbeat_thread = None
+voice_worker = None
+runtime_queues = RuntimeQueues()
+follow_up_state = FollowUpState()
+execution_stop_event = threading.Event()
+execution_thread = None
+event_stop_event = threading.Event()
+event_thread = None
+active_request_state = ActiveRequestState()
+speech_stop_event = threading.Event()
+speech_playback_controller = SpeechPlaybackController()
+speech_processor = SpeechTaskProcessor(
+    speech.resolve_speech_providers,
+    speech_playback_controller,
+)
+speech_worker = SpeechWorker(
+    runtime_queues.speech,
+    runtime_queues.events,
+    speech_processor,
+    speech_stop_event,
+)
+shutdown_lock = threading.Lock()
+shutdown_started = threading.Event()
+latest_request_lock = threading.Lock()
+latest_request_id = None
+
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -273,32 +305,371 @@ def check_update_available(version_url):
 
     return False
 
+def submit_speech_response(text: str) -> bool:
+    """Queue speech and associate it with the active request."""
+    if not text.strip():
+        return False
 
-# calls voice recog run loop using wakewords, commands and a stop event.
-def start_voice_recognition():
-    runtime_state.set_input_mode("wake word")
-    voice_recognizer.run(wakewords, commands, mode='normal',
-                         stop_event=voice_stop_event)
+    request = active_request_state.active_request()
+
+    if request is None:
+        request = RuntimeRequest(
+            message=text,
+            source=InputSource.MANUAL,
+        )
+
+    if request.cancel_event.is_set():
+        return False
+
+    runtime_queues.speech.put(
+        SpeechTask(
+            request_id=request.request_id,
+            text=text,
+            cancel_event=request.cancel_event,
+        )
+    )
+    return True
+
+def submit_runtime_request(request: RuntimeRequest) -> str | None:
+    global latest_request_id
+
+    cancelled_request_id = None
+
+    if request.replace_active:
+        cancelled_request_id = active_request_state.cancel_active()
+
+    with latest_request_lock:
+        latest_request_id = request.request_id
+
+    runtime_queues.requests.put(request)
+    return cancelled_request_id
 
 
-# Starts daemon thread for voice loop if not already alive.
-def start_voice_thread():
-    global voice_thread
+def _is_latest_request(request_id: str | None) -> bool:
+    with latest_request_lock:
+        return latest_request_id is None or latest_request_id == request_id
 
-    if voice_thread is not None and voice_thread.is_alive():
+def cancel_active_request() -> str | None:
+    """Request cancellation of the active runtime request."""
+    request_id = active_request_state.cancel_active()
+    speech_cancel_event = runtime_queues.speech.cancel_current()
+    playback_cancelled = (
+        speech_processor.stop(
+            expected_cancel_event=speech_cancel_event,
+        )
+        if speech_cancel_event is not None
+        else False
+    )
+    speech_cancelled = (
+        speech_cancel_event is not None
+        or playback_cancelled
+    )
+
+    if request_id is None and not speech_cancelled:
+        print(
+            "[RUNTIME] No active request to cancel",
+            flush=True,
+        )
+        return None
+
+    if runtime_state.is_debug_enabled(default=False):
+        if request_id is not None:
+            message = (
+                "[RUNTIME] Cancellation requested for "
+                f"request {request_id[:8]}"
+            )
+        else:
+            message = "[RUNTIME] Speech cancellation requested"
+    else:
+        message = "[RUNTIME] Cancellation requested"
+        
+    print(message, flush=True)
+    return request_id
+
+def _create_execution_result(
+    request: RuntimeRequest,
+    command_result,
+) -> ExecutionResult:
+    """Convert a command result into a runtime execution result."""
+    if request.cancel_event.is_set():
+        return ExecutionResult(
+            request_id=request.request_id,
+            handled=False,
+            cancelled=True,
+        )
+
+    return ExecutionResult(
+        request_id=request.request_id,
+        handled=command_result.handled,
+        response_text=command_result.response_text,
+        open_follow_up=(
+            command_result.open_follow_up
+            and request.source == InputSource.VOICE
+        ),
+    )
+    
+def _execution_loop(stop_event):
+    """Process queued runtime requests untill system shutdown."""
+    while not stop_event.is_set():
+        request = runtime_queues.requests.get(timeout=0.1)
+        
+        if request is None:
+            continue
+        
+        active_request_state.activate(request)
+        
+        request_label = (
+            f"{request.source.value} request "
+            f"{request.request_id[:8]}"
+        )
+
+        debug_enabled = runtime_state.is_debug_enabled(default=False)
+        execution_started_at = time.perf_counter()
+        
+        queue_duration = max(
+            0.0,
+            time.time() - request.created_at,
+        )
+        
+        if debug_enabled:
+            processing_message = (
+                f"[RUNTIME] Processing {request_label} "
+                f"after {queue_duration:.2f}s queued"
+            )
+        else:
+            processing_message = "[RUNTIME] Processing request"
+
+        print(processing_message, flush=True)
+        
+        try:
+            if request.cancel_event.is_set():
+                execution_result = ExecutionResult(
+                    request_id=request.request_id,
+                    handled=False,
+                    cancelled=True,
+                )
+            else:
+                command_result = command.run(
+                    request.message,
+                    commands,
+                    debug=debug_enabled,
+                    cancel_event=request.cancel_event,
+                )
+                execution_result = _create_execution_result(
+                    request,
+                    command_result,
+                )
+                if (
+                    execution_result.response_text is not None
+                    and not execution_result.cancelled
+                ):
+                    dashboard_state.record_ai_response(
+                        execution_result.response_text,
+                        source="tts",
+                    )
+                    runtime_queues.speech.put(
+                        SpeechTask(
+                            request_id=request.request_id,
+                            text=execution_result.response_text,
+                            cancel_event=request.cancel_event,
+                            open_follow_up=execution_result.open_follow_up,
+                        )
+                    )
+        except Exception as error:
+            execution_result = ExecutionResult(
+                request_id=request.request_id,
+                handled=False,
+                error=str(error),
+            )
+        finally:
+            active_request_state.clear(request.request_id)
+            runtime_queues.requests.task_done()
+            
+        if execution_result.cancelled:
+            outcome = "Cancelled"
+        elif execution_result.error is not None:
+            outcome = "Failed"
+        elif not execution_result.handled:
+            outcome = "Not handled"
+        else:
+            outcome = "Completed"
+
+        execution_duration = time.perf_counter() - execution_started_at
+
+        if debug_enabled:
+            outcome_message = (
+                f"[RUNTIME] {outcome} {request_label} "
+                f"in {execution_duration:.2f}s"
+            )
+        else:
+            outcome_message = f"[RUNTIME] Request {outcome.lower()}"
+
+        print(outcome_message, flush=True)
+                
+        runtime_queues.events.put(execution_result)
+        
+def _event_loop(stop_event):
+    """Process runtime results until shutdown"""
+    while not stop_event.is_set():
+        runtime_event = runtime_queues.events.get(timeout=0.1)
+
+        if runtime_event is None:
+            continue
+
+        try:
+            if isinstance(runtime_event, WorkerEvent):
+                if runtime_event.worker != WorkerName.SPEECH:
+                    continue
+
+                if runtime_event.event_type == WorkerEventType.STARTED:
+                    follow_up_state.close()
+                    continue
+
+                if (
+                    runtime_event.event_type == WorkerEventType.COMPLETED
+                    and runtime_event.open_follow_up
+                ):
+                    if _is_latest_request(runtime_event.request_id):
+                        follow_up_state.open(
+                            voice_recognizer.get_follow_up_timeout_seconds()
+                        )
+                else:
+                    follow_up_state.close()
+
+                if (
+                    runtime_event.event_type == WorkerEventType.FAILED
+                    and runtime_event.error is not None
+                    and runtime_state.is_debug_enabled(default=False)
+                ):
+                    print(
+                        "[RUNTIME] Speech failed for request "
+                        f"{runtime_event.request_id}: "
+                        f"{runtime_event.error}"
+                    )
+
+                continue
+
+            if not isinstance(runtime_event, ExecutionResult):
+                continue
+
+            if (
+                runtime_event.response_text is not None
+                and not runtime_event.cancelled
+                and runtime_event.error is None
+            ):
+                continue
+
+            if (
+                runtime_event.open_follow_up
+                and not runtime_event.cancelled
+                and runtime_event.error is None
+            ):
+                follow_up_state.open(
+                    voice_recognizer.get_follow_up_timeout_seconds()
+                )
+            else:
+                follow_up_state.close()
+
+            if (
+                runtime_event.error is not None
+                and runtime_state.is_debug_enabled(default=False)
+            ):
+                print(
+                    "[RUNTIME] Request "
+                    f"{runtime_event.request_id} failed: "
+                    f"{runtime_event.error}"
+                )
+
+        finally:
+            runtime_queues.events.task_done()
+            
+def start_event_thread():
+    """Start the runtime event-processing thread."""
+    global event_thread
+    
+    if event_thread is not None and event_thread.is_alive():
         return
+    
+    event_stop_event.clear()
+    event_thread = threading.Thread(
+        target=_event_loop,
+        args=(event_stop_event,),
+        name="coda-events",
+        daemon=True,
+    )
+    event_thread.start()
+    
+def stop_event_thread(timeout_seconds=4.0):
+    """Stop the runtime event processing thread."""
+    event_stop_event.set()
 
-    voice_stop_event.clear()
-    voice_thread = threading.Thread(target=start_voice_recognition, daemon=True)
-    voice_thread.start()
+    if event_thread is not None and event_thread.is_alive():
+        event_thread.join(timeout=timeout_seconds)
+        
+def start_execution_thread():
+    """Start the runitme request-processing thread."""
+    global execution_thread
+    
+    if execution_thread is not None and execution_thread.is_alive():
+        return
+    
+    execution_stop_event.clear()
+    execution_thread = threading.Thread(
+        target=_execution_loop,
+        args=(execution_stop_event,),
+        name="coda-execution",
+        daemon=True,
+    )
+    execution_thread.start()
+    
+def start_speech_thread():
+    """Start the dedicated speech-playback worker."""
+    speech_worker.start()
 
 
-# signals the voice thread to stop and waits for it to finish.
+def stop_speech_thread(timeout_seconds=4.0):
+    """Stop active speech and shut down the speech worker."""
+    speech_worker.stop(timeout=timeout_seconds)
+
+def stop_execution_thread(timeout_seconds=4.0):
+    """Stop the runtime request-processing thread."""
+    execution_stop_event.set()
+    if execution_thread is not None and execution_thread.is_alive():
+        execution_thread.join(timeout=timeout_seconds)
+
+def start_voice_recognition(stop_event):
+    """Run voice recog untill the worker receives a shutdown."""
+    runtime_state.set_input_mode("wake word")
+    voice_recognizer.run(
+        wakewords, 
+        commands, 
+        mode='normal', 
+        stop_event=stop_event,
+        request_queue=runtime_queues.requests,
+        submit_request=submit_runtime_request,
+        follow_up_state=follow_up_state,
+        cancel_active_request=cancel_active_request,
+        is_speech_playing=speech_playback_controller.is_playing,
+    )
+
+
+def start_voice_thread():
+    """Start the dedicated voice-input worker."""
+    global voice_worker
+    
+    if voice_worker is None:
+        voice_worker = VoiceInputWorker(
+            start_voice_recognition,
+            threading.Event(),
+        )
+
+    voice_worker.start()
+
+
 def stop_voice_thread(timeout_seconds=4.0):
-    voice_stop_event.set()
-
-    if voice_thread is not None and voice_thread.is_alive():
-        voice_thread.join(timeout=timeout_seconds)
+    """Stop the dedicated voice-input worker."""
+    if voice_worker is not None:
+        voice_worker.stop(timeout=timeout_seconds)
 
 
 # calls dashboard_state with a delay, this is used to feed the connection pill on the dashboard.
@@ -332,6 +703,26 @@ def stop_heartbeat_thread(timeout_seconds=2.0):
         heartbeat_thread.join(timeout=timeout_seconds)
 
 
+def shutdown_runtime(timeout_seconds=4.0):
+    """Cancel active work and stop every runtime worker exactly once."""
+    with shutdown_lock:
+        if shutdown_started.is_set():
+            return False
+        shutdown_started.set()
+
+    follow_up_state.close()
+    stop_voice_thread(timeout_seconds=timeout_seconds)
+
+    active_request_state.cancel_active()
+    stop_execution_thread(timeout_seconds=timeout_seconds)
+
+    speech.configure_speech_submitter(None)
+    stop_speech_thread(timeout_seconds=timeout_seconds)
+    stop_event_thread(timeout_seconds=timeout_seconds)
+    stop_heartbeat_thread(timeout_seconds=timeout_seconds)
+    return True
+
+
 # runs first time setup if command/wakeword files are missing. can be called whenever safely as resets program flow.
 def run_first_time_setup():
     print("Commands file not found. Assuming first time setup...")
@@ -356,7 +747,7 @@ def json_dict_to_string_array(jsonData):
 #####################
 
 
-def main():
+def _run_runtime():
     global commands
     global wakewords
     global manual_assisstant_input
@@ -365,8 +756,10 @@ def main():
 
     manual_assisstant_input = _apply_cli_microphone_flags()
 
-    wakewords = ["coda", "kodak", "coder", "skoda",
-                 "powder", "kodi", "system", "jeff"]
+    wakewords = [
+        "coda", "kodak", "coder", "skoda",
+        "powder", "kodi", "system", "jeff"
+        ]
 
     if check_update_available(version_url):
         # if there's an update available, re-find the commands
@@ -386,6 +779,14 @@ def main():
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
 
     start_heartbeat_thread()  # start heartbeat daemon for dashboard connection status
+    
+    start_execution_thread() # start the execution worker
+    
+    start_event_thread() # start the event thread
+
+    start_speech_thread() # start the speech thread
+
+    speech.configure_speech_submitter(submit_speech_response)
 
     if manual_assisstant_input:
         print("MANUAL MODE ENABLED")
@@ -408,10 +809,7 @@ def main():
             normalized_manual_message = manual_message.lower()
 
             if normalized_manual_message in ("quit", "exit"):
-                stop_voice_thread()
-                stop_heartbeat_thread()
-                print("Exiting C.O.D.A")
-                break
+                return
 
             if normalized_manual_message in ("voice", "/voice"):
                 manual_assisstant_input = False
@@ -432,11 +830,11 @@ def main():
                 print("[MANUAL] Wakeword detected without follow-up text.")
                 continue
 
-            # Debug output enabled in manual mode so command matching is visible.
-            command.run(
-                command_message,
-                commands,
-                debug=runtime_state.is_debug_enabled(default=False),
+            submit_runtime_request(
+                RuntimeRequest(
+                    message=command_message,
+                    source=InputSource.MANUAL,
+                )
             )
         else:
             if keyboard_toggle_available:
@@ -454,6 +852,20 @@ def main():
                     print("Restart with -m or --manual to use manual mode.")
 
             time.sleep(0.05)
+
+
+def main():
+    """Run CODA and guarantee runtime cleanup on every exit path."""
+    shutdown_started.clear()
+
+    try:
+        _run_runtime()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        shutdown_runtime()
+
+    print("Exiting C.O.D.A")
 
 
 if __name__ == "__main__":

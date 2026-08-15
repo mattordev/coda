@@ -43,13 +43,11 @@ The active roadmap is maintained in the
 
 - [v1.2.0 - Provider Routing & Privacy](https://github.com/mattordev/coda/milestone/1)
 - [v1.3.0 - Intent Routing & Command System](https://github.com/mattordev/coda/milestone/2)
-
-### In Progress
-
 - [v1.4.0 - Concurrent Runtime & Interruptible Responses](https://github.com/mattordev/coda/milestone/3)
 
 ### Future Milestones
 
+- [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 - [v1.6.0 - Semantic Intent Matching](https://github.com/mattordev/coda/milestone/5)
 
@@ -179,6 +177,8 @@ cloud-safe conversation rules.
 - `CODA_FOLLOWUP_TIMEOUT` controls how long an LLM voice follow-up can omit the
   wake word.
 - `ELEVENLABS_API_KEY` enables ElevenLabs speech output.
+- `CODA_ELEVENLABS_TIMEOUT` bounds audio generation before CODA falls back to
+  another speech provider (default: 30 seconds).
 
 The remaining provider, privacy, speech and model options are documented in
 [`docs/.env.example`](docs/.env.example).
@@ -197,10 +197,12 @@ Commands are self-registering modules that own their intent metadata and
 - [Command Modules](docs/command-modules.md)
 - [Intent Routing](docs/intent-routing.md)
 - [Main Program Flow](docs/main-program-flow.md)
-- [Concurrent Runtime Design](docs/concurrent-runtime.md)
+- [Concurrent Runtime](docs/concurrent-runtime.md)
 
 ## Licence
 
 CODA is licensed under the GNU AGPLv3. See [LICENCE.md](LICENCE.md).
 
-Copyright (C) 2022 Matthew Roberts
+Third-party notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Copyright (C) 2022-2026 Matthew Roberts (mattordev)

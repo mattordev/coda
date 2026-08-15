@@ -1,4 +1,5 @@
 import unittest
+from threading import Event
 from unittest.mock import Mock, patch
 
 from ai.intents.models import Intent, IntentResult
@@ -102,7 +103,6 @@ class IntentRuntimeTests(unittest.TestCase):
         self.assertEqual(command.requests[0].strategy, "local_classifier")
         route_request.assert_not_called()
 
-    @patch("utils.speak_response.speak_response")
     @patch.object(
         command_runtime,
         "route_request",
@@ -117,7 +117,6 @@ class IntentRuntimeTests(unittest.TestCase):
         self,
         _fallback_enabled,
         route_request,
-        speak_response,
     ):
         router = Mock()
         router.route.return_value = IntentResult(intent=None)
@@ -133,9 +132,9 @@ class IntentRuntimeTests(unittest.TestCase):
         self.assertTrue(result.open_follow_up)
         self.assertEqual(result.response_text, "General response")
         route_request.assert_called_once_with(
-            "tell me something interesting"
+            "tell me something interesting",
+            cancel_event=None,
         )
-        speak_response.assert_called_once_with("General response")
 
     @patch.object(command_runtime, "route_request")
     @patch.object(
@@ -203,6 +202,106 @@ class IntentRuntimeTests(unittest.TestCase):
 
         self.assertFalse(result.handled)
         router.route.assert_not_called()
+
+    def test_cancellation_during_intent_dispatch_discards_result(self):
+        cancel_event = Event()
+
+        def dispatch_intent(*_args, **_kwargs):
+            cancel_event.set()
+            return command_runtime.CommandResult(handled=True)
+
+        with patch.object(
+            command_runtime,
+            "_dispatch_intent",
+            side_effect=dispatch_intent,
+        ):
+            result = command_runtime.on_command(
+                "connected",
+                {},
+                cancel_event=cancel_event,
+            )
+
+        self.assertFalse(result.handled)
+
+    def test_cancellation_during_llm_request_prevents_response(self):
+        cancel_event = Event()
+
+        def route_request(_message, cancel_event=None):
+            cancel_event.set()
+            return "stale response", None
+
+        with (
+            patch.object(
+                command_runtime,
+                "_dispatch_intent",
+                return_value=None,
+            ),
+            patch.object(
+                command_runtime,
+                "_llm_fallback_enabled",
+                return_value=True,
+            ),
+            patch.object(
+                command_runtime,
+                "route_request",
+                side_effect=route_request,
+            ) as route,
+            patch("utils.speak_response.speak_response") as speak_response,
+        ):
+            result = command_runtime.on_command(
+                "tell me something",
+                {},
+                cancel_event=cancel_event,
+            )
+
+        self.assertFalse(result.handled)
+        route.assert_called_once_with(
+            "tell me something",
+            cancel_event=cancel_event,
+        )
+        speak_response.assert_not_called()
+
+    def test_cancellation_during_llm_retry_prevents_response(self):
+        cancel_event = Event()
+        attempt_count = 0
+
+        def route_request(_message, cancel_event=None):
+            nonlocal attempt_count
+            attempt_count += 1
+
+            if attempt_count == 1:
+                return None, None
+
+            cancel_event.set()
+            return "stale retry response", None
+
+        with (
+            patch.object(
+                command_runtime,
+                "_dispatch_intent",
+                return_value=None,
+            ),
+            patch.object(
+                command_runtime,
+                "_llm_fallback_enabled",
+                return_value=True,
+            ),
+            patch.object(
+                command_runtime,
+                "route_request",
+                side_effect=route_request,
+            ) as route,
+            patch("utils.speak_response.speak_response") as speak_response,
+        ):
+            result = command_runtime.on_command(
+                "tell me something",
+                {},
+                cancel_event=cancel_event,
+            )
+
+        self.assertFalse(result.handled)
+        self.assertEqual(route.call_count, 2)
+        speak_response.assert_not_called()
 
 
 if __name__ == "__main__":

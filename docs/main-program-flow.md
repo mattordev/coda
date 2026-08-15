@@ -1,101 +1,109 @@
 # C.O.D.A Main Program Flow
 
-## Purpose
+This document summarises startup, input modes and shutdown. For worker,
+message, cancellation and command-extension details, see
+[Concurrent Runtime](concurrent-runtime.md).
 
-This document explains how the runtime in main.py initializes, switches modes, handles input, and updates dashboard state.
+## Startup
 
-## High-Level Flow
+`main.py` calls `coda_runtime.main()`, which guarantees cleanup around the
+runtime body.
 
-1. Parse CLI flags and optional microphone overrides.
+1. Parse manual-mode and microphone flags.
 2. Optionally list microphones and exit.
-3. Determine startup mode (manual or voice).
-4. Check for updates.
-5. Load command cache and wakewords, or run first-time setup.
-6. Configure the intent router from the loaded command modules.
-7. Start heartbeat thread for dashboard liveness.
-8. Start voice thread if voice mode is active.
-9. Enter the main loop.
-10. On exit, stop threads and terminate.
+3. Check for an available CODA update.
+4. Load command modules and wake words, rebuilding first-time files when
+   needed.
+5. Configure and validate the intent router.
+6. Start the heartbeat, execution, event and speech workers.
+7. Configure `speak_response()` to submit asynchronous speech tasks.
+8. Start the voice-input worker unless manual mode was requested.
+9. Enter the main input-mode loop.
 
-## Detailed Flow
+## Voice Mode
 
-### 1) Startup and Arguments
+The voice worker owns microphone capture and speech-to-text. It records the
+transcript, applies wake-word and follow-up rules, then submits a
+`RuntimeRequest` to the shared request queue.
 
-- Read flags with \_get_flag_value and \_is_manual_mode_requested.
-- If --list-mics is present:
-    - Print available microphones.
-    - Exit process.
-- Set manual_assisstant_input when -m or --manual is passed.
+Follow-up permission and audible playback state are snapshotted when the
+accepted phrase begins. They are not taken when the listener first starts
+waiting or after transcription finishes. CODA's phrase-aware adapter mirrors
+SpeechRecognition 3.17.0's non-streaming voice-activity detection because the
+library's streaming iterator exposes short candidates without reporting when
+one is rejected. This lets CODA replace the snapshot after noise and associate
+the final `AudioData` with the accepted phrase-start buffer's state.
 
-### 2) Command and Wakeword Initialization
+A wakeword-free phrase that began before the follow-up window opened is ignored
+without closing the newly opened window. A phrase that began while CODA was
+audibly speaking is also ignored, preventing assistant playback echoed through
+the microphone from feeding back into the request queue. An exact wake-word
+stop command, such as `coda stop`, is deliberately handled before this echo
+filter so spoken cancellation remains available during playback.
 
-- Define default wakewords in code.
-- Run check_update_available(version_url).
-- If update is accepted:
-    - Run update flow.
-    - Rebuild commands cache with setup_commands().
-- Else:
-    - Try load_commands() and load_wakewords().
-    - If files are missing, run run_first_time_setup().
-- Pass the loaded command modules to command.configure_intent_router().
-- Validate each module's INTENT metadata and run function.
-- Build the intent registry and configured detection strategies.
+The execution worker processes queued requests one at a time. It runs intent
+routing and command dispatch, or LLM fallback for unmatched input. Responses
+are submitted to the speech worker, while execution and speech outcomes are
+published to the event worker for follow-up-state handling.
 
-### 3) Background Threads
+The main thread remains available for the Ctrl+B mode toggle. If the global
+keyboard hook is unavailable, CODA disables only that toggle and continues in
+voice mode. If a stopped listener is still exiting when voice mode is requested
+again, the voice worker defers the restart until that listener has finished.
 
-- Start heartbeat thread with start_heartbeat_thread().
-- Heartbeat loop calls dashboard_state.touch_heartbeat(source="main") on an interval.
-- Start voice thread only when voice mode is active.
+## Manual Mode
 
-### 4) Main Loop Behavior
+Manual input still requires a wake word. The main loop handles:
 
-#### Manual Mode Branch
+- `quit` or `exit`: return through graceful shutdown.
+- `voice` or `/voice`: switch to voice mode and start the voice worker.
+- A wake-word request: strip the wake word, create an `InputSource.MANUAL`
+  `RuntimeRequest` and submit it to the shared request queue.
 
-- Prompt with manual> and read input.
-- Ignore empty input.
-- If input is quit or exit:
-    - Stop voice and heartbeat threads.
-    - Exit loop.
-- If input is voice or /voice:
-    - Switch to voice mode.
-    - Start voice thread.
-- Require wakeword in manual command text.
-- Strip content before wakeword.
-- If command text remains, pass it to command.run(...).
-- Try exact, example and command-prefix intent rules.
-- Try the local classifier when enabled and no rule is accepted.
-- Dispatch an accepted intent to the matching command module.
-- Use the general LLM fallback when no intent is accepted and fallback is
-  enabled.
+Manual commands use the same intent registry and LLM fallback, but their
+execution is serialised with voice requests on the execution worker. Command
+speech and manual LLM replies both use the configured speech worker.
 
-#### Voice Mode Branch
+## Cancellation
 
-- Voice recognition runs in background thread.
-- Main loop polls Ctrl+B toggle:
-    - Switches to manual mode.
-    - Stops voice thread.
-    - Prints manual instructions.
-- If keyboard hook fails, disable keyboard toggle and continue.
+In voice mode, a wake-word stop phrase calls the runtime cancellation boundary.
+It signals the event belonging to the active request and the oldest outstanding
+speech task before stopping that task's active provider session. Speech remains
+cancellable while it is queued, resolving a provider or playing. Interruptible
+OpenAI and Ollama calls close their response streams and discard partial
+provider output. A cancelled execution result does not add partial text to
+conversation history, dashboard output, speech playback or provider fallback.
+After execution has completed, cancelling its tracked speech prevents or stops
+the audio but does not retract text already recorded in conversation history or
+dashboard state. The same applies to command speech recorded before submission.
 
-### 5) Shutdown
+## Shutdown
 
-- On explicit exit command:
-    - stop_voice_thread()
-    - stop_heartbeat_thread()
-- Break loop and terminate process.
+Manual exit and Ctrl+C both execute the idempotent `shutdown_runtime()` path:
+
+1. Close follow-up state and stop voice input.
+2. Cancel active execution and join the execution worker.
+3. Disconnect speech submission, cancel outstanding speech and stop playback.
+4. Stop the event worker.
+5. Stop the heartbeat worker.
+
+Every worker join is bounded by a timeout. Ctrl+C is handled without exposing a
+`KeyboardInterrupt` traceback.
 
 ## Dashboard State Touchpoints
 
-- Heartbeat updates: main heartbeat loop -> dashboard_state.touch_heartbeat.
-- User speech updates: voice_recognizer -> dashboard_state.record_user_message.
-- AI response updates: speak_response -> dashboard_state.record_ai_response.
-- Dashboard UI reads snapshot via Flask endpoint /api/state.
+- Voice transcripts: `voice_recognizer` calls
+  `dashboard_state.record_user_message()`.
+- Queued LLM responses: the execution path calls
+  `dashboard_state.record_ai_response()` before speech submission.
+- Command speech: `speak_response()` records the response before queueing it.
+- Liveness: the heartbeat worker calls
+  `dashboard_state.touch_heartbeat(source="main")`.
+- The Flask dashboard reads the persisted snapshot from `/api/state`.
 
-## Notes
+## Related Documentation
 
-- Commands cache is validated against command files and rebuilt when stale.
-- Heartbeat thread is independent of manual or voice mode.
-- Manual and voice inputs converge into the same intent router and dispatcher.
-- Intent metadata lives in each command module rather than a central command
-  catalogue.
-- See [Intent Routing](intent-routing.md) for the strategy and dispatcher flow.
+- [Concurrent Runtime](concurrent-runtime.md)
+- [Command Modules](command-modules.md)
+- [Intent Routing](intent-routing.md)
+- [Privacy Routing](privacy-routing.md)
