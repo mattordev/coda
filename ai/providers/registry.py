@@ -10,18 +10,21 @@ SUPPORTED_PROVIDERS = {
         "module": openai_provider,
         "api_key_env": "OPENAI_API_KEY",
         "model_env": "CODA_OPENAI_MODEL",
+        "base_url_env": None,
     },
     "ollama": {
         "type": "local",
         "module": ollama_provider,
         "api_key_env": None,
         "model_env": "CODA_OLLAMA_MODEL",
+        "base_url_env": "CODA_OLLAMA_BASE_URL",
     },
     "llamacpp": {
         "type": "local",
         "module": llamacpp_provider,
         "api_key_env": None,
         "model_env": "CODA_LLAMACPP_MODEL",
+        "base_url_env": "CODA_LLAMACPP_BASE_URL",
     },
 }
 
@@ -38,13 +41,15 @@ def is_provider_configured(provider: str) -> bool:
     if provider not in SUPPORTED_PROVIDERS:
         return False
 
-    config = SUPPORTED_PROVIDERS[provider]
-
-    # Local providers don't require API keys
-    if config["type"] == "local":
+    if get_provider_type(provider) == "local":
         return True
 
-    api_key = os.getenv(config["api_key_env"], "").strip()
+    api_key_env = get_provider_api_key_env(provider)
+
+    if not api_key_env:
+        return False
+
+    api_key = os.getenv(api_key_env, "").strip()
 
     return bool(api_key)
 
@@ -55,6 +60,32 @@ def get_provider_type(provider: str) -> str | None:
         return None
 
     return SUPPORTED_PROVIDERS[provider]["type"]
+
+def get_provider_api_key_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["api_key_env"]
+
+
+def get_provider_model_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["model_env"]
+
+
+def get_provider_base_url_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["base_url_env"]
 
 def get_provider_module(provider: str):
     provider = normalize_provider_name(provider)
@@ -105,6 +136,24 @@ def get_configured_providers(
         configured.append(provider)
 
     return configured
+
+def resolve_provider_list(
+    value: str,
+    provider_type: str,
+) -> list[str]:
+    provider_names = [
+        provider.strip()
+        for provider in value.split(",")
+        if provider.strip()
+    ]
+    
+    if provider_names:
+        return get_configured_providers(
+            provider_names,
+            provider_type=provider_type,
+        )
+        
+    return get_providers_by_type(provider_type)
 
 def get_providers_by_type(provider_type: str) -> list[str]:
     providers = []

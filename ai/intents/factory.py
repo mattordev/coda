@@ -20,27 +20,11 @@ def _local_classifier_enabled() -> bool:
 
     return value in ("1", "true", "yes", "on")
 
-
-def _split_provider_list(value: str) -> list[str]:
-    return [
-        provider.strip()
-        for provider in value.split(",")
-        if provider.strip()
-    ]
-
-
 def _get_local_classifier_provider():
-    configured_names = _split_provider_list(
-        os.getenv("CODA_LOCAL_PROVIDERS", "")
+    providers = provider_registry.resolve_provider_list(
+        os.getenv("CODA_LOCAL_PROVIDERS", ""),
+        provider_type="local",
     )
-
-    if configured_names:
-        providers = provider_registry.get_configured_providers(
-            configured_names,
-            provider_type="local",
-        )
-    else:
-        providers = provider_registry.get_providers_by_type("local")
 
     if not providers:
         return None
