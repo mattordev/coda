@@ -2,6 +2,7 @@ import os
 
 from ai.providers import ollama as ollama_provider
 from ai.providers import openai as openai_provider
+from ai.providers import llamacpp as llamacpp_provider
 
 SUPPORTED_PROVIDERS = {
     "openai": {
@@ -15,6 +16,12 @@ SUPPORTED_PROVIDERS = {
         "module": ollama_provider,
         "api_key_env": None,
         "model_env": "CODA_OLLAMA_MODEL",
+    },
+    "llamacpp": {
+        "type": "local",
+        "module": llamacpp_provider,
+        "api_key_env": None,
+        "model_env": "CODA_LLAMACPP_MODEL",
     },
 }
 
