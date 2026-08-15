@@ -1,7 +1,9 @@
 import socket
 import os
 
-from elevenlabs import generate, play, set_api_key
+from elevenlabs import play, set_api_key
+import requests
+from ai.providers.cancellable import CancellationScope
 import utils.dashboard_state as dashboard_state
 import utils.runtime_state as runtime_state
 from runtime.speech_playback import SpeechProvider
@@ -102,25 +104,51 @@ def is_tts_available():
     except Exception:
         return False
     
-def _generate_elevenlabs_audio(response: str) -> bytes:
+def _generate_elevenlabs_audio(
+    response: str,
+    scope: CancellationScope | None = None,
+    timeout_seconds: float = 30.0,
+) -> bytes:
     global _eleven_labs_disabled
     
     if not ensure_api_key_loaded():
         raise RuntimeError("ElevenLabs is not configured.")
     
     runtime_state.debug_print("Using Eleven labs for speech")
+    active_scope = scope or CancellationScope()
+    session = requests.Session()
+    close_session = active_scope.add(session.close)
     
     try:
-        return generate(
-            text=response,
-            voice="N2lVS1w4EtoT3dr4eOWO",
-            model="eleven_flash_v2_5",
-        )
-    except Exception as error:
-        if "invalid api key" in str(error).lower():
+        with session.post(
+            "https://api.elevenlabs.io/v1/text-to-speech/"
+            "N2lVS1w4EtoT3dr4eOWO",
+            headers={
+                "Accept": "audio/mpeg",
+                "Content-Type": "application/json",
+                "xi-api-key": load_api_key(),
+            },
+            json={
+                "text": response,
+                "model_id": "eleven_flash_v2_5",
+            },
+            timeout=timeout_seconds,
+            stream=True,
+        ) as provider_response:
+            close_response = active_scope.add(provider_response.close)
+            if provider_response.status_code == 401:
+                _eleven_labs_disabled = True
+            provider_response.raise_for_status()
+            audio = b"".join(provider_response.iter_content(chunk_size=8192))
+            close_response()
+            return audio
+    except requests.RequestException as error:
+        error_response = getattr(error, "response", None)
+        if getattr(error_response, "status_code", None) == 401:
             _eleven_labs_disabled = True
-
         raise
+    finally:
+        close_session()
     
 def resolve_speech_providers() -> list[SpeechProvider]:
     global _elevenlabs_provider

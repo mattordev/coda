@@ -54,6 +54,8 @@ speech_worker = SpeechWorker(
 )
 shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
+latest_request_lock = threading.Lock()
+latest_request_id = None
 
 
 
@@ -329,13 +331,23 @@ def submit_speech_response(text: str) -> bool:
     return True
 
 def submit_runtime_request(request: RuntimeRequest) -> str | None:
+    global latest_request_id
+
     cancelled_request_id = None
 
     if request.replace_active:
         cancelled_request_id = active_request_state.cancel_active()
 
+    with latest_request_lock:
+        latest_request_id = request.request_id
+
     runtime_queues.requests.put(request)
     return cancelled_request_id
+
+
+def _is_latest_request(request_id: str | None) -> bool:
+    with latest_request_lock:
+        return latest_request_id is None or latest_request_id == request_id
 
 def cancel_active_request() -> str | None:
     """Request cancellation of the active runtime request."""
@@ -517,9 +529,10 @@ def _event_loop(stop_event):
                     runtime_event.event_type == WorkerEventType.COMPLETED
                     and runtime_event.open_follow_up
                 ):
-                    follow_up_state.open(
-                        voice_recognizer.get_follow_up_timeout_seconds()
-                    )
+                    if _is_latest_request(runtime_event.request_id):
+                        follow_up_state.open(
+                            voice_recognizer.get_follow_up_timeout_seconds()
+                        )
                 else:
                     follow_up_state.close()
 

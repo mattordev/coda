@@ -1040,6 +1040,37 @@ class RuntimeExecutionTests(unittest.TestCase):
         follow_up.open.assert_called_once_with(10.0)
         follow_up.close.assert_not_called()
 
+    def test_stale_speech_completion_does_not_open_follow_up(self):
+        queues = RuntimeQueues()
+        stop_event = threading.Event()
+        follow_up = Mock()
+        stale_event = WorkerEvent(
+            worker=WorkerName.SPEECH,
+            event_type=WorkerEventType.COMPLETED,
+            request_id="request-a",
+            open_follow_up=True,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(coda_runtime, "follow_up_state", follow_up),
+            patch.object(coda_runtime, "latest_request_id", "request-b"),
+        ):
+            worker = threading.Thread(
+                target=coda_runtime._event_loop,
+                args=(stop_event,),
+            )
+            worker.start()
+
+            try:
+                queues.events.put(stale_event)
+                queues.events.join()
+            finally:
+                stop_event.set()
+                worker.join(timeout=1.0)
+
+        follow_up.open.assert_not_called()
+
     def test_cancelled_speech_keeps_follow_up_closed(self):
         queues = RuntimeQueues()
         stop_event = threading.Event()

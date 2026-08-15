@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import requests
+
 import utils.speak_response as speech
 
 
@@ -91,6 +93,16 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         load_dotenv.assert_called_once_with(override=True)
 
     def test_invalid_cloud_key_disables_provider(self):
+        response = Mock(status_code=401)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.raise_for_status.side_effect = requests.HTTPError(
+            "401 Unauthorized",
+            response=response,
+        )
+        session = Mock()
+        session.post.return_value = response
+
         with (
             patch.object(speech, "_eleven_labs_disabled", False),
             patch.object(
@@ -99,15 +111,51 @@ class SpeechProviderResolutionTests(unittest.TestCase):
                 return_value=True,
             ),
             patch.object(
-                speech,
-                "generate",
-                side_effect=RuntimeError("invalid api key"),
+                speech.requests,
+                "Session",
+                return_value=session,
             ),
         ):
-            with self.assertRaisesRegex(RuntimeError, "invalid api key"):
+            with self.assertRaises(requests.HTTPError):
                 speech._generate_elevenlabs_audio("hello")
 
             self.assertTrue(speech._eleven_labs_disabled)
+
+    def test_cloud_generation_uses_bounded_streaming_request(self):
+        response = Mock(status_code=200)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.iter_content.return_value = [b"audio", b" data"]
+        session = Mock()
+        session.post.return_value = response
+
+        with (
+            patch.object(
+                speech,
+                "ensure_api_key_loaded",
+                return_value=True,
+            ),
+            patch.object(
+                speech,
+                "load_api_key",
+                return_value="test-key",
+            ),
+            patch.object(
+                speech.requests,
+                "Session",
+                return_value=session,
+            ),
+        ):
+            audio = speech._generate_elevenlabs_audio(
+                "hello",
+                timeout_seconds=12.0,
+            )
+
+        self.assertEqual(audio, b"audio data")
+        self.assertEqual(session.post.call_args.kwargs["timeout"], 12.0)
+        self.assertTrue(session.post.call_args.kwargs["stream"])
+        session.close.assert_called_once_with()
+        response.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

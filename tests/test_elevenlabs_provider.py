@@ -27,7 +27,7 @@ class ElevenLabsProviderTests(unittest.TestCase):
     def test_cancellation_after_generation_skips_playback(self, popen):
         cancel_event = threading.Event()
 
-        def generate_audio(_text):
+        def generate_audio(_text, _scope, _timeout):
             cancel_event.set()
             return b"audio"
 
@@ -48,8 +48,9 @@ class ElevenLabsProviderTests(unittest.TestCase):
         release_generation = threading.Event()
         cancel_event = threading.Event()
 
-        def generate_audio(_text):
+        def generate_audio(_text, scope, _timeout):
             generation_started.set()
+            scope.add(release_generation.set)
             release_generation.wait(timeout=1.0)
             return b"audio"
 
@@ -78,8 +79,9 @@ class ElevenLabsProviderTests(unittest.TestCase):
         generation_started = threading.Event()
         release_generation = threading.Event()
 
-        def generate_audio(_text):
+        def generate_audio(_text, scope, _timeout):
             generation_started.set()
+            scope.add(release_generation.set)
             release_generation.wait(timeout=1.0)
             return b"audio"
 
@@ -103,7 +105,7 @@ class ElevenLabsProviderTests(unittest.TestCase):
         popen.return_value = process
         session = ElevenLabsSession(
             text="hello",
-            generate_audio=lambda _text: b"audio",
+            generate_audio=lambda _text, _scope, _timeout: b"audio",
             ffplay_path="ffplay",
         )
 
@@ -135,7 +137,7 @@ class ElevenLabsProviderTests(unittest.TestCase):
 
         process = ControlledProcess()
 
-        def generate_audio(_text):
+        def generate_audio(_text, _scope, _timeout):
             generation_started.set()
             release_generation.wait(timeout=1.0)
             return b"audio"
@@ -187,7 +189,7 @@ class ElevenLabsProviderTests(unittest.TestCase):
         popen.side_effect = fail_process_start
         session = ElevenLabsSession(
             text="hello",
-            generate_audio=lambda _text: b"audio",
+            generate_audio=lambda _text, _scope, _timeout: b"audio",
             ffplay_path="ffplay",
         )
 
@@ -219,7 +221,7 @@ class ElevenLabsProviderTests(unittest.TestCase):
         cancel_event.wait.return_value = True
         session = ElevenLabsSession(
             text="hello",
-            generate_audio=lambda _text: b"audio",
+            generate_audio=lambda _text, _scope, _timeout: b"audio",
             ffplay_path="ffplay",
         )
 
