@@ -111,6 +111,11 @@ class SpeechProviderResolutionTests(unittest.TestCase):
                 return_value=True,
             ),
             patch.object(
+                speech,
+                "load_api_key",
+                return_value="invalid-test-key",
+            ),
+            patch.object(
                 speech.requests,
                 "Session",
                 return_value=session,
