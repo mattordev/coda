@@ -274,6 +274,31 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(results, [(None, "Request cancelled.")])
         session.close.assert_called()
 
+    def test_outer_deadline_uses_larger_loaded_model_timeout(self):
+        session = mock.MagicMock()
+
+        with mock.patch.object(
+            ollama.requests,
+            "Session",
+            return_value=session,
+        ), mock.patch.object(
+            ollama,
+            "get_timeout_seconds",
+            return_value=60.0,
+        ), mock.patch.object(
+            ollama,
+            "get_cold_start_timeout_seconds",
+            return_value=5.0,
+        ), mock.patch.object(
+            ollama,
+            "run_cancellable",
+            return_value=("response", None),
+        ) as run_cancellable:
+            result = ollama.generate([])
+
+        self.assertEqual(result, ("response", None))
+        self.assertEqual(run_cancellable.call_args.args[2], 80.0)
+
 
 if __name__ == "__main__":
     unittest.main()

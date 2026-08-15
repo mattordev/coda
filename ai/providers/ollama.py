@@ -228,7 +228,10 @@ def generate(messages, cancel_event=None):
     scope = CancellationScope()
     close_session = scope.add(session.close)
     timeout_seconds = (
-        get_cold_start_timeout_seconds()
+        max(
+            get_timeout_seconds(),
+            get_cold_start_timeout_seconds(),
+        )
         + (2 * min(get_timeout_seconds(), 10))
     )
 
