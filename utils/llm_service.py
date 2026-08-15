@@ -231,6 +231,15 @@ def _generate_provider_response(
     if cancel_event is not None and cancel_event.is_set():
         return None, "Request cancelled."
 
+    original_history = list(conversation_log)
+
+    def cancel_and_restore():
+        if cancel_event is None or not cancel_event.is_set():
+            return False
+
+        conversation_log[:] = original_history
+        return True
+
     conversation_log.append(
         _new_message(
             "user",
@@ -243,18 +252,20 @@ def _generate_provider_response(
     messages = _build_messages_for_provider(provider_name)
     response, error = provider_module.generate(messages, cancel_event=cancel_event)
 
-    if cancel_event is not None and cancel_event.is_set():
-        conversation_log.pop()
+    if cancel_and_restore():
         return None, "Request cancelled."
 
     if error:
-        conversation_log.pop()
+        conversation_log[:] = original_history
         return None, error
 
     response = (response or "").strip()
     if response:
         assistant_privacy_result = analyze_privacy(response)
         assistant_risk = max(risk, assistant_privacy_result["risk"])
+
+        if cancel_and_restore():
+            return None, "Request cancelled."
 
         if assistant_risk > assistant_privacy_result["risk"]:
             assistant_privacy_result = {
@@ -275,7 +286,14 @@ def _generate_provider_response(
                 privacy_result=assistant_privacy_result,
             )
         )
+
+        if cancel_and_restore():
+            return None, "Request cancelled."
+
         _trim_conversation()
+
+    if cancel_and_restore():
+        return None, "Request cancelled."
 
     return response, None
 

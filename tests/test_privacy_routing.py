@@ -166,6 +166,62 @@ class PrivacyRoutingTests(unittest.TestCase):
         self.assertEqual(error, "Request cancelled.")
         self.assertEqual(llm_service.conversation_log, original_history)
 
+    def test_cancellation_during_response_analysis_restores_history(self):
+        cancel_event = Event()
+        provider = registry.get_provider_module("ollama")
+        original_history = list(llm_service.conversation_log)
+        privacy_result = analyze_privacy("late response")
+
+        def cancel_during_analysis(_response):
+            cancel_event.set()
+            return privacy_result
+
+        with mock.patch.object(
+            provider,
+            "generate",
+            return_value=("late response", None),
+        ), mock.patch.object(
+            llm_service,
+            "analyze_privacy",
+            side_effect=cancel_during_analysis,
+        ):
+            response, error = llm_service.call_provider(
+                "ollama",
+                "cancel during analysis",
+                cancel_event=cancel_event,
+            )
+
+        self.assertIsNone(response)
+        self.assertEqual(error, "Request cancelled.")
+        self.assertEqual(llm_service.conversation_log, original_history)
+
+    def test_cancellation_after_assistant_append_restores_history(self):
+        cancel_event = Event()
+        provider = registry.get_provider_module("ollama")
+        original_history = list(llm_service.conversation_log)
+
+        def cancel_during_trim():
+            cancel_event.set()
+
+        with mock.patch.object(
+            provider,
+            "generate",
+            return_value=("late response", None),
+        ), mock.patch.object(
+            llm_service,
+            "_trim_conversation",
+            side_effect=cancel_during_trim,
+        ):
+            response, error = llm_service.call_provider(
+                "ollama",
+                "cancel after append",
+                cancel_event=cancel_event,
+            )
+
+        self.assertIsNone(response)
+        self.assertEqual(error, "Request cancelled.")
+        self.assertEqual(llm_service.conversation_log, original_history)
+
     def test_cloud_messages_redact_sensitive_history(self):
         local_provider = registry.get_provider_module("ollama")
         cloud_provider = registry.get_provider_module("openai")
