@@ -299,7 +299,7 @@ fallback, CODA can continue through the configured local provider list.
 Example debug output:
 
 ```text
-[DEBUG - ROUTER] Provider order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp']
+[DEBUG - ROUTER] Provider order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp', 'ollama']
 [ROUTER] trying provider openrouter
 [ROUTER] openrouter succeeded
 ```
