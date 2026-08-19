@@ -377,6 +377,7 @@ class CrossProviderRoutingTests(unittest.TestCase):
                     "grok,openrouter",
                 "XAI_API_KEY": "grok-key",
                 "OPENROUTER_API_KEY": "router-key",
+                "CODA_OPENROUTER_MODEL": "openrouter/free",
             },
             clear=True,
         ):
