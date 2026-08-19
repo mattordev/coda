@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from ai.providers import registry
 
@@ -15,6 +16,19 @@ class ProviderRegistryTests(unittest.TestCase):
         )
         self.assertIsNone(
             registry.get_provider_base_url_env("openai")
+        )
+
+    def test_gemini_metadata(self):
+        self.assertEqual(
+            registry.get_provider_api_key_env("gemini"),
+            "GEMINI_API_KEY",
+        )
+        self.assertEqual(
+            registry.get_provider_model_env("gemini"),
+            "CODA_GEMINI_MODEL",
+        )
+        self.assertIsNone(
+            registry.get_provider_base_url_env("gemini")
         )
 
     def test_ollama_metadata(self):
@@ -53,6 +67,25 @@ class ProviderRegistryTests(unittest.TestCase):
         self.assertIsNone(
             registry.get_provider_base_url_env("does-not-exist")
         )
+
+    def test_gemini_is_supported(self):
+        self.assertTrue(
+            registry.is_provider_supported("gemini")
+        )
+
+    def test_gemini_is_configured_when_api_key_exists(self):
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "test-key"},
+            clear=False,
+        ):
+            self.assertTrue(
+                registry.is_provider_configured("gemini")
+            )
+            self.assertEqual(
+                registry.get_provider_type("gemini"),
+                "cloud",
+            )
 
 
 if __name__ == "__main__":
