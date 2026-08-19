@@ -42,8 +42,11 @@ stop command, such as `coda stop`, is deliberately handled before this echo
 filter so spoken cancellation remains available during playback.
 
 The execution worker processes queued requests one at a time. It runs intent
-routing and command dispatch, or LLM fallback for unmatched input. Responses
-are submitted to the speech worker, while execution and speech outcomes are
+routing and command dispatch, or LLM fallback for unmatched input. LLM fallback
+passes through the privacy-aware provider router, which resolves the configured
+local and cloud provider order and attempts eligible providers until one
+succeeds, the request is cancelled or no providers remain. Responses are
+submitted to the speech worker, while execution and speech outcomes are
 published to the event worker for follow-up-state handling.
 
 The main thread remains available for the Ctrl+B mode toggle. If the global
@@ -70,11 +73,12 @@ In voice mode, a wake-word stop phrase calls the runtime cancellation boundary.
 It signals the event belonging to the active request and the oldest outstanding
 speech task before stopping that task's active provider session. Speech remains
 cancellable while it is queued, resolving a provider or playing. Interruptible
-OpenAI and Ollama calls close their response streams and discard partial
-provider output. A cancelled execution result does not add partial text to
-conversation history, dashboard output, speech playback or provider fallback.
-After execution has completed, cancelling its tracked speech prevents or stops
-the audio but does not retract text already recorded in conversation history or
+LLM provider calls close their active response streams or sessions and discard
+partial provider output. Cancellation also prevents the router from continuing
+to another fallback provider. A cancelled execution result does not add partial
+text to conversation history, dashboard output or speech playback. After
+execution has completed, cancelling its tracked speech prevents or stops the
+audio but does not retract text already recorded in conversation history or
 dashboard state. The same applies to command speech recorded before submission.
 
 ## Shutdown
@@ -106,4 +110,5 @@ Every worker join is bounded by a timeout. Ctrl+C is handled without exposing a
 - [Concurrent Runtime](concurrent-runtime.md)
 - [Command Modules](command-modules.md)
 - [Intent Routing](intent-routing.md)
+- [LLM Providers](providers.md)
 - [Privacy Routing](privacy-routing.md)

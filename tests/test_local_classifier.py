@@ -33,7 +33,10 @@ class LocalClassifierStrategyTests(unittest.TestCase):
 
         self.assertEqual(len(generator.calls), 1)
         messages = generator.calls[0]
-        self.assertEqual([message["role"] for message in messages], ["system", "user"])
+        self.assertEqual(
+            [message["role"] for message in messages],
+            ["system", "user"],
+        )
 
         payload = json.loads(messages[1]["content"])
         self.assertEqual(payload["message"], "find the station")
@@ -61,7 +64,11 @@ class LocalClassifierStrategyTests(unittest.TestCase):
         self.assertFalse(result.accepted)
 
     def test_accepts_json_inside_markdown_fence(self):
-        response = '```json\n{"intent": "connected", "confidence": 0.8}\n```'
+        response = (
+            '```json\n'
+            '{"intent": "connected", "confidence": 0.8}\n'
+            '```'
+        )
         strategy = LocalClassifierStrategy(FakeGenerator(response))
 
         result = strategy.detect("are we online", self.registry)
@@ -70,13 +77,28 @@ class LocalClassifierStrategyTests(unittest.TestCase):
         self.assertEqual(result.confidence, 0.8)
 
     def test_returns_unmatched_result_for_null_intent(self):
-        response = json.dumps({"intent": None, "confidence": 0.0})
+        response = json.dumps(
+            {"intent": None, "confidence": 0.0}
+        )
         strategy = LocalClassifierStrategy(FakeGenerator(response))
 
         result = strategy.detect("write a symphony", self.registry)
 
         self.assertFalse(result.matched)
         self.assertEqual(result.confidence, 0.0)
+        self.assertFalse(result.accepted)
+
+    def test_normalizes_nonzero_confidence_for_null_intent(self):
+        response = json.dumps(
+            {"intent": None, "confidence": 0.5}
+        )
+        strategy = LocalClassifierStrategy(FakeGenerator(response))
+
+        result = strategy.detect("write a symphony", self.registry)
+
+        self.assertFalse(result.matched)
+        self.assertEqual(result.confidence, 0.0)
+        self.assertFalse(result.accepted)
 
     def test_raises_for_provider_error(self):
         strategy = LocalClassifierStrategy(
@@ -91,39 +113,68 @@ class LocalClassifierStrategyTests(unittest.TestCase):
             ("", "empty response"),
             ("not json", "invalid JSON"),
             ("[]", "JSON object"),
-            (json.dumps({"intent": "maps"}), "confidence must be a number"),
             (
-                json.dumps({"intent": "maps", "confidence": True}),
+                json.dumps({"intent": "maps"}),
                 "confidence must be a number",
             ),
             (
-                json.dumps({"intent": None, "confidence": 0.5}),
-                "null intent",
+                json.dumps(
+                    {"intent": "maps", "confidence": True}
+                ),
+                "confidence must be a number",
             ),
             (
-                json.dumps({"intent": "", "confidence": 0.5}),
+                json.dumps(
+                    {"intent": None, "confidence": -0.1}
+                ),
+                "between 0.0 and 1.0",
+            ),
+            (
+                json.dumps(
+                    {"intent": None, "confidence": 1.1}
+                ),
+                "between 0.0 and 1.0",
+            ),
+            (
+                json.dumps(
+                    {"intent": "", "confidence": 0.5}
+                ),
                 "intent must be a name",
             ),
             (
-                json.dumps({"intent": "unknown", "confidence": 0.5}),
+                json.dumps(
+                    {"intent": "unknown", "confidence": 0.5}
+                ),
                 "unknown intent",
             ),
             (
-                json.dumps({"intent": "maps", "confidence": 1.1}),
-                "Confidence",
+                json.dumps(
+                    {"intent": "maps", "confidence": 1.1}
+                ),
+                "between 0.0 and 1.0",
             ),
         )
 
         for response, expected_error in invalid_outputs:
             with self.subTest(response=response):
-                strategy = LocalClassifierStrategy(FakeGenerator(response))
+                strategy = LocalClassifierStrategy(
+                    FakeGenerator(response)
+                )
 
-                with self.assertRaisesRegex(ValueError, expected_error):
-                    strategy.detect("find somewhere", self.registry)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    expected_error,
+                ):
+                    strategy.detect(
+                        "find somewhere",
+                        self.registry,
+                    )
 
     def test_rule_match_skips_local_classifier(self):
         generator = FakeGenerator(
-            json.dumps({"intent": "connected", "confidence": 0.9})
+            json.dumps(
+                {"intent": "connected", "confidence": 0.9}
+            )
         )
         router = IntentRouter(
             self.registry,

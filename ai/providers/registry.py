@@ -1,7 +1,11 @@
 import os
 
-from ai.providers import ollama as ollama_provider
 from ai.providers import openai as openai_provider
+from ai.providers import gemini as gemini_provider
+from ai.providers import llamacpp as llamacpp_provider
+from ai.providers import ollama as ollama_provider
+from ai.providers import grok as grok_provider
+from ai.providers import openrouter as openrouter_provider
 
 SUPPORTED_PROVIDERS = {
     "openai": {
@@ -9,12 +13,48 @@ SUPPORTED_PROVIDERS = {
         "module": openai_provider,
         "api_key_env": "OPENAI_API_KEY",
         "model_env": "CODA_OPENAI_MODEL",
+        "base_url_env": None,
+        "model_required": False,
+    },
+    "gemini": {
+        "type": "cloud",
+        "module": gemini_provider,
+        "api_key_env": "GEMINI_API_KEY",
+        "model_env": "CODA_GEMINI_MODEL",
+        "base_url_env": None,
+        "model_required": False,
+    },
+    "grok": {
+        "type": "cloud",
+        "module": grok_provider,
+        "api_key_env": "XAI_API_KEY",
+        "model_env": "CODA_GROK_MODEL",
+        "base_url_env": None,
+        "model_required": False,
+    },
+    "openrouter": {
+        "type": "cloud",
+        "module": openrouter_provider,
+        "api_key_env": "OPENROUTER_API_KEY",
+        "model_env": "CODA_OPENROUTER_MODEL",
+        "base_url_env": None,
+        "model_required": True,
     },
     "ollama": {
         "type": "local",
         "module": ollama_provider,
         "api_key_env": None,
         "model_env": "CODA_OLLAMA_MODEL",
+        "base_url_env": "CODA_OLLAMA_BASE_URL",
+        "model_required": False,
+    },
+    "llamacpp": {
+        "type": "local",
+        "module": llamacpp_provider,
+        "api_key_env": None,
+        "model_env": "CODA_LLAMACPP_MODEL",
+        "base_url_env": "CODA_LLAMACPP_BASE_URL",
+        "model_required": False,
     },
 }
 
@@ -33,13 +73,31 @@ def is_provider_configured(provider: str) -> bool:
 
     config = SUPPORTED_PROVIDERS[provider]
 
-    # Local providers don't require API keys
     if config["type"] == "local":
         return True
 
-    api_key = os.getenv(config["api_key_env"], "").strip()
+    api_key_env = config["api_key_env"]
 
-    return bool(api_key)
+    if not api_key_env:
+        return False
+
+    api_key = os.getenv(api_key_env, "").strip()
+
+    if not api_key:
+        return False
+
+    if config.get("model_required", False):
+        model_env = config["model_env"]
+
+        if not model_env:
+            return False
+
+        model = os.getenv(model_env, "").strip()
+
+        if not model:
+            return False
+
+    return True
 
 def get_provider_type(provider: str) -> str | None:
     provider = normalize_provider_name(provider)
@@ -48,6 +106,32 @@ def get_provider_type(provider: str) -> str | None:
         return None
 
     return SUPPORTED_PROVIDERS[provider]["type"]
+
+def get_provider_api_key_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["api_key_env"]
+
+
+def get_provider_model_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["model_env"]
+
+
+def get_provider_base_url_env(provider: str) -> str | None:
+    provider = normalize_provider_name(provider)
+
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
+    return SUPPORTED_PROVIDERS[provider]["base_url_env"]
 
 def get_provider_module(provider: str):
     provider = normalize_provider_name(provider)
@@ -98,6 +182,24 @@ def get_configured_providers(
         configured.append(provider)
 
     return configured
+
+def resolve_provider_list(
+    value: str,
+    provider_type: str,
+) -> list[str]:
+    provider_names = [
+        provider.strip()
+        for provider in value.split(",")
+        if provider.strip()
+    ]
+    
+    if provider_names:
+        return get_configured_providers(
+            provider_names,
+            provider_type=provider_type,
+        )
+        
+    return get_providers_by_type(provider_type)
 
 def get_providers_by_type(provider_type: str) -> list[str]:
     providers = []
