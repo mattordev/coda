@@ -5,6 +5,7 @@ from ai.providers import gemini as gemini_provider
 from ai.providers import llamacpp as llamacpp_provider
 from ai.providers import ollama as ollama_provider
 from ai.providers import grok as grok_provider
+from ai.providers import openrouter as openrouter_provider
 
 SUPPORTED_PROVIDERS = {
     "openai": {
@@ -26,6 +27,13 @@ SUPPORTED_PROVIDERS = {
         "module": grok_provider,
         "api_key_env": "XAI_API_KEY",
         "model_env": "CODA_GROK_MODEL",
+        "base_url_env": None,
+    },
+    "openrouter": {
+        "type": "cloud",
+        "module": openrouter_provider,
+        "api_key_env": "OPENROUTER_API_KEY",
+        "model_env": "CODA_OPENROUTER_MODEL",
         "base_url_env": None,
     },
     "ollama": {
