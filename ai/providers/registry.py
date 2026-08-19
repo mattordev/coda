@@ -1,8 +1,9 @@
 import os
 
-from ai.providers import ollama as ollama_provider
 from ai.providers import openai as openai_provider
+from ai.providers import gemini as gemini_provider
 from ai.providers import llamacpp as llamacpp_provider
+from ai.providers import ollama as ollama_provider
 
 SUPPORTED_PROVIDERS = {
     "openai": {
@@ -10,6 +11,13 @@ SUPPORTED_PROVIDERS = {
         "module": openai_provider,
         "api_key_env": "OPENAI_API_KEY",
         "model_env": "CODA_OPENAI_MODEL",
+        "base_url_env": None,
+    },
+    "gemini": {
+        "type": "cloud",
+        "module": gemini_provider,
+        "api_key_env": "GEMINI_API_KEY",
+        "model_env": "CODA_GEMINI_MODEL",
         "base_url_env": None,
     },
     "ollama": {
