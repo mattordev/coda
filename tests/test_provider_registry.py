@@ -77,7 +77,7 @@ class ProviderRegistryTests(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {"GEMINI_API_KEY": "test-key"},
-            clear=False,
+            clear=True,
         ):
             self.assertTrue(
                 registry.is_provider_configured("gemini")
@@ -86,6 +86,7 @@ class ProviderRegistryTests(unittest.TestCase):
                 registry.get_provider_type("gemini"),
                 "cloud",
             )
+
     def test_grok_metadata(self):
         self.assertEqual(
             registry.get_provider_api_key_env("grok"),
@@ -108,7 +109,7 @@ class ProviderRegistryTests(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {"XAI_API_KEY": "test-key"},
-            clear=False,
+            clear=True,
         ):
             self.assertTrue(
                 registry.is_provider_configured("grok")
@@ -117,7 +118,7 @@ class ProviderRegistryTests(unittest.TestCase):
                 registry.get_provider_type("grok"),
                 "cloud",
             )
-            
+
     def test_openrouter_metadata(self):
         self.assertEqual(
             registry.get_provider_api_key_env("openrouter"),
@@ -136,11 +137,14 @@ class ProviderRegistryTests(unittest.TestCase):
             registry.is_provider_supported("openrouter")
         )
 
-    def test_openrouter_is_configured_when_api_key_exists(self):
+    def test_openrouter_is_configured_when_api_key_and_model_exist(self):
         with patch.dict(
             "os.environ",
-            {"OPENROUTER_API_KEY": "test-key"},
-            clear=False,
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "CODA_OPENROUTER_MODEL": "openrouter/free",
+            },
+            clear=True,
         ):
             self.assertTrue(
                 registry.is_provider_configured("openrouter")
@@ -148,6 +152,19 @@ class ProviderRegistryTests(unittest.TestCase):
             self.assertEqual(
                 registry.get_provider_type("openrouter"),
                 "cloud",
+            )
+
+    def test_openrouter_is_not_configured_when_model_is_missing(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "CODA_OPENROUTER_MODEL": "",
+            },
+            clear=True,
+        ):
+            self.assertFalse(
+                registry.is_provider_configured("openrouter")
             )
 
 

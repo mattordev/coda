@@ -14,6 +14,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": "OPENAI_API_KEY",
         "model_env": "CODA_OPENAI_MODEL",
         "base_url_env": None,
+        "model_required": False,
     },
     "gemini": {
         "type": "cloud",
@@ -21,6 +22,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": "GEMINI_API_KEY",
         "model_env": "CODA_GEMINI_MODEL",
         "base_url_env": None,
+        "model_required": False,
     },
     "grok": {
         "type": "cloud",
@@ -28,6 +30,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": "XAI_API_KEY",
         "model_env": "CODA_GROK_MODEL",
         "base_url_env": None,
+        "model_required": False,
     },
     "openrouter": {
         "type": "cloud",
@@ -35,6 +38,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": "OPENROUTER_API_KEY",
         "model_env": "CODA_OPENROUTER_MODEL",
         "base_url_env": None,
+        "model_required": True,
     },
     "ollama": {
         "type": "local",
@@ -42,6 +46,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": None,
         "model_env": "CODA_OLLAMA_MODEL",
         "base_url_env": "CODA_OLLAMA_BASE_URL",
+        "model_required": False,
     },
     "llamacpp": {
         "type": "local",
@@ -49,6 +54,7 @@ SUPPORTED_PROVIDERS = {
         "api_key_env": None,
         "model_env": "CODA_LLAMACPP_MODEL",
         "base_url_env": "CODA_LLAMACPP_BASE_URL",
+        "model_required": False,
     },
 }
 
@@ -65,17 +71,33 @@ def is_provider_configured(provider: str) -> bool:
     if provider not in SUPPORTED_PROVIDERS:
         return False
 
-    if get_provider_type(provider) == "local":
+    config = SUPPORTED_PROVIDERS[provider]
+
+    if config["type"] == "local":
         return True
 
-    api_key_env = get_provider_api_key_env(provider)
+    api_key_env = config["api_key_env"]
 
     if not api_key_env:
         return False
 
     api_key = os.getenv(api_key_env, "").strip()
 
-    return bool(api_key)
+    if not api_key:
+        return False
+
+    if config.get("model_required", False):
+        model_env = config["model_env"]
+
+        if not model_env:
+            return False
+
+        model = os.getenv(model_env, "").strip()
+
+        if not model:
+            return False
+
+    return True
 
 def get_provider_type(provider: str) -> str | None:
     provider = normalize_provider_name(provider)
