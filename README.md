@@ -17,6 +17,7 @@ eventually revived as the assistant it is today.
 - Route exact commands, aliases and natural-language examples through the
   intent system.
 - Fall back to a local or cloud LLM when no command matches.
+- Use ordered fallback across multiple local and cloud LLM providers.
 - Keep sensitive requests local or sanitise them before cloud fallback.
 - Prefer local Whisper speech recognition with Google as a fallback.
 - Speak responses through ElevenLabs with a local `pyttsx3` fallback.
@@ -25,14 +26,14 @@ eventually revived as the assistant it is today.
 
 ### Commands
 
-| Command | What it does | Example |
-| --- | --- | --- |
-| `connected` | Checks whether CODA can reach the internet. | `coda are we connected?` |
-| `debug` | Views or changes runtime debugging settings. | `coda debug status` |
-| `maps` | Opens a Google Maps search. | `coda where is Victoria Station?` |
-| `say` | Speaks the supplied text. | `coda say hello there` |
-| `status` | Reports CODA or system information. | `coda system status` |
-| `time` | Reports the local time or date. | `coda what time is it?` |
+| Command     | What it does                                 | Example                           |
+| ----------- | -------------------------------------------- | --------------------------------- |
+| `connected` | Checks whether CODA can reach the internet.  | `coda are we connected?`          |
+| `debug`     | Views or changes runtime debugging settings. | `coda debug status`               |
+| `maps`      | Opens a Google Maps search.                  | `coda where is Victoria Station?` |
+| `say`       | Speaks the supplied text.                    | `coda say hello there`            |
+| `status`    | Reports CODA or system information.          | `coda system status`              |
+| `time`      | Reports the local time or date.              | `coda what time is it?`           |
 
 ## Roadmap
 
@@ -135,21 +136,67 @@ Then open `http://localhost:5000/dashboard`.
 
 ## AI Provider Routing
 
-Provider order is configured in `.env`:
+CODA supports multiple local and cloud LLM providers through a shared provider
+registry and routing system.
+
+### Supported Providers
+
+Cloud providers:
+
+- OpenAI
+- Google Gemini
+- xAI Grok
+- OpenRouter
+
+Local providers:
+
+- Ollama
+- llama.cpp
+
+Provider order is configured in `.env`.
+
+For example:
 
 ```text
-CODA_CLOUD_PROVIDERS=openai
-CODA_LOCAL_PROVIDERS=ollama
+CODA_CLOUD_PROVIDERS=openrouter,gemini,grok,openai
+CODA_LOCAL_PROVIDERS=llamacpp,ollama
 ```
+
+Providers are evaluated from left to right within each configured group.
+
+For a low-risk request using the example above, CODA may therefore attempt:
+
+```text
+openrouter -> gemini -> grok -> openai -> llamacpp -> ollama
+```
+
+If a provider fails, CODA can continue through the remaining eligible providers
+until one succeeds or the provider list is exhausted.
+
+Unconfigured or unknown providers are skipped rather than preventing CODA from
+starting.
+
+Providers that have recently failed may also enter a temporary cooldown so
+repeated requests do not continually wait on a provider that is known to be
+unavailable.
+
+### Privacy-Aware Ordering
+
+The privacy router decides whether local or cloud providers should be attempted
+first.
 
 By default:
 
 - Low-risk requests try cloud providers before local providers.
 - Medium-risk requests try local providers first and sanitise sensitive values
-  before a cloud fallback.
+  before a permitted cloud fallback.
 - High-risk requests stay local unless the privacy policy explicitly permits a
   cloud fallback.
-- Unavailable providers enter a temporary cooldown before CODA retries them.
+- Cloud providers receive privacy-safe conversation history rather than
+  automatically receiving all raw stored content.
+- Local providers can receive the original conversation content.
+- Cancelling an active provider request prevents the router from continuing
+  fallback for that request.
 
 Privacy behaviour is controlled with:
 
@@ -163,6 +210,123 @@ CODA_PRIVACY_HIGH_RISK_THRESHOLD=0.7
 
 See [Privacy Routing](docs/privacy-routing.md) for the complete policy and
 cloud-safe conversation rules.
+
+### Provider Configuration
+
+Each provider exposes its configuration through environment variables.
+
+| Provider   | Type  | API key              | Model                   | Base URL                 |
+| ---------- | ----- | -------------------- | ----------------------- | ------------------------ |
+| OpenAI     | Cloud | `OPENAI_API_KEY`     | `CODA_OPENAI_MODEL`     | Built in                 |
+| Gemini     | Cloud | `GEMINI_API_KEY`     | `CODA_GEMINI_MODEL`     | Built in                 |
+| Grok       | Cloud | `XAI_API_KEY`        | `CODA_GROK_MODEL`       | Built in                 |
+| OpenRouter | Cloud | `OPENROUTER_API_KEY` | `CODA_OPENROUTER_MODEL` | Built in                 |
+| Ollama     | Local | Not required         | `CODA_OLLAMA_MODEL`     | `CODA_OLLAMA_BASE_URL`   |
+| llama.cpp  | Local | Not required         | `CODA_LLAMACPP_MODEL`   | `CODA_LLAMACPP_BASE_URL` |
+
+The full configuration baseline is available in
+[`docs/.env.example`](docs/.env.example).
+
+### Model Selection
+
+OpenAI, Gemini and Grok provide default model values when no custom model is
+configured.
+
+For example:
+
+```text
+CODA_OPENAI_MODEL=gpt-4o-mini
+CODA_GEMINI_MODEL=gemini-3.7-flash
+CODA_GROK_MODEL=grok-4.5
+```
+
+OpenRouter works slightly differently. CODA does not maintain a hard-coded list
+of OpenRouter models. Instead, `CODA_OPENROUTER_MODEL` accepts an arbitrary valid
+OpenRouter model ID.
+
+For example:
+
+```text
+CODA_OPENROUTER_MODEL=openrouter/free
+```
+
+This allows OpenRouter's available model catalogue to change without requiring
+CODA itself to be updated simply to recognise another model name.
+
+For local providers, a model can either be supplied explicitly or resolved from
+the configured local service.
+
+Ollama configuration:
+
+```text
+CODA_OLLAMA_BASE_URL=http://localhost:11434
+CODA_OLLAMA_MODEL=
+```
+
+If `CODA_OLLAMA_MODEL` is left blank, CODA can inspect the configured Ollama
+instance and resolve from the locally available models.
+
+llama.cpp configuration:
+
+```text
+CODA_LLAMACPP_BASE_URL=http://localhost:8080
+CODA_LLAMACPP_MODEL=
+```
+
+If `CODA_LLAMACPP_MODEL` is left blank, CODA attempts to resolve the model
+exposed by the configured llama.cpp server.
+
+This supports llama.cpp deployments where the model is selected when starting
+the server rather than supplied on every request.
+
+### Provider Fallback
+
+Provider fallback is handled generically by the router rather than through
+provider-specific routing rules.
+
+For example, if the configured cloud order is:
+
+```text
+CODA_CLOUD_PROVIDERS=openrouter,gemini,grok,openai
+```
+
+and OpenRouter is unavailable, CODA may continue with Gemini. If Gemini also
+fails, Grok can be attempted next, followed by OpenAI.
+
+If all eligible cloud providers fail and the privacy policy permits local
+fallback, CODA can continue through the configured local provider list.
+
+Example debug output:
+
+```text
+[DEBUG - ROUTER] Provider order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp']
+[ROUTER] trying provider openrouter
+[ROUTER] openrouter succeeded
+```
+
+Cancellation is handled differently from an ordinary provider failure. When an
+active request is cancelled, CODA stops that request and does not continue
+through the fallback list.
+
+### Provider Diagnostics
+
+Providers expose a description containing the currently configured model where
+available.
+
+Examples include:
+
+```text
+openai (model: gpt-4o-mini)
+gemini (model: gemini-3.7-flash)
+grok (model: grok-4.5)
+openrouter (model: openrouter/free)
+```
+
+Debug routing output also reports the resolved provider order and each attempted
+provider, making it possible to see which backend ultimately handled a request.
+
+For more detailed provider setup, ordering, fallback and model-selection
+documentation, see [LLM Providers](docs/providers.md).
 
 ## Voice Configuration
 
@@ -198,6 +362,8 @@ Commands are self-registering modules that own their intent metadata and
 - [Intent Routing](docs/intent-routing.md)
 - [Main Program Flow](docs/main-program-flow.md)
 - [Concurrent Runtime](docs/concurrent-runtime.md)
+- [LLM Providers](docs/providers.md)
+- [Privacy Routing](docs/privacy-routing.md)
 
 ## Licence
 

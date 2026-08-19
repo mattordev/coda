@@ -69,3 +69,7 @@ CODA_HIGH_RISK_CLOUD_FALLBACK=block
 
 The router decides which providers are allowed. `llm_service` decides what
 content each provider sees.
+
+## Related Documentation
+
+- [LLM Providers](providers.md)
