@@ -113,7 +113,7 @@ def _ensure_provider(provider):
         _save_state_to_disk()
 
 
-def log_failure(provider: str, cooldown: int = 30):
+def log_failure(provider: str):
     """
     Record that a provider has failed, with a timestamp
     
@@ -143,7 +143,7 @@ def log_attempt(provider: str):
         _save_state_to_disk()
 
 
-def should_skip_provider(provider: str, cooldown: int = 30) -> bool:
+def should_skip_provider(provider: str, cooldown: int = 600) -> bool:
     """
     Check if a provider should be skipped based on recent failures or attempts
 

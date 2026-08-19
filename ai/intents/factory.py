@@ -1,6 +1,6 @@
 import os
 
-from ai.providers import ollama as ollama_provider
+from ai.providers import registry as provider_registry
 
 from .local_classifier import LocalClassifierStrategy
 from .router import (
@@ -13,7 +13,6 @@ from .registry import IntentRegistry
 
 
 def _local_classifier_enabled() -> bool:
-    """Return whether local intent classification is enabled."""
     value = os.getenv(
         "CODA_INTENT_LOCAL_CLASSIFIER",
         "1",
@@ -21,9 +20,20 @@ def _local_classifier_enabled() -> bool:
 
     return value in ("1", "true", "yes", "on")
 
+def _get_local_classifier_provider():
+    providers = provider_registry.resolve_provider_list(
+        os.getenv("CODA_LOCAL_PROVIDERS", ""),
+        provider_type="local",
+    )
+
+    if not providers:
+        return None
+
+    provider_name = providers[0]
+    return provider_registry.get_provider_module(provider_name)
+
 
 def create_router(registry: IntentRegistry) -> IntentRouter:
-    """Create CODA's router using the supplied intent registry."""
     strategies = [
         ExactMatchStrategy(),
         ExampleMatchStrategy(),
@@ -31,9 +41,12 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
     ]
 
     if _local_classifier_enabled():
-        strategies.append(
-            LocalClassifierStrategy(ollama_provider.generate)
-        )
+        provider = _get_local_classifier_provider()
+
+        if provider is not None:
+            strategies.append(
+                LocalClassifierStrategy(provider.generate)
+            )
 
     return IntentRouter(
         registry=registry,

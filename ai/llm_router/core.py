@@ -129,37 +129,16 @@ def _no_provider_configured_message():
     )
 
 
-def _split_provider_list(value: str) -> list[str]:
-    return [
-        provider.strip()
-        for provider in value.split(",")
-        if provider.strip()
-    ]
-
-
 def _get_configured_provider_groups():
-    cloud_provider_names = _split_provider_list(
-        os.getenv("CODA_CLOUD_PROVIDERS", "")
-    )
-    local_provider_names = _split_provider_list(
-        os.getenv("CODA_LOCAL_PROVIDERS", "")
+    cloud_providers = registry.resolve_provider_list(
+        os.getenv("CODA_CLOUD_PROVIDERS", ""),
+        provider_type="cloud",
     )
 
-    if cloud_provider_names:
-        cloud_providers = registry.get_configured_providers(
-            cloud_provider_names,
-            provider_type="cloud",
-        )
-    else:
-        cloud_providers = registry.get_providers_by_type("cloud")
-
-    if local_provider_names:
-        local_providers = registry.get_configured_providers(
-            local_provider_names,
-            provider_type="local",
-        )
-    else:
-        local_providers = registry.get_providers_by_type("local")
+    local_providers = registry.resolve_provider_list(
+        os.getenv("CODA_LOCAL_PROVIDERS", ""),
+        provider_type="local",
+    )
 
     return cloud_providers, local_providers
 

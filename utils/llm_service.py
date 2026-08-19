@@ -189,29 +189,19 @@ def llm_fallback_enabled():
     configured_value = os.getenv("CODA_LLM_FALLBACK", "1")
     return configured_value.lower() in ("1", "true", "yes")
 
-
-def _split_provider_list(value: str) -> list[str]:
-    return [
-        provider.strip()
-        for provider in value.split(",")
-        if provider.strip()
-    ]
-
-
 def _get_described_providers(env_name: str, provider_type: str) -> str:
-    configured_names = _split_provider_list(os.getenv(env_name, ""))
-    if configured_names:
-        providers = registry.get_configured_providers(
-            configured_names,
-            provider_type=provider_type,
-        )
-    else:
-        providers = registry.get_providers_by_type(provider_type)
+    providers = registry.resolve_provider_list(
+        os.getenv(env_name, ""),
+        provider_type=provider_type,
+    )
 
     if not providers:
         return "none configured"
 
-    return ", ".join(registry.describe_provider(provider) for provider in providers)
+    return ", ".join(
+        registry.describe_provider(provider)
+        for provider in providers
+    )
 
 
 def _generate_provider_response(
