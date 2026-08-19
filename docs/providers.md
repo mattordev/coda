@@ -446,9 +446,9 @@ Example:
 
 ```text
 [DEBUG - ROUTER] Privacy risk: 0.0
-[DEBUG - ROUTER] Provider order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp']
+[DEBUG - ROUTER] Provider order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp', 'ollama']
 [DEBUG] Primary provider being checked: openrouter
-[ROUTER] Low risk -> trying providers in order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp']
+[ROUTER] Low risk -> trying providers in order: ['openrouter', 'gemini', 'grok', 'openai', 'llamacpp', 'olama']
 [ROUTER] trying provider openrouter
 [ROUTER] openrouter succeeded
 ```
