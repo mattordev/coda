@@ -275,21 +275,21 @@ class GeminiProviderTests(unittest.TestCase):
             stream_closed.is_set()
         )
         
-        def test_generate_returns_error_when_api_key_is_missing(self):
-            with mock.patch.dict(
-                "os.environ",
-                {},
-                clear=True,
-            ):
-                result, error = gemini_provider.generate(
-                    [{"role": "user", "content": "hi"}]
-                )
-
-            self.assertIsNone(result)
-            self.assertEqual(
-                error,
-                "GEMINI_API_KEY is not set in env.",
+    def test_generate_returns_error_when_api_key_is_missing(self):
+        with mock.patch.dict(
+            "os.environ",
+            {},
+            clear=True,
+        ):
+            result, error = gemini_provider.generate(
+                [{"role": "user", "content": "hi"}]
             )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            error,
+            "GEMINI_API_KEY is not set in env.",
+        )
 
 
 if __name__ == "__main__":
