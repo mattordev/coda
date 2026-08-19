@@ -117,6 +117,38 @@ class ProviderRegistryTests(unittest.TestCase):
                 registry.get_provider_type("grok"),
                 "cloud",
             )
+            
+    def test_openrouter_metadata(self):
+        self.assertEqual(
+            registry.get_provider_api_key_env("openrouter"),
+            "OPENROUTER_API_KEY",
+        )
+        self.assertEqual(
+            registry.get_provider_model_env("openrouter"),
+            "CODA_OPENROUTER_MODEL",
+        )
+        self.assertIsNone(
+            registry.get_provider_base_url_env("openrouter")
+        )
+
+    def test_openrouter_is_supported(self):
+        self.assertTrue(
+            registry.is_provider_supported("openrouter")
+        )
+
+    def test_openrouter_is_configured_when_api_key_exists(self):
+        with patch.dict(
+            "os.environ",
+            {"OPENROUTER_API_KEY": "test-key"},
+            clear=False,
+        ):
+            self.assertTrue(
+                registry.is_provider_configured("openrouter")
+            )
+            self.assertEqual(
+                registry.get_provider_type("openrouter"),
+                "cloud",
+            )
 
 
 if __name__ == "__main__":
