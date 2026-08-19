@@ -86,6 +86,37 @@ class ProviderRegistryTests(unittest.TestCase):
                 registry.get_provider_type("gemini"),
                 "cloud",
             )
+    def test_grok_metadata(self):
+        self.assertEqual(
+            registry.get_provider_api_key_env("grok"),
+            "XAI_API_KEY",
+        )
+        self.assertEqual(
+            registry.get_provider_model_env("grok"),
+            "CODA_GROK_MODEL",
+        )
+        self.assertIsNone(
+            registry.get_provider_base_url_env("grok")
+        )
+
+    def test_grok_is_supported(self):
+        self.assertTrue(
+            registry.is_provider_supported("grok")
+        )
+
+    def test_grok_is_configured_when_api_key_exists(self):
+        with patch.dict(
+            "os.environ",
+            {"XAI_API_KEY": "test-key"},
+            clear=False,
+        ):
+            self.assertTrue(
+                registry.is_provider_configured("grok")
+            )
+            self.assertEqual(
+                registry.get_provider_type("grok"),
+                "cloud",
+            )
 
 
 if __name__ == "__main__":
