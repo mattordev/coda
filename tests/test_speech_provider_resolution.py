@@ -69,6 +69,57 @@ class SpeechProviderResolutionTests(unittest.TestCase):
             speech._generate_elevenlabs_audio
         )
 
+    def test_configured_order_reorders_providers(self):
+        cloud_provider = Mock(name="cloud_provider")
+        local_provider = Mock(name="local_provider")
+
+        with (
+            patch.dict(
+                speech.os.environ,
+                {"TTS_PROVIDER_ORDER": "pyttsx3,elevenlabs"},
+                clear=True,
+            ),
+            patch.object(speech, "_elevenlabs_provider", None),
+            patch.object(speech, "_pyttsx3_provider", local_provider),
+            patch.object(speech, "is_connected", return_value=True),
+            patch.object(
+                speech,
+                "ensure_api_key_loaded",
+                return_value=True,
+            ),
+            patch.object(
+                speech,
+                "ElevenLabsProvider",
+                return_value=cloud_provider,
+            ),
+        ):
+            providers = speech.resolve_speech_providers()
+
+        self.assertEqual(providers, [local_provider, cloud_provider])
+
+    def test_omitted_cloud_provider_is_not_checked(self):
+        local_provider = Mock(name="local_provider")
+
+        with (
+            patch.dict(
+                speech.os.environ,
+                {"TTS_PROVIDER_ORDER": "pyttsx3"},
+                clear=True,
+            ),
+            patch.object(speech, "_pyttsx3_provider", local_provider),
+            patch.object(
+                speech,
+                "is_connected",
+                return_value=False,
+            ) as is_connected,
+            patch.object(speech, "ensure_api_key_loaded") as ensure_key,
+        ):
+            providers = speech.resolve_speech_providers()
+
+        self.assertEqual(providers, [local_provider])
+        is_connected.assert_not_called()
+        ensure_key.assert_not_called()
+
     def test_reload_config_discards_cached_cloud_provider(self):
         load_dotenv = Mock()
 
