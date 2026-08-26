@@ -1,7 +1,7 @@
 import socket
 import os
+from threading import Event
 
-from elevenlabs import play, set_api_key
 import requests
 from ai.providers.cancellable import CancellationScope
 import utils.dashboard_state as dashboard_state
@@ -50,8 +50,7 @@ def ensure_api_key_loaded():
         return True
 
     try:
-        eleven_labs_api_key = load_api_key()
-        set_api_key(eleven_labs_api_key)
+        load_api_key()
         _api_key_loaded = True
         return True
     except Exception as error:
@@ -196,12 +195,15 @@ def speak_response(response):
     if _speech_submitter is not None:
         return _speech_submitter(response)
 
-    if is_connected() and ensure_api_key_loaded():
+    provider = _resolve_elevenlabs_provider()
+
+    if provider is not None:
         try:
-            audio = _generate_elevenlabs_audio(response)
-            
-            play(audio)
-            return True
+            session = provider.create_session(response)
+            if session.play(Event()):
+                return True
+
+            return use_pyttsx3(response)
         except Exception as e:
             print(f"Error using Eleven Labs: {e}")
 

@@ -25,6 +25,30 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         submitter.assert_called_once_with("hello")
         record_response.assert_called_once_with("hello", source="tts")
 
+    def test_synchronous_speech_uses_resolved_cloud_provider(self):
+        provider = Mock(name="cloud_provider")
+        session = provider.create_session.return_value
+        session.play.return_value = True
+
+        with (
+            patch.object(speech, "_speech_submitter", None),
+            patch.object(
+                speech,
+                "_resolve_elevenlabs_provider",
+                return_value=provider,
+            ),
+            patch.object(
+                speech.dashboard_state,
+                "record_ai_response",
+            ),
+        ):
+            played = speech.speak_response("hello")
+
+        self.assertTrue(played)
+        provider.create_session.assert_called_once_with("hello")
+        cancel_event = session.play.call_args.args[0]
+        self.assertFalse(cancel_event.is_set())
+
     def test_offline_resolution_returns_local_provider_only(self):
         local_provider = Mock(name="local_provider")
 
