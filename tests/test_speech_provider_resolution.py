@@ -120,6 +120,28 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         is_connected.assert_not_called()
         ensure_key.assert_not_called()
 
+    def test_tts_availability_uses_resolved_providers(self):
+        provider = Mock(name="provider")
+        provider.is_available.return_value = True
+        legacy_tts = Mock()
+        legacy_tts.init.side_effect = RuntimeError("legacy path used")
+
+        with (
+            patch.dict(speech.os.environ, {}, clear=True),
+            patch.dict("sys.modules", {"pyttsx3": legacy_tts}),
+            patch.object(speech, "is_connected", return_value=False),
+            patch.object(
+                speech,
+                "resolve_speech_providers",
+                return_value=[provider],
+            ) as resolve_providers,
+        ):
+            available = speech.is_tts_available()
+
+        self.assertTrue(available)
+        resolve_providers.assert_called_once_with()
+        provider.is_available.assert_called_once_with()
+
     def test_reload_config_discards_cached_cloud_provider(self):
         load_dotenv = Mock()
 
@@ -130,9 +152,10 @@ class SpeechProviderResolutionTests(unittest.TestCase):
             patch.object(speech, "_elevenlabs_provider", Mock()),
             patch.object(
                 speech,
-                "ensure_api_key_loaded",
+                "is_tts_available",
                 return_value=True,
-            ),
+            ) as is_tts_available,
+            patch.object(speech, "ensure_api_key_loaded") as ensure_key,
         ):
             reloaded = speech.reload_config()
 
@@ -142,6 +165,8 @@ class SpeechProviderResolutionTests(unittest.TestCase):
 
         self.assertTrue(reloaded)
         load_dotenv.assert_called_once_with(override=True)
+        is_tts_available.assert_called_once_with()
+        ensure_key.assert_not_called()
 
     def test_invalid_cloud_key_disables_provider(self):
         response = Mock(status_code=401)

@@ -62,7 +62,11 @@ class TTSProviderRegistryTests(unittest.TestCase):
             "[TTS] Unknown provider 'unknown' ignored."
         )
 
-    def test_resolve_providers_skips_unconfigured_provider(self):
+    @patch("tts.registry.runtime_state.debug_print")
+    def test_resolve_providers_skips_unconfigured_provider(
+        self,
+        debug_print,
+    ):
         configured_provider = Mock(name="configured_provider")
 
         result = registry.resolve_providers(
@@ -74,6 +78,30 @@ class TTSProviderRegistryTests(unittest.TestCase):
         )
 
         self.assertEqual(result, [configured_provider])
+        debug_print.assert_called_once_with(
+            "[TTS] Provider 'unconfigured' is not configured; skipping."
+        )
+
+    @patch("tts.registry.runtime_state.debug_print")
+    def test_resolver_error_does_not_prevent_next_provider(
+        self,
+        debug_print,
+    ):
+        available_provider = Mock(name="available_provider")
+
+        result = registry.resolve_providers(
+            ["failing", "available"],
+            {
+                "failing": Mock(side_effect=RuntimeError("load failed")),
+                "available": Mock(return_value=available_provider),
+            },
+        )
+
+        self.assertEqual(result, [available_provider])
+        debug_print.assert_called_once_with(
+            "[TTS] Provider 'failing' could not be resolved: "
+            "load failed. Skipping."
+        )
 
 
 if __name__ == "__main__":

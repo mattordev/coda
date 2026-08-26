@@ -9,6 +9,7 @@ import utils.runtime_state as runtime_state
 from runtime.speech_playback import SpeechProvider
 from tts.elevenlabs_provider import ElevenLabsProvider
 from tts.pyttsx3_provider import Pyttsx3Provider
+from tts import registry as tts_registry
 from typing import Callable
 
 try:
@@ -71,7 +72,7 @@ def reload_config():
     _eleven_labs_disabled = False
     _elevenlabs_provider = None
 
-    return ensure_api_key_loaded()
+    return is_tts_available()
 
 
 def is_connected():
@@ -86,23 +87,18 @@ def is_connected():
 
 
 def is_tts_available():
-    """Return whether a configured cloud or local TTS path is available."""
-    has_eleven_labs = (
-        not _eleven_labs_disabled
-        and bool(os.getenv("ELEVENLABS_API_KEY", "").strip())
-        and is_connected()
-    )
-    if has_eleven_labs:
-        return True
+    """Return whether a configured TTS provider is available."""
+    for provider in resolve_speech_providers():
+        try:
+            if provider.is_available():
+                return True
+        except Exception as error:
+            runtime_state.debug_print(
+                f"[TTS] Provider {provider.name} availability check "
+                f"failed: {error}"
+            )
 
-    try:
-        import pyttsx3 as tts
-
-        speaker = tts.init()
-        speaker.stop()
-        return True
-    except Exception:
-        return False
+    return False
     
 def _generate_elevenlabs_audio(
     response: str,
@@ -150,21 +146,39 @@ def _generate_elevenlabs_audio(
     finally:
         close_session()
     
-def resolve_speech_providers() -> list[SpeechProvider]:
+def _resolve_elevenlabs_provider() -> SpeechProvider | None:
     global _elevenlabs_provider
-    
-    providers: list[SpeechProvider] = []
-    
-    if is_connected() and ensure_api_key_loaded():
-        if _elevenlabs_provider is None:
-            _elevenlabs_provider = ElevenLabsProvider(
-                _generate_elevenlabs_audio
-            )
-            
-        providers.append(_elevenlabs_provider)
-    
-    providers.append(_pyttsx3_provider)
-    return providers
+
+    if not is_connected() or not ensure_api_key_loaded():
+        return None
+
+    if _elevenlabs_provider is None:
+        _elevenlabs_provider = ElevenLabsProvider(
+            _generate_elevenlabs_audio
+        )
+
+    return _elevenlabs_provider
+
+
+def _resolve_pyttsx3_provider() -> SpeechProvider:
+    return _pyttsx3_provider
+
+
+_TTS_PROVIDER_RESOLVERS: tts_registry.ProviderResolvers = {
+    "elevenlabs": _resolve_elevenlabs_provider,
+    "pyttsx3": _resolve_pyttsx3_provider,
+}
+
+
+def resolve_speech_providers() -> list[SpeechProvider]:
+    provider_names = tts_registry.parse_provider_order(
+        os.getenv("TTS_PROVIDER_ORDER")
+    )
+
+    return tts_registry.resolve_providers(
+        provider_names,
+        _TTS_PROVIDER_RESOLVERS,
+    )
 
 def configure_speech_submitter(
     submitter: SpeechSubmitter | None,

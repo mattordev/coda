@@ -31,10 +31,23 @@ def resolve_providers(
             )
             continue
 
-        provider = resolver()
+        try:
+            provider = resolver()
+        except Exception as error:
+            runtime_state.debug_print(
+                f"[TTS] Provider '{provider_name}' could not be resolved: "
+                f"{error}. Skipping."
+            )
+            continue
 
-        if provider is not None:
-            providers.append(provider)
+        if provider is None:
+            runtime_state.debug_print(
+                f"[TTS] Provider '{provider_name}' is not configured; "
+                "skipping."
+            )
+            continue
+
+        providers.append(provider)
 
     return providers
 
