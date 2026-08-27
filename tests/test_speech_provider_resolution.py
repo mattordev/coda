@@ -49,25 +49,46 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         cancel_event = session.play.call_args.args[0]
         self.assertFalse(cancel_event.is_set())
 
-    def test_offline_resolution_returns_local_provider_only(self):
+    def test_offline_resolution_returns_local_providers(self):
+        pocket_provider = Mock(name="pocket_provider")
         local_provider = Mock(name="local_provider")
 
         with (
+            patch.object(
+                speech,
+                "_pockettts_provider",
+                pocket_provider,
+            ),
             patch.object(speech, "_pyttsx3_provider", local_provider),
             patch.object(speech, "is_connected", return_value=False),
             patch.object(speech, "ensure_api_key_loaded") as ensure_key,
         ):
             providers = speech.resolve_speech_providers()
 
-        self.assertEqual(providers, [local_provider])
+        self.assertEqual(providers, [pocket_provider, local_provider])
         ensure_key.assert_not_called()
 
     def test_online_resolution_reuses_ordered_providers(self):
         cloud_provider = Mock(name="cloud_provider")
+        pocket_provider = Mock(name="pocket_provider")
         local_provider = Mock(name="local_provider")
 
         with (
+            patch.dict(
+                speech.os.environ,
+                {
+                    "TTS_PROVIDER_ORDER": (
+                        "elevenlabs,pockettts,pyttsx3"
+                    )
+                },
+                clear=True,
+            ),
             patch.object(speech, "_elevenlabs_provider", None),
+            patch.object(
+                speech,
+                "_pockettts_provider",
+                pocket_provider,
+            ),
             patch.object(speech, "_pyttsx3_provider", local_provider),
             patch.object(speech, "is_connected", return_value=True),
             patch.object(
@@ -86,7 +107,7 @@ class SpeechProviderResolutionTests(unittest.TestCase):
 
         self.assertEqual(
             first_result,
-            [cloud_provider, local_provider],
+            [cloud_provider, pocket_provider, local_provider],
         )
         self.assertEqual(second_result, first_result)
         provider_type.assert_called_once_with(
@@ -168,12 +189,18 @@ class SpeechProviderResolutionTests(unittest.TestCase):
 
     def test_reload_config_discards_cached_cloud_provider(self):
         load_dotenv = Mock()
+        pocket_provider = Mock()
 
         with (
             patch.object(speech, "load_dotenv", load_dotenv),
             patch.object(speech, "_api_key_loaded", True),
             patch.object(speech, "_eleven_labs_disabled", True),
             patch.object(speech, "_elevenlabs_provider", Mock()),
+            patch.object(
+                speech,
+                "_pockettts_provider",
+                pocket_provider,
+            ),
             patch.object(
                 speech,
                 "is_tts_available",
@@ -186,11 +213,50 @@ class SpeechProviderResolutionTests(unittest.TestCase):
             self.assertFalse(speech._api_key_loaded)
             self.assertFalse(speech._eleven_labs_disabled)
             self.assertIsNone(speech._elevenlabs_provider)
+            self.assertIsNone(speech._pockettts_provider)
 
         self.assertTrue(reloaded)
+        pocket_provider.close.assert_called_once_with()
         load_dotenv.assert_called_once_with(override=True)
         is_tts_available.assert_called_once_with()
         ensure_key.assert_not_called()
+
+    def test_pocket_provider_is_created_once_and_reused(self):
+        pocket_provider = Mock(name="pocket_provider")
+
+        with (
+            patch.dict(
+                speech.os.environ,
+                {"TTS_PROVIDER_ORDER": "pockettts"},
+                clear=True,
+            ),
+            patch.object(speech, "_pockettts_provider", None),
+            patch.object(
+                speech,
+                "PocketTTSProvider",
+                return_value=pocket_provider,
+            ) as provider_type,
+        ):
+            first_result = speech.resolve_speech_providers()
+            second_result = speech.resolve_speech_providers()
+
+        self.assertEqual(first_result, [pocket_provider])
+        self.assertEqual(second_result, first_result)
+        provider_type.assert_called_once_with()
+
+    def test_shutdown_closes_and_discards_pocket_provider(self):
+        pocket_provider = Mock()
+
+        with patch.object(
+            speech,
+            "_pockettts_provider",
+            pocket_provider,
+        ):
+            speech.shutdown()
+
+            self.assertIsNone(speech._pockettts_provider)
+
+        pocket_provider.close.assert_called_once_with()
 
     def test_invalid_cloud_key_disables_provider(self):
         response = Mock(status_code=401)

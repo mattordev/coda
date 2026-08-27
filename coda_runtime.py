@@ -718,6 +718,7 @@ def shutdown_runtime(timeout_seconds=4.0):
 
     speech.configure_speech_submitter(None)
     stop_speech_thread(timeout_seconds=timeout_seconds)
+    speech.shutdown()
     stop_event_thread(timeout_seconds=timeout_seconds)
     stop_heartbeat_thread(timeout_seconds=timeout_seconds)
     return True

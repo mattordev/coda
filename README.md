@@ -343,6 +343,20 @@ documentation, see [LLM Providers](docs/providers.md).
 - `ELEVENLABS_API_KEY` enables ElevenLabs speech output.
 - `CODA_ELEVENLABS_TIMEOUT` bounds audio generation before CODA falls back to
   another speech provider (default: 30 seconds).
+- `TTS_PROVIDER_ORDER` sets the ordered speech fallback chain. The default is
+  `elevenlabs,pockettts,pyttsx3`.
+- `CODA_POCKET_TTS_LANGUAGE` selects PocketTTS's retained language model and
+  defaults to `english`.
+- `CODA_POCKET_TTS_VOICE` selects a built-in voice, local audio prompt or
+  exported voice state. Leaving it blank uses the language model's default
+  voice (Alba for English).
+
+PocketTTS runs on CPU and streams speech as it is generated. Its model and
+selected voice are loaded once, then reused until `debug reload` or application
+shutdown. The first use downloads the required model and voice assets; after
+they are cached, PocketTTS can operate without a network connection. Playback
+stops immediately when cancelled while remaining synthesis output is discarded
+before the next response begins.
 
 The remaining provider, privacy, speech and model options are documented in
 [`docs/.env.example`](docs/.env.example).

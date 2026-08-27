@@ -8,6 +8,7 @@ import utils.dashboard_state as dashboard_state
 import utils.runtime_state as runtime_state
 from runtime.speech_playback import SpeechProvider
 from tts.elevenlabs_provider import ElevenLabsProvider
+from tts.pockettts_provider import PocketTTSProvider
 from tts.pyttsx3_provider import Pyttsx3Provider
 from tts import registry as tts_registry
 from typing import Callable
@@ -20,6 +21,7 @@ except ImportError:
 _api_key_loaded = False
 _eleven_labs_disabled = False
 _elevenlabs_provider: ElevenLabsProvider | None = None
+_pockettts_provider: PocketTTSProvider | None = None
 _pyttsx3_provider = Pyttsx3Provider()
 
 SpeechSubmitter = Callable[[str], bool]
@@ -63,6 +65,7 @@ def reload_config():
     global _api_key_loaded
     global _eleven_labs_disabled
     global _elevenlabs_provider
+    global _pockettts_provider
 
     if load_dotenv is not None:
         load_dotenv(override=True)
@@ -71,7 +74,20 @@ def reload_config():
     _eleven_labs_disabled = False
     _elevenlabs_provider = None
 
+    if _pockettts_provider is not None:
+        _pockettts_provider.close()
+    _pockettts_provider = None
+
     return is_tts_available()
+
+
+def shutdown() -> None:
+    """Release retained TTS provider state during application shutdown."""
+    global _pockettts_provider
+
+    if _pockettts_provider is not None:
+        _pockettts_provider.close()
+        _pockettts_provider = None
 
 
 def is_connected():
@@ -163,8 +179,18 @@ def _resolve_pyttsx3_provider() -> SpeechProvider:
     return _pyttsx3_provider
 
 
+def _resolve_pockettts_provider() -> SpeechProvider:
+    global _pockettts_provider
+
+    if _pockettts_provider is None:
+        _pockettts_provider = PocketTTSProvider()
+
+    return _pockettts_provider
+
+
 _TTS_PROVIDER_RESOLVERS: tts_registry.ProviderResolvers = {
     "elevenlabs": _resolve_elevenlabs_provider,
+    "pockettts": _resolve_pockettts_provider,
     "pyttsx3": _resolve_pyttsx3_provider,
 }
 
