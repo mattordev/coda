@@ -16,6 +16,7 @@ import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.dashboard_state as dashboard_state
+from utils.console import configure_stdout_encoding
 from colorama import Fore, init
 
 import semantic_version
@@ -56,7 +57,6 @@ shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
 latest_request_lock = threading.Lock()
 latest_request_id = None
-
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -856,6 +856,7 @@ def _run_runtime():
 
 def main():
     """Run CODA and guarantee runtime cleanup on every exit path."""
+    configure_stdout_encoding()
     shutdown_started.clear()
 
     try:
