@@ -358,6 +358,14 @@ they are cached, PocketTTS can operate without a network connection. Playback
 stops immediately when cancelled while remaining synthesis output is discarded
 before the next response begins.
 
+CODA's provider-independent spoken-text normaliser targets English with
+en-GB-oriented phrasing. It expands supported numbers, percentages, GBP and
+USD amounts, 24-hour times, English month-name dates, system initialisms and
+common computing units. It deliberately leaves versions, IP addresses, URLs,
+filenames, paths and ambiguous numeric dates unchanged. The original response
+remains available for display and conversation history; #108 tracks applying
+the separate spoken copy consistently across provider routing and fallback.
+
 The remaining provider, privacy, speech and model options are documented in
 [`docs/.env.example`](docs/.env.example).
 
