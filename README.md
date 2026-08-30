@@ -84,7 +84,8 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-On Ubuntu, install the audio prerequisites first:
+On Ubuntu, install the PortAudio and FLAC prerequisites before the Python
+dependencies so PyAudio can build against the system audio libraries:
 
 ```text
 sudo apt-get update
