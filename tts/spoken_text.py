@@ -12,15 +12,17 @@ _CURRENCY_AMOUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?"
 
 _INITIALISMS = {
     "API": "A. P. I.",
-    "CPU": "C. P. U.",
-    "GPU": "G. P. U.",
+    "CPU": "see pee you",
+    "GPU": "gee pee you",
     "RAM": "ram",
     "URL": "U. R. L.",
 }
+_PHONETIC_INITIALISMS = {"CPU", "GPU"}
 _INITIALISM_PATTERN = re.compile(
     r"(?<![\w./\\:\-?&=#%@])"
     r"(?:API|CPU|GPU|RAM|URL)"
-    r"(?![\w/\\:\-?&=#%@]|\.\w)"
+    r"(?![\w/\\:\-?&=#%@]|\.\w)",
+    re.IGNORECASE,
 )
 
 _CURRENCIES = {
@@ -153,10 +155,26 @@ def _normalise_number(match: re.Match[str]) -> str:
     return num2words(match.group().replace(",", ""), lang="en")
 
 
+def _normalise_initialism(match: re.Match[str]) -> str:
+    initialism = match.group().upper()
+    spoken = _INITIALISMS[initialism]
+
+    if initialism not in _PHONETIC_INITIALISMS:
+        return spoken
+
+    preceding_text = match.string[:match.start()].rstrip()
+    preceding_text = preceding_text.rstrip("\"'([")
+
+    if not preceding_text or preceding_text[-1] in ".!?":
+        return spoken[0].upper() + spoken[1:]
+
+    return spoken
+
+
 def normalise_spoken_text(text: str) -> str:
     """Return an en-GB-oriented TTS copy without modifying the source."""
     spoken_text = _INITIALISM_PATTERN.sub(
-        lambda match: _INITIALISMS[match.group()],
+        _normalise_initialism,
         text,
     )
     transformations = (

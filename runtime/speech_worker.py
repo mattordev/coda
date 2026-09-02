@@ -1,5 +1,7 @@
 from threading import Event, Thread
 from typing import Callable
+from tts.spoken_text import normalise_spoken_text
+from tts.segmentation import split_spoken_text
 
 import utils.runtime_state as runtime_state
 
@@ -18,6 +20,8 @@ from runtime.speech_playback import (
 
 
 ProviderResolver = Callable[[], list[SpeechProvider]]
+TextNormaliser = Callable[[str], str]
+TextSegmenter = Callable[[str], list[str]]
 
 
 class SpeechTaskProcessor:
@@ -27,66 +31,90 @@ class SpeechTaskProcessor:
         self,
         resolve_providers: ProviderResolver,
         playback_controller: SpeechPlaybackController,
+        normalise_text: TextNormaliser = normalise_spoken_text,
+        segment_text: TextSegmenter = split_spoken_text,
     ) -> None:
         self._resolve_providers = resolve_providers
         self._playback_controller = playback_controller
+        self._normalise_text = normalise_text
+        self._segment_text = segment_text
         
     def process(self, task: SpeechTask) -> WorkerEvent:
         if task.cancel_event.is_set():
             return self._event(task, WorkerEventType.CANCELLED)
-        
-        
-        errors = []
-        
-        for provider_index, provider in enumerate(self._resolve_providers()):
-            if task.cancel_event.is_set():
-                return self._event(task, WorkerEventType.CANCELLED)
-            
-            
-            try:
-                if not provider.is_available():
+
+        spoken_text = self._normalise_text(task.text)
+
+        if task.cancel_event.is_set():
+            return self._event(task, WorkerEventType.CANCELLED)
+
+        segments = self._segment_text(spoken_text)
+
+        if not segments:
+            return self._event(task, WorkerEventType.COMPLETED)
+
+        providers = self._resolve_providers()
+        provider_start_index = 0
+
+        for segment in segments:
+            errors = []
+            segment_completed = False
+
+            for provider_index in range(provider_start_index, len(providers)):
+                if task.cancel_event.is_set():
+                    return self._event(task, WorkerEventType.CANCELLED)
+
+                provider = providers[provider_index]
+
+                try:
+                    if not provider.is_available():
+                        continue
+
+                    played = self._playback_controller.play(
+                        provider,
+                        segment,
+                        task.cancel_event,
+                    )
+                except Exception as error:
+                    provider_error = f"{provider.name}: {error}"
+                    errors.append(provider_error)
+                    runtime_state.debug_print(
+                        f"[TTS] {provider_error}. Trying next provider."
+                    )
                     continue
-                
-                played = self._playback_controller.play(
-                    provider,
-                    task.text,
-                    task.cancel_event,
-                )
-            except Exception as error:
-                provider_error = f"{provider.name}: {error}"
+
+                if task.cancel_event.is_set():
+                    return self._event(task, WorkerEventType.CANCELLED)
+
+                if played:
+                    if provider_index > provider_start_index:
+                        runtime_state.debug_print(
+                            f"[TTS] Fallback provider {provider.name} succeeded."
+                        )
+
+                    provider_start_index = provider_index
+                    segment_completed = True
+                    break
+
+                provider_error = f"{provider.name}: playback did not complete."
                 errors.append(provider_error)
                 runtime_state.debug_print(
-                    f"[TTS] {provider_error}. Trying next provider."
+                    f"[TTS] {provider_error} Trying next provider."
                 )
-                continue
-            
-            if task.cancel_event.is_set():
-                return self._event(task, WorkerEventType.CANCELLED)
-            
-            if played:
-                if provider_index > 0:
-                    runtime_state.debug_print(
-                        f"[TTS] Fallback provider {provider.name} succeeded."
-                    )
-                return self._event(task, WorkerEventType.COMPLETED)
-            
-            provider_error = f"{provider.name}: playback did not complete."
-            errors.append(provider_error)
-            runtime_state.debug_print(
-                f"[TTS] {provider_error} Trying next provider."
-            )
-            
-        error_message = (
-            "; ".join(errors)
-            if errors
-            else "No TTS provider is available."
-        )
-        
-        return self._event(
-            task,
-            WorkerEventType.FAILED,
-            error=error_message,
-        )
+
+            if not segment_completed:
+                error_message = (
+                    "; ".join(errors)
+                    if errors
+                    else "No TTS provider is available."
+                )
+                return self._event(
+                    task,
+                    WorkerEventType.FAILED,
+                    error=error_message,
+                )
+
+        return self._event(task, WorkerEventType.COMPLETED)
     
     def stop(self, expected_cancel_event: Event | None = None) -> bool:
         """Stop the currently active playback session."""

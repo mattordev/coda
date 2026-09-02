@@ -818,12 +818,12 @@ def _run_runtime():
                 start_voice_thread()
                 continue
 
-            if not _has_wakeword(normalized_manual_message, wakewords):
+            if not _has_wakeword(manual_message, wakewords):
                 print("[MANUAL] Wakeword not detected. Prefix your request with a wakeword.")
                 continue
 
             command_message = _strip_text_before_wakeword(
-                normalized_manual_message,
+                manual_message,
                 wakewords,
             )
 

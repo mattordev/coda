@@ -283,7 +283,7 @@ def run(
                 continue
 
             speech_text = speech.strip()
-            message = speech.lower()
+            message = speech_text
             follow_up_active = capture_state.follow_up_active
             follow_up_opened_after_capture = (
                 not follow_up_active

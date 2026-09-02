@@ -919,7 +919,7 @@ class RuntimeExecutionTests(unittest.TestCase):
             patch.object(coda_runtime.command, "run") as run_command,
             patch(
                 "builtins.input",
-                side_effect=["coda tell me something", "quit"],
+                side_effect=["CODA say CPU Usage", "quit"],
             ),
             patch("builtins.print"),
         ):
@@ -929,7 +929,7 @@ class RuntimeExecutionTests(unittest.TestCase):
         submit_request.assert_called_once()
         submitted_request = submit_request.call_args.args[0]
         self.assertIsInstance(submitted_request, RuntimeRequest)
-        self.assertEqual(submitted_request.message, "tell me something")
+        self.assertEqual(submitted_request.message, "say CPU Usage")
         self.assertEqual(submitted_request.source, InputSource.MANUAL)
         self.assertFalse(submitted_request.replace_active)
         

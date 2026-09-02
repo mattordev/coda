@@ -94,7 +94,7 @@ class VoiceRecognizerTests(unittest.TestCase):
         def transcribe_audio(_recognizer, _audio):
             follow_up_state.close()
             stop_event.set()
-            return "connected", "test provider"
+            return "Connected to API", "test provider"
 
         with (
             patch.object(
@@ -136,10 +136,10 @@ class VoiceRecognizerTests(unittest.TestCase):
         queued_request = request_queue.get(timeout=0.1)
 
         self.assertIsNotNone(queued_request)
-        self.assertEqual(queued_request.message, "connected")
+        self.assertEqual(queued_request.message, "Connected to API")
         self.assertEqual(queued_request.source, InputSource.VOICE)
         record_user_message.assert_called_once_with(
-            "connected",
+            "Connected to API",
             source="test provider",
             tags=["follow_up"],
         )

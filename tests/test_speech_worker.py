@@ -35,9 +35,11 @@ class SpeechTaskProcessorTests(unittest.TestCase):
         task.cancel_event.set()
         resolve_providers = Mock()
         controller = Mock(spec=SpeechPlaybackController)
+        normaliser = Mock()
         processor = SpeechTaskProcessor(
             resolve_providers,
             controller,
+            normalise_text=normaliser,
         )
 
         event = processor.process(task)
@@ -47,6 +49,7 @@ class SpeechTaskProcessorTests(unittest.TestCase):
         self.assertEqual(event.request_id, task.request_id)
         resolve_providers.assert_not_called()
         controller.play.assert_not_called()
+        normaliser.assert_not_called()
 
     def test_uses_first_available_successful_provider(self):
         unavailable = FakeProvider("unavailable", available=False)
@@ -91,6 +94,148 @@ class SpeechTaskProcessorTests(unittest.TestCase):
         )
         debug_print.assert_any_call(
             "[TTS] Fallback provider second succeeded."
+        )
+
+    def test_normalises_text_once_and_reuses_it_for_fallback(self):
+        first = FakeProvider("first")
+        second = FakeProvider("second")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.side_effect = [RuntimeError("failed"), True]
+        spoken_text = "See pee you usage is thirty-seven percent."
+        normaliser = Mock(return_value=spoken_text)
+        task = SpeechTask(
+            request_id="request-1",
+            text="CPU usage is 37 percent.",
+            cancel_event=threading.Event(),
+        )
+        processor = SpeechTaskProcessor(
+            lambda: [first, second],
+            controller,
+            normalise_text=normaliser,
+        )
+
+        event = processor.process(task)
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        normaliser.assert_called_once_with("CPU usage is 37 percent.")
+        self.assertEqual(
+            [call.args[1] for call in controller.play.call_args_list],
+            [spoken_text, spoken_text],
+        )
+        self.assertEqual(task.text, "CPU usage is 37 percent.")
+
+    def test_processes_spoken_segments_in_order(self):
+        provider = FakeProvider("primary")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.return_value = True
+        segmenter = Mock(return_value=["First sentence.", "Second sentence."])
+        task = self._task()
+        processor = SpeechTaskProcessor(
+            lambda: [provider],
+            controller,
+            segment_text=segmenter,
+        )
+
+        event = processor.process(task)
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        segmenter.assert_called_once_with(task.text)
+        self.assertEqual(
+            [call.args[1] for call in controller.play.call_args_list],
+            ["First sentence.", "Second sentence."],
+        )
+
+    def test_phonetic_initialism_preserves_sentence_boundary(self):
+        provider = FakeProvider("primary")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.return_value = True
+        task = SpeechTask(
+            request_id="request-1",
+            text=(
+                "CODA is running normally. CPU usage is 37 percent, "
+                "GPU usage is 12.5 percent."
+            ),
+            cancel_event=threading.Event(),
+        )
+        processor = SpeechTaskProcessor(
+            lambda: [provider],
+            controller,
+        )
+
+        event = processor.process(task)
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        self.assertEqual(
+            [call.args[1] for call in controller.play.call_args_list],
+            [
+                "CODA is running normally.",
+                (
+                    "See pee you usage is thirty-seven percent, "
+                    "gee pee you usage is twelve point five percent."
+                ),
+            ],
+        )
+
+    def test_failure_falls_back_only_for_incomplete_segment(self):
+        primary = FakeProvider("primary")
+        fallback = FakeProvider("fallback")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.side_effect = [
+            True,
+            RuntimeError("generation failed"),
+            True,
+            True,
+        ]
+        processor = SpeechTaskProcessor(
+            lambda: [primary, fallback],
+            controller,
+            segment_text=lambda _text: ["First.", "Second.", "Third."],
+        )
+
+        event = processor.process(self._task())
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        self.assertEqual(
+            [
+                (call.args[0], call.args[1])
+                for call in controller.play.call_args_list
+            ],
+            [
+                (primary, "First."),
+                (primary, "Second."),
+                (fallback, "Second."),
+                (fallback, "Third."),
+            ],
+        )
+
+    def test_cancellation_on_later_segment_does_not_fall_back(self):
+        primary = FakeProvider("primary")
+        fallback = FakeProvider("fallback")
+        controller = Mock(spec=SpeechPlaybackController)
+        task = self._task()
+
+        def play(_provider, segment, _cancel_event):
+            if segment == "Second.":
+                task.cancel_event.set()
+                return False
+            return True
+
+        controller.play.side_effect = play
+        processor = SpeechTaskProcessor(
+            lambda: [primary, fallback],
+            controller,
+            segment_text=lambda _text: ["First.", "Second.", "Third."],
+        )
+
+        event = processor.process(task)
+
+        self.assertEqual(event.event_type, WorkerEventType.CANCELLED)
+        self.assertEqual(
+            [
+                (call.args[0], call.args[1])
+                for call in controller.play.call_args_list
+            ],
+            [(primary, "First."), (primary, "Second.")],
         )
 
     def test_cancellation_during_playback_prevents_fallback(self):

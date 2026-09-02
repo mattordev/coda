@@ -8,11 +8,11 @@ class SpokenTextNormalisationTests(unittest.TestCase):
         cases = (
             (
                 "CPU usage is 37 percent.",
-                "C. P. U. usage is thirty-seven percent.",
+                "See pee you usage is thirty-seven percent.",
             ),
             (
                 "GPU usage is 12.5 percent.",
-                "G. P. U. usage is twelve point five percent.",
+                "Gee pee you usage is twelve point five percent.",
             ),
             (
                 "Memory usage is 6.4 gigabytes.",
@@ -52,6 +52,13 @@ class SpokenTextNormalisationTests(unittest.TestCase):
     def test_normalises_system_initialisms(self):
         cases = (
             ("The API is ready.", "The A. P. I. is ready."),
+            ("cpu usage is normal.", "See pee you usage is normal."),
+            ("The gpu is ready.", "The gee pee you is ready."),
+            ("Check the CPU.", "Check the see pee you."),
+            (
+                "CPU, GPU usage is normal.",
+                "See pee you, gee pee you usage is normal.",
+            ),
             ("RAM is available.", "ram is available."),
             ("Open the URL now.", "Open the U. R. L. now."),
         )
@@ -70,7 +77,10 @@ class SpokenTextNormalisationTests(unittest.TestCase):
             ("The model uses 512 MB.", "The model uses five hundred and twelve megabytes."),
             ("Latency is 1 ms.", "Latency is one millisecond."),
             ("Latency is 218 ms.", "Latency is two hundred and eighteen milliseconds."),
-            ("The CPU runs at 3.6 GHz.", "The C. P. U. runs at three point six gigahertz."),
+            (
+                "The CPU runs at 3.6 GHz.",
+                "The see pee you runs at three point six gigahertz.",
+            ),
         )
 
         for original, expected in cases:
@@ -113,11 +123,11 @@ class SpokenTextNormalisationTests(unittest.TestCase):
         cases = (
             (
                 "CPU usage is 37%.",
-                "C. P. U. usage is thirty-seven percent.",
+                "See pee you usage is thirty-seven percent.",
             ),
             (
                 "GPU usage is 12.5 %.",
-                "G. P. U. usage is twelve point five percent.",
+                "Gee pee you usage is twelve point five percent.",
             ),
         )
 
