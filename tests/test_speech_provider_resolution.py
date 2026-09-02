@@ -54,6 +54,11 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         local_provider = Mock(name="local_provider")
 
         with (
+            patch.dict(
+                speech.os.environ,
+                {"TTS_PROVIDER_ORDER": "pockettts,pyttsx3"},
+                clear=True,
+            ),
             patch.object(
                 speech,
                 "_pockettts_provider",
@@ -220,6 +225,64 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         load_dotenv.assert_called_once_with(override=True)
         is_tts_available.assert_called_once_with()
         ensure_key.assert_not_called()
+
+    def test_reload_recreates_pocket_provider_with_updated_settings(self):
+        created_providers = []
+        captured_settings = []
+
+        def create_provider():
+            captured_settings.append(
+                (
+                    speech.os.environ["CODA_POCKET_TTS_LANGUAGE"],
+                    speech.os.environ["CODA_POCKET_TTS_VOICE"],
+                )
+            )
+            provider = Mock(name=f"pocket_provider_{len(created_providers)}")
+            provider.name = "pockettts"
+            provider.is_available.return_value = True
+            created_providers.append(provider)
+            return provider
+
+        def reload_environment(*, override):
+            self.assertTrue(override)
+            speech.os.environ["CODA_POCKET_TTS_LANGUAGE"] = "german_24l"
+            speech.os.environ["CODA_POCKET_TTS_VOICE"] = "new-voice.wav"
+
+        with (
+            patch.dict(
+                speech.os.environ,
+                {
+                    "TTS_PROVIDER_ORDER": "pockettts",
+                    "CODA_POCKET_TTS_LANGUAGE": "english",
+                    "CODA_POCKET_TTS_VOICE": "alba",
+                },
+                clear=True,
+            ),
+            patch.object(speech, "_pockettts_provider", None),
+            patch.object(
+                speech,
+                "PocketTTSProvider",
+                side_effect=create_provider,
+            ),
+            patch.object(
+                speech,
+                "load_dotenv",
+                side_effect=reload_environment,
+            ),
+        ):
+            initial = speech.resolve_speech_providers()[0]
+            self.assertTrue(speech.reload_config())
+            reloaded = speech._pockettts_provider
+
+        self.assertIsNot(initial, reloaded)
+        initial.close.assert_called_once_with()
+        self.assertEqual(
+            captured_settings,
+            [
+                ("english", "alba"),
+                ("german_24l", "new-voice.wav"),
+            ],
+        )
 
     def test_pocket_provider_is_created_once_and_reused(self):
         pocket_provider = Mock(name="pocket_provider")

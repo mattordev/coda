@@ -22,6 +22,66 @@ class FakeProvider:
         return self._available
 
 
+class RecordingStreamingSession:
+    def __init__(self, text, sink, pause_after_first=False):
+        self._text = text
+        self._sink = sink
+        self._pause_after_first = pause_after_first
+        self._stop_event = threading.Event()
+        self._release_stream = threading.Event()
+        self.first_frame_played = threading.Event()
+        self._playing = False
+
+    def play(self, cancel_event):
+        self._playing = True
+
+        try:
+            for index, frame in enumerate((b"first", b"second")):
+                if cancel_event.is_set() or self._stop_event.is_set():
+                    return False
+
+                self._sink.append((self._text, frame))
+
+                if index == 0:
+                    self.first_frame_played.set()
+
+                    if self._pause_after_first:
+                        self._release_stream.wait(timeout=1.0)
+
+            return not cancel_event.is_set() and not self._stop_event.is_set()
+        finally:
+            self._playing = False
+
+    def stop(self):
+        self._stop_event.set()
+        self._release_stream.set()
+
+    def is_playing(self):
+        return self._playing
+
+
+class RecordingStreamingProvider:
+    name = "streaming"
+
+    def __init__(self):
+        self.played_frames = []
+        self.sessions = []
+        self.session_created = threading.Event()
+
+    def is_available(self):
+        return True
+
+    def create_session(self, text):
+        session = RecordingStreamingSession(
+            text,
+            self.played_frames,
+            pause_after_first=(text == "cancel this response"),
+        )
+        self.sessions.append(session)
+        self.session_created.set()
+        return session
+
+
 class SpeechTaskProcessorTests(unittest.TestCase):
     def _task(self):
         return SpeechTask(
@@ -94,6 +154,66 @@ class SpeechTaskProcessorTests(unittest.TestCase):
         )
         debug_print.assert_any_call(
             "[TTS] Fallback provider second succeeded."
+        )
+
+    def test_incomplete_playback_without_cancellation_falls_back(self):
+        first = FakeProvider("first")
+        second = FakeProvider("second")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.side_effect = [False, True]
+        task = self._task()
+        processor = SpeechTaskProcessor(
+            lambda: [first, second],
+            controller,
+        )
+
+        event = processor.process(task)
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        self.assertFalse(task.cancel_event.is_set())
+        self.assertEqual(
+            [call.args[0] for call in controller.play.call_args_list],
+            [first, second],
+        )
+
+    def test_availability_error_falls_back_to_next_provider(self):
+        first = Mock(name="first_provider")
+        first.name = "first"
+        first.is_available.side_effect = RuntimeError("check failed")
+        second = FakeProvider("second")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.return_value = True
+        processor = SpeechTaskProcessor(
+            lambda: [first, second],
+            controller,
+        )
+
+        event = processor.process(self._task())
+
+        self.assertEqual(event.event_type, WorkerEventType.COMPLETED)
+        controller.play.assert_called_once()
+        self.assertIs(controller.play.call_args.args[0], second)
+
+    def test_all_provider_failures_report_ordered_errors(self):
+        first = FakeProvider("first")
+        second = FakeProvider("second")
+        controller = Mock(spec=SpeechPlaybackController)
+        controller.play.side_effect = [
+            RuntimeError("generation failed"),
+            False,
+        ]
+        processor = SpeechTaskProcessor(
+            lambda: [first, second],
+            controller,
+        )
+
+        event = processor.process(self._task())
+
+        self.assertEqual(event.event_type, WorkerEventType.FAILED)
+        self.assertEqual(
+            event.error,
+            "first: generation failed; "
+            "second: playback did not complete.",
         )
 
     def test_normalises_text_once_and_reuses_it_for_fallback(self):
@@ -407,6 +527,75 @@ class SpeechWorkerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(processor.process.call_count, 2)
+        self.assertFalse(worker.is_alive())
+
+    def test_stream_cancellation_does_not_leak_into_next_request(self):
+        queues = RuntimeQueues()
+        shutdown_event = threading.Event()
+        provider = RecordingStreamingProvider()
+        fallback = Mock(name="fallback_provider")
+        fallback.name = "fallback"
+        fallback.is_available.return_value = True
+        controller = SpeechPlaybackController()
+        processor = SpeechTaskProcessor(
+            lambda: [provider, fallback],
+            controller,
+            normalise_text=lambda text: text,
+            segment_text=lambda text: [text],
+        )
+        worker = SpeechWorker(
+            queues.speech,
+            queues.events,
+            processor,
+            shutdown_event,
+        )
+        cancelled_task = SpeechTask(
+            request_id="request-1",
+            text="cancel this response",
+            cancel_event=threading.Event(),
+        )
+        next_task = SpeechTask(
+            request_id="request-2",
+            text="play this response",
+            cancel_event=threading.Event(),
+        )
+        worker.start()
+
+        try:
+            queues.speech.put(cancelled_task)
+            first_started = queues.events.get(timeout=1.0)
+            self.assertEqual(first_started.event_type, WorkerEventType.STARTED)
+
+            self.assertTrue(provider.session_created.wait(timeout=1.0))
+            first_session = provider.sessions[0]
+            self.assertTrue(first_session.first_frame_played.wait(timeout=1.0))
+            cancel_event = queues.speech.cancel_current()
+            self.assertIs(cancel_event, cancelled_task.cancel_event)
+            self.assertTrue(
+                processor.stop(expected_cancel_event=cancel_event)
+            )
+            cancelled = queues.events.get(timeout=1.0)
+
+            queues.speech.put(next_task)
+            second_started = queues.events.get(timeout=1.0)
+            completed = queues.events.get(timeout=1.0)
+        finally:
+            worker.stop(timeout=1.0)
+
+        self.assertEqual(cancelled.event_type, WorkerEventType.CANCELLED)
+        self.assertEqual(second_started.event_type, WorkerEventType.STARTED)
+        self.assertEqual(completed.event_type, WorkerEventType.COMPLETED)
+        self.assertEqual(len(provider.sessions), 2)
+        self.assertEqual(
+            provider.played_frames,
+            [
+                ("cancel this response", b"first"),
+                ("play this response", b"first"),
+                ("play this response", b"second"),
+            ],
+        )
+        fallback.create_session.assert_not_called()
+        self.assertFalse(controller.is_playing())
         self.assertFalse(worker.is_alive())
 
     def test_worker_cancels_task_during_provider_resolution(self):
