@@ -1,5 +1,28 @@
 # Third-party notices
 
+## Pocket TTS 3.0.2
+
+CODA integrates the Pocket TTS Python implementation distributed by Kyutai
+under the MIT licence:
+
+https://github.com/kyutai-labs/pocket-tts
+
+Pocket model and voice assets are downloaded at runtime and are not
+redistributed with CODA. The gated `kyutai/pocket-tts` voice-cloning weights
+and anonymous `kyutai/pocket-tts-without-voice-cloning` weights are published
+under CC BY 4.0 with additional prohibited-use conditions recorded on their
+model cards:
+
+https://huggingface.co/kyutai/pocket-tts
+
+https://huggingface.co/kyutai/pocket-tts-without-voice-cloning
+
+The default Alba MacKenna voice recordings are published under CC BY 4.0.
+Other voices in the upstream repository may use different licences, including
+CC0, CC BY 4.0 and CC BY-NC 4.0:
+
+https://huggingface.co/kyutai/tts-voices
+
 ## SpeechRecognition 3.17.0
 
 CODA's `utils/phrase_listener.py` adapts the voice-activity-detection loop from
