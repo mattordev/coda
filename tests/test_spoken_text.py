@@ -187,7 +187,6 @@ class SpokenTextNormalisationTests(unittest.TestCase):
 
     def test_preserves_ambiguous_dotted_and_path_tokens(self):
         unchanged_text = (
-            "CODA version v1.4.2 is ready.",
             "Service 192.168.1.42 is available.",
             "Visit https://openrouter.ai.",
             "Visit https://example.com/API/v1/report?id=37.",
@@ -201,6 +200,26 @@ class SpokenTextNormalisationTests(unittest.TestCase):
         for text in unchanged_text:
             with self.subTest(text=text):
                 self.assertEqual(normalise_spoken_text(text), text)
+
+    def test_normalises_explicit_version_tokens(self):
+        cases = (
+            (
+                "CODA version 1.4.0 is ready.",
+                "CODA version one point four point zero is ready.",
+            ),
+            (
+                "CODA version v1.4.2 is ready.",
+                "CODA version one point four point two is ready.",
+            ),
+            (
+                "Upgrade to v2.0.",
+                "Upgrade to version two point zero.",
+            ),
+        )
+
+        for original, expected in cases:
+            with self.subTest(original=original):
+                self.assertEqual(normalise_spoken_text(original), expected)
 
     def test_normalisation_is_idempotent(self):
         text = (

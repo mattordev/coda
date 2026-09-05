@@ -70,6 +70,14 @@ _DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_VERSION_PATTERN = re.compile(
+    r"(?<![\w./\\:\-?&=#%@])"
+    r"(?P<label>version\s+v?|v)"
+    r"(?P<version>\d+(?:\.\d+){1,3})"
+    r"(?![\w/\\:\-?&=#%@]|\.\w)",
+    re.IGNORECASE,
+)
+
 _NUMBER_PATTERN = re.compile(
     r"(?<![\w./\\:\-?&=#%@,])"
     rf"{_NUMBER_TOKEN}"
@@ -155,6 +163,14 @@ def _normalise_number(match: re.Match[str]) -> str:
     return num2words(match.group().replace(",", ""), lang="en")
 
 
+def _normalise_version(match: re.Match[str]) -> str:
+    spoken_parts = (
+        num2words(int(part), lang="en")
+        for part in match.group("version").split(".")
+    )
+    return f"version {' point '.join(spoken_parts)}"
+
+
 def _normalise_initialism(match: re.Match[str]) -> str:
     initialism = match.group().upper()
     spoken = _INITIALISMS[initialism]
@@ -180,6 +196,7 @@ def normalise_spoken_text(text: str) -> str:
     transformations = (
         (_DATE_PATTERN, _normalise_date),
         (_TIME_PATTERN, _normalise_time),
+        (_VERSION_PATTERN, _normalise_version),
         (_CURRENCY_PATTERN, _normalise_currency),
         (_PERCENTAGE_PATTERN, _normalise_percentage),
         (_MEASUREMENT_PATTERN, _normalise_measurement),

@@ -379,11 +379,12 @@ and discarded before the next response begins.
 
 CODA's provider-independent spoken-text normaliser targets English with
 en-GB-oriented phrasing. It expands supported numbers, percentages, GBP and
-USD amounts, 24-hour times, English month-name dates, system initialisms and
-common computing units. It deliberately leaves versions, IP addresses, URLs,
-filenames, paths and ambiguous numeric dates unchanged. The original response
-remains available for display and conversation history. Every configured
-provider receives the same spoken copy during routing and fallback.
+USD amounts, 24-hour times, English month-name dates, explicit version tokens,
+system initialisms and common computing units. It deliberately leaves IP
+addresses, URLs, filenames, paths, arbitrary dotted text and ambiguous numeric
+dates unchanged. The original response remains available for display and
+conversation history. Every configured provider receives the same spoken copy
+during routing and fallback.
 
 See [Local Text-to-Speech](docs/local-tts.md) for installation, provider order,
 asset caching, offline and privacy behaviour, licences, cancellation semantics,
