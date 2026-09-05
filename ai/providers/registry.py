@@ -6,8 +6,8 @@ from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
 
 _SUPPORTED_PROVIDERS: dict[str, Provider] = {
-    "openai": OpenAIProvider.instance(),
-    "openrouter": OpenRouterProvider.instance()
+    "openai": OpenAIProvider(),
+    "openrouter": OpenRouterProvider()
     # "gemini": {
     #     "type": "cloud",
     #     "api_key_env": "GEMINI_API_KEY",
@@ -57,7 +57,7 @@ def is_provider_configured(provider_name: str) -> bool:
     if provider.data.get("type") == "local":
         return True
 
-    api_key_env = provider.data.get("api_key_env")
+    api_key_env = provider.data.get("api_key_env_name")
 
     if not api_key_env:
         return False
@@ -94,7 +94,7 @@ def get_provider_api_key_env(provider_name: str) -> str | None:
     if provider is None:
         return None
 
-    return provider.data.get("api_key_env")
+    return provider.data.get("api_key_env_name")
 
 
 def get_provider_model_env(provider_name: str) -> str | None:

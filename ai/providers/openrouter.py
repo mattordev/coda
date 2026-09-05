@@ -11,16 +11,12 @@ class OpenRouterProvider(OpenAIProvider):
             "api_key_env": "OPENROUTER_API_KEY",
             "model_env": "CODA_OPENROUTER_MODEL",
             "model_required": True,
+            "default_base_url": "https://openrouter.ai/api/v1"
         }
-
-    @staticmethod
-    def get_base_url() -> str:
-        return "https://openrouter.ai/api/v1"
     
     @staticmethod
     def _get_timeout_message() -> str:
         return "OpenRouter generation timed out."
 
-    @classmethod
-    def describe(cls) -> str:
-        return f"openrouter (model: {cls.get_model() or 'not configured'})"
+    def describe(self) -> str:
+        return f"openrouter (model: {self.get_configured_model() or 'not configured'})"

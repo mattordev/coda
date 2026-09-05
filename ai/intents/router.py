@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import replace
 from typing import Protocol, TYPE_CHECKING
 from abc import abstractmethod

@@ -53,7 +53,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         model_name = "openai/gpt-4.1-mini"
         
         with mock.patch.dict("os.environ", {"CODA_OPENROUTER_MODEL": model_name}):
-            self.assertEqual(OpenRouterProvider.get_model(), model_name)
+            self.assertEqual(OpenRouterProvider.get_configured_model(), model_name)
 
     def test_get_model_has_no_default(self) -> None:
         with mock.patch.dict(
@@ -62,7 +62,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             clear=True,
         ):
             self.assertEqual(
-                OpenRouterProvider.get_model(),
+                OpenRouterProvider.get_configured_model(),
                 "",
             )
 

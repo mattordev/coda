@@ -1,4 +1,5 @@
-from abc import abstractmethod
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,19 +21,18 @@ class OpenAIProvider(Provider):
             "api_key_env": "OPENAI_API_KEY",
             "model_env": "CODA_OPENAI_MODEL",
             "model_required": False,
+            "default_model": "gpt-4o-mini"
         }
     
     @staticmethod
     def _get_timeout_message() -> str:
         return "OpenAI generation timed out."
 
-    @classmethod
-    def reload_config(cls) -> None:
-        openai.api_key = cls.get_api_key() or None
+    def reload_config(self) -> None:
+        openai.api_key = self.get_api_key() or None
             
-    @classmethod
-    def describe(cls) -> str:
-        return f"openai (model: {cls.get_model()})"
+    def describe(self) -> str:
+        return f"openai (model: {self.get_configured_model()})"
         
     @staticmethod
     def _generate_stream(client: openai.OpenAI, model: str, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None, scope: CancellationScope) -> str:
@@ -63,30 +63,29 @@ class OpenAIProvider(Provider):
 
         return "".join(response_parts)
 
-    @classmethod
-    def generate(cls, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None = None) -> tuple[str|None, str|None]:
-        api_key = cls.get_api_key()
-        model = cls.get_model()
+    def generate(self, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None = None) -> tuple[str|None, str|None]:
+        api_key = self.get_api_key()
+        model = self.get_configured_model()
         
         if openai is None:
             return None, "openai package is not installed."
         
         if not api_key:
-            return None, f"{cls.instance().data.get("api_key_env")} is not set in env."
+            return None, f"{self.data.get("api_key_env")} is not set in env."
 
         # if we require a model, but haven't specified one, we cannot continue
-        if not model and cls.instance().data.get("model_required"):
-            return None, f"{cls.instance().data.get("model_env")} is not set in env."
+        if not model and self.data.get("model_required"):
+            return None, f"{self.data.get("model_env")} is not set in env."
             
         try:
-            client = openai.OpenAI(api_key=api_key, base_url=cls.get_base_url())
+            client = openai.OpenAI(api_key=api_key, base_url=self.get_base_url())
             scope = CancellationScope()
             close_client = client.close
             if callable(close_client):
                 close_client = scope.add(close_client)
             try:
                 assistant_message = run_cancellable(
-                    lambda: cls._generate_stream(
+                    lambda: self._generate_stream(
                         client,
                         model,
                         messages,
@@ -94,8 +93,8 @@ class OpenAIProvider(Provider):
                         scope,
                     ),
                     cancel_event,
-                    cls._get_timeout_seconds(),
-                    cls._get_timeout_message(),
+                    self._get_timeout_seconds(),
+                    self._get_timeout_message(),
                     on_abandon=scope.cancel,
                 )
             finally:

@@ -1,131 +1,137 @@
+from __future__ import annotations
+
 import json
-import os
 
 import requests
 from requests.exceptions import Timeout
 
+from typing import TypedDict, TYPE_CHECKING
+if TYPE_CHECKING:
+    from typing import Required, NotRequired
+
 from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.provider import Provider
 
-_model_cache = None
-_preferred_models = (
-    "nemotron-3-nano:4b",
-)
+class _OllamaHttpResponse(TypedDict):
+    models: Required[list[_OllamaModel]]
 
+class _OllamaModel(TypedDict):
+    name: NotRequired[str]
+    model: NotRequired[str]
 
-def _get_float_env(name, default):
-    value = os.getenv(name)
-    if value is None:
-        return default
+class OllamaProvider(Provider):
+    @staticmethod
+    def _get_data() -> Provider.Details:
+        return {
+            "type": Provider.Type.LOCAL,
+            "model_env": "CODA_OLLAMA_MODEL",
+            "base_url_env": "CODA_OLLAMA_BASE_URL",
+            "model_required": False,
+            "default_base_url": "http://localhost:11434",
+            "default_model": "gpt-4o-mini"
+        }
 
-    try:
-        return float(value)
-    except ValueError:
-        return default
+    @staticmethod
+    def preferred_models() -> list[str]:
+        return [
+            "nemotron-3-nano:4b"
+        ]
 
+    def get_base_url(self) -> str | None:
+        base_url = super().get_base_url()
 
-def get_base_url():
-    return os.getenv("CODA_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        if not base_url:
+            return None
 
+        return base_url.rstrip("/")
+    
+    def get_cold_start_timeout_seconds(self) -> float:
+        return self._get_float_env("CODA_OLLAMA_COLD_START_TIMEOUT", 120.0)
+    
+    def reload_config(self) -> None:
+        self._model_cache = None
 
-def get_configured_model():
-    return os.getenv("CODA_OLLAMA_MODEL", "").strip()
+    def _get_response(self, url: str) -> _OllamaHttpResponse|None:
+        try:
+            response = requests.get(url, timeout=min(self._get_timeout_seconds(), 10))
+            response.raise_for_status()
+        except Exception:
+            return None
 
+        return _OllamaHttpResponse(**response.json())
 
-def get_timeout_seconds():
-    return _get_float_env("CODA_LLM_TIMEOUT", 45.0)
+    def _get_models(self, url: str, *, raise_exception: bool = True) -> list[_OllamaModel]:
+        models: list[_OllamaModel] = []
+        try:
+            response = self._get_response(url)
+            if response is not None:
+                models = response.get("models", [])
+        except Exception:
+            if raise_exception:
+                raise
 
+        return models
 
-def get_cold_start_timeout_seconds():
-    return _get_float_env("CODA_OLLAMA_COLD_START_TIMEOUT", 120.0)
+    def get_model(self):
+        configured_model = self.get_configured_model()
+        if configured_model:
+            return configured_model, None
 
+        if self._model_cache:
+            return self._model_cache, None
 
-def reload_config():
-    global _model_cache
+        model_env = self.data.get("model_env")
+        models: list[_OllamaModel] = []
+        try:
+            tags_url = f"{self.get_base_url()}/api/tags"
+            models = self._get_models(tags_url)
+        except Exception as exc:
+            return None, f"Could not fetch Ollama models automatically. Set {model_env} explicitly. Details: {exc}"
 
-    _model_cache = None
+        if not models:
+            return None, f"No Ollama models were found at the configured host. Set {model_env} after pulling a model on the host."
 
+        model_names: list[str] = []
+        for model in models:
+            model_name = model.get("name") or model.get("model")
+            if model_name:
+                model_names.append(model_name)
 
-def get_model(http_client=requests):
-    global _model_cache
+        selected_model: str|None = None
+        for preferred_model in self.preferred_models():
+            if preferred_model in model_names:
+                selected_model = preferred_model
+                break
 
-    configured_model = get_configured_model()
-    if configured_model:
-        return configured_model, None
+        if selected_model is None:
+            selected_model = model_names[0] if model_names else None
 
-    if _model_cache:
+        if not selected_model:
+            return None, "Ollama returned models but none included a usable name."
+
+        _model_cache = selected_model
         return _model_cache, None
 
-    base_url = get_base_url()
+    def describe(self) -> str:
+        model, error = self.get_model()
+        if error:
+            return f"ollama (model resolution failed: {error})"
 
-    try:
-        response = http_client.get(
-            f"{base_url}/api/tags",
-            timeout=min(get_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception as exc:
-        return None, (
-            "Could not fetch Ollama models automatically. "
-            "Set CODA_OLLAMA_MODEL explicitly. "
-            f"Details: {exc}"
-        )
+        return f"ollama (model: {model})"
 
-    if not models:
-        return None, (
-            "No Ollama models were found at the configured host. "
-            "Set CODA_OLLAMA_MODEL after pulling a model on the host."
-        )
+    def is_model_loaded(self, model_name: str) -> bool:
+        ps_url = f"{self.get_base_url()}/api/ps"
+        models = self._get_models(ps_url, raise_exception=False)
 
-    model_names = []
-    for model in models:
-        model_name = model.get("name") or model.get("model")
-        if model_name:
-            model_names.append(model_name)
+        if not models:
+            return False
 
-    selected_model = None
-    for preferred_model in _preferred_models:
-        if preferred_model in model_names:
-            selected_model = preferred_model
-            break
+        for model in models:
+            loaded_name = model.get("name") or model.get("model")
+            if loaded_name == model_name:
+                return True
 
-    if selected_model is None:
-        selected_model = model_names[0] if model_names else None
-
-    if not selected_model:
-        return None, "Ollama returned models but none included a usable name."
-
-    _model_cache = selected_model
-    return _model_cache, None
-
-
-def is_model_loaded(model_name, http_client=requests):
-    base_url = get_base_url()
-
-    try:
-        response = http_client.get(
-            f"{base_url}/api/ps",
-            timeout=min(get_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception:
         return False
-
-    for model in models:
-        loaded_name = model.get("name") or model.get("model")
-        if loaded_name == model_name:
-            return True
-
-    return False
-
-
-def describe():
-    model, error = get_model()
-    if error:
-        return f"ollama (model resolution failed: {error})"
-
-    return f"ollama (model: {model})"
 
 
 def _generate_stream(

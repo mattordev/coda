@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Run blocking provider work without trapping CODA's execution worker."""
 
 from queue import Empty, Queue
