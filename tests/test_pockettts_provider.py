@@ -267,6 +267,9 @@ class PocketTTSProviderTests(unittest.TestCase):
         command = popen.call_args.args[0]
         self.assertIn("f32le", command)
         self.assertIn("24000", command)
+        self.assertIn("-ch_layout", command)
+        self.assertIn("mono", command)
+        self.assertNotIn("-ac", command)
 
     @patch("tts.pockettts_provider.Popen")
     def test_stop_ends_playback_and_drains_remaining_audio(self, popen):
