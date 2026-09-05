@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import threading
 import unittest
 from threading import Event

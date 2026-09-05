@@ -26,7 +26,7 @@ class Provider(ABC):
 
     @classmethod
     def instance(cls) -> Self:
-        if cls._instance is None or not isinstance(cls._instance, type(cls)):
+        if cls._instance is None or not isinstance(cls._instance, cls):
             cls._instance = cls.__new__(cls)
 
         return cls._instance
