@@ -913,10 +913,6 @@ class RuntimeExecutionTests(unittest.TestCase):
             patch.object(coda_runtime, "start_speech_thread"),
             patch.object(coda_runtime.speech, "configure_speech_submitter"),
             patch.object(
-                coda_runtime.runtime_queues.speech,
-                "join",
-            ) as join_speech,
-            patch.object(
                 coda_runtime,
                 "submit_runtime_request",
                 side_effect=lambda request: request.execution_complete.set(),
@@ -938,7 +934,6 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(submitted_request.source, InputSource.MANUAL)
         self.assertFalse(submitted_request.replace_active)
         self.assertTrue(submitted_request.execution_complete.is_set())
-        join_speech.assert_called_once_with()
         
     def test_execution_thread_starts_once_and_stops(self):
         stop_event = threading.Event()

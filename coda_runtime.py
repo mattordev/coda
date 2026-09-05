@@ -838,7 +838,6 @@ def _run_runtime():
             )
             submit_runtime_request(manual_request)
             manual_request.execution_complete.wait()
-            runtime_queues.speech.join()
         else:
             if keyboard_toggle_available:
                 try:
