@@ -69,9 +69,11 @@ speech and manual LLM replies both use the configured speech worker.
 
 ## Cancellation
 
-In voice mode, a wake-word stop phrase calls the runtime cancellation boundary.
-It signals the event belonging to the active request and the oldest outstanding
-speech task before stopping that task's active provider session. Speech remains
+In voice or manual mode, a wake-word stop phrase calls the runtime cancellation
+boundary. Manual mode keeps its input prompt available during speech, so a
+typed command such as `coda stop` can interrupt playback. Cancellation signals
+the event belonging to the active request and the oldest outstanding speech
+task before stopping that task's active provider session. Speech remains
 cancellable while it is queued, resolving a provider or playing. Interruptible
 LLM provider calls close their active response streams or sessions and discard
 partial provider output. Cancellation also prevents the router from continuing

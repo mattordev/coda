@@ -934,6 +934,46 @@ class RuntimeExecutionTests(unittest.TestCase):
         self.assertEqual(submitted_request.source, InputSource.MANUAL)
         self.assertFalse(submitted_request.replace_active)
         self.assertTrue(submitted_request.execution_complete.is_set())
+
+    def test_manual_stop_phrase_cancels_without_queueing_request(self):
+        with (
+            patch.object(coda_runtime, "commands", {}),
+            patch.object(coda_runtime, "wakewords", []),
+            patch.object(coda_runtime, "manual_assisstant_input", False),
+            patch.object(
+                coda_runtime,
+                "_apply_cli_microphone_flags",
+                return_value=True,
+            ),
+            patch.object(
+                coda_runtime,
+                "check_update_available",
+                return_value=False,
+            ),
+            patch.object(coda_runtime, "load_commands", return_value={}),
+            patch.object(
+                coda_runtime,
+                "load_wakewords",
+                return_value=["coda"],
+            ),
+            patch.object(coda_runtime.command, "configure_intent_router"),
+            patch.object(coda_runtime, "start_heartbeat_thread"),
+            patch.object(coda_runtime, "start_execution_thread"),
+            patch.object(coda_runtime, "start_event_thread"),
+            patch.object(coda_runtime, "start_speech_thread"),
+            patch.object(coda_runtime.speech, "configure_speech_submitter"),
+            patch.object(coda_runtime, "submit_runtime_request") as submit,
+            patch.object(coda_runtime, "cancel_active_request") as cancel,
+            patch(
+                "builtins.input",
+                side_effect=["coda stop", "quit"],
+            ),
+            patch("builtins.print"),
+        ):
+            coda_runtime._run_runtime()
+
+        cancel.assert_called_once_with()
+        submit.assert_not_called()
         
     def test_execution_thread_starts_once_and_stops(self):
         stop_event = threading.Event()

@@ -134,7 +134,7 @@ def _queue_runtime_request(
     return request
 
 
-def _is_follow_up_stop_phrase(message):
+def is_stop_phrase(message):
     normalized_message = _normalize_message(message)
     return normalized_message in {
         "stop",
@@ -298,7 +298,7 @@ def run(
             event_tags = []
             if follow_up_active:
                 event_tags.append("follow_up")
-                if _is_follow_up_stop_phrase(message):
+                if is_stop_phrase(message):
                     event_tags.append("follow_up_stop")
             elif has_wakeword:
                 event_tags.append("wakeword_detected")
@@ -324,7 +324,7 @@ def run(
                 
             if (
                 has_wakeword
-                and _is_follow_up_stop_phrase(wakeword_command_message)
+                and is_stop_phrase(wakeword_command_message)
                 and cancel_active_request is not None
             ):
                 active_follow_up_state.close()
@@ -339,7 +339,7 @@ def run(
                 continue
 
             if follow_up_active:
-                if _is_follow_up_stop_phrase(message):
+                if is_stop_phrase(message):
                     active_follow_up_state.close()
                     if debug_enabled:
                         print("[VOICE] Follow-up ended by user.")

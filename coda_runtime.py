@@ -832,6 +832,10 @@ def _run_runtime():
                 print("[MANUAL] Wakeword detected without follow-up text.")
                 continue
 
+            if voice_recognizer.is_stop_phrase(command_message):
+                cancel_active_request()
+                continue
+
             manual_request = RuntimeRequest(
                 message=command_message,
                 source=InputSource.MANUAL,
