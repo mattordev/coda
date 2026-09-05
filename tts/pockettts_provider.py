@@ -17,6 +17,7 @@ class PocketTTSRuntime(Protocol):
 
 
 RuntimeFactory = Callable[[str, str | None], PocketTTSRuntime]
+PLAYBACK_TAIL_SECONDS = 0.2
 
 
 class _LoadedPocketTTSRuntime:
@@ -234,6 +235,14 @@ class PocketTTSSession:
 
             if playback_error is not None:
                 raise playback_error
+
+            silence_samples = int(
+                self._runtime.sample_rate * PLAYBACK_TAIL_SECONDS
+            )
+            if process.stdin is None:
+                raise RuntimeError("ffplay input pipe is unavailable.")
+            process.stdin.write(bytes(silence_samples * 4))
+            process.stdin.flush()
 
             self._close_stdin(process)
 

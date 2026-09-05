@@ -261,7 +261,9 @@ class PocketTTSProviderTests(unittest.TestCase):
 
         self.assertTrue(played)
         self.assertEqual(runtime.text, "hello")
-        self.assertEqual(process.stdin.chunks, [b"one", b"two"])
+        self.assertEqual(process.stdin.chunks[:2], [b"one", b"two"])
+        self.assertEqual(len(process.stdin.chunks[2]), 24000 * 4 // 5)
+        self.assertEqual(set(process.stdin.chunks[2]), {0})
         self.assertTrue(process.stdin.closed)
         self.assertFalse(session.is_playing())
         command = popen.call_args.args[0]
