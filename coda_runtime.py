@@ -505,7 +505,8 @@ def _execution_loop(stop_event):
             outcome_message = f"[RUNTIME] Request {outcome.lower()}"
 
         print(outcome_message, flush=True)
-                
+        request.execution_complete.set()
+
         runtime_queues.events.put(execution_result)
         
 def _event_loop(stop_event):
@@ -831,12 +832,13 @@ def _run_runtime():
                 print("[MANUAL] Wakeword detected without follow-up text.")
                 continue
 
-            submit_runtime_request(
-                RuntimeRequest(
-                    message=command_message,
-                    source=InputSource.MANUAL,
-                )
+            manual_request = RuntimeRequest(
+                message=command_message,
+                source=InputSource.MANUAL,
             )
+            submit_runtime_request(manual_request)
+            manual_request.execution_complete.wait()
+            runtime_queues.speech.join()
         else:
             if keyboard_toggle_available:
                 try:
