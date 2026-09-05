@@ -118,6 +118,28 @@ class StatusCommandTests(unittest.TestCase):
 
     @patch("commands.status.speak.speak_response")
     @patch("builtins.print")
+    def test_program_status_speaks_debug_state_as_word(
+        self,
+        print_output,
+        speak_response,
+    ):
+        status = {
+            "version": "1.4.0",
+            "memory_mb": 100.0,
+            "uptime": "1 minute",
+            "debug": False,
+            "input_mode": "manual",
+            "stt_provider": "Configured",
+            "tts_available": True,
+        }
+
+        status_command.print_program_status(status)
+
+        print_output.assert_any_call("Debug mode is currently OFF.")
+        speak_response.assert_any_call("Debug mode is currently off.")
+
+    @patch("commands.status.speak.speak_response")
+    @patch("builtins.print")
     def test_reports_battery_time_remaining(self, print_output, speak_response):
         system_status = self._system_status(
             {

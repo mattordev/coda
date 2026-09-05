@@ -397,6 +397,7 @@ def get_program_status_data() -> dict[str, object]:
 def print_program_status(status: dict[str, object]) -> None:
     """Print and speak a collected CODA program status report."""
     debug_status = "ON" if status["debug"] else "OFF"
+    debug_spoken_status = debug_status.lower()
     tts_status = "Available" if status["tts_available"] else "Unavailable"
 
     print(f"We are running version {status['version']}.")
@@ -411,7 +412,9 @@ def print_program_status(status: dict[str, object]) -> None:
     speak.speak_response(f"The current uptime is {status['uptime']}.")
 
     print(f"Debug mode is currently {debug_status}.")
-    speak.speak_response(f"Debug mode is currently {debug_status}.")
+    speak.speak_response(
+        f"Debug mode is currently {debug_spoken_status}."
+    )
 
     print(f"The current input mode is {status['input_mode']}.")
     speak.speak_response(
