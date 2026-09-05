@@ -107,6 +107,7 @@ def _generate_stream(
     ) as response:
         close_response = scope.add(response.close)
         response.raise_for_status()
+        response.encoding = "utf-8"
 
         response_parts = []
 
