@@ -1,102 +1,109 @@
-import os
+from abc import abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from threading import Event
+    from typing import Iterable
+
+import openai
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.provider import Provider
 
-try:
-    import openai
-except ImportError:
-    openai = None
-
-def get_api_key():
-    return os.getenv("OPENAI_API_KEY", "").strip()
+class OpenAIProvider(Provider):
+    @staticmethod
+    def _get_data() -> Provider.Details:
+        return {
+            "type": Provider.Type.CLOUD,
+            "api_key_env": "OPENAI_API_KEY",
+            "model_env": "CODA_OPENAI_MODEL",
+            "model_required": False,
+        }
     
-def get_model():
-    return os.getenv("CODA_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    @staticmethod
+    def _get_timeout_message() -> str:
+        return "OpenAI generation timed out."
 
-def reload_config():
-    api_key = get_api_key()
-    
-    if openai is not None and hasattr(openai, "api_key"):
-        openai.api_key = api_key or None
+    @classmethod
+    def reload_config(cls) -> None:
+        openai.api_key = cls.get_api_key() or None
+            
+    @classmethod
+    def describe(cls) -> str:
+        return f"openai (model: {cls.get_model()})"
         
-def describe():
-    return f"openai (model: {get_model()})"
-
-
-def _get_timeout_seconds():
-    try:
-        return max(0.1, float(os.getenv("CODA_LLM_TIMEOUT", "45")))
-    except ValueError:
-        return 45.0
-
-
-def _generate_stream(client, model, messages, cancel_event, scope):
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-    )
-    close_stream = getattr(stream, "close", None)
-    if callable(close_stream):
-        close_stream = scope.add(close_stream)
-    response_parts = []
-
-    try:
-        for chunk in stream:
-            if cancel_event is not None and cancel_event.is_set():
-                raise InterruptedError("Request cancelled.")
-
-            if not chunk.choices:
-                continue
-
-            content = chunk.choices[0].delta.content
-            if content:
-                response_parts.append(content)
-    finally:
+    @staticmethod
+    def _generate_stream(client: openai.OpenAI, model: str, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None, scope: CancellationScope) -> str:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+        )
+        close_stream = stream.close
         if callable(close_stream):
-            close_stream()
+            close_stream = scope.add(close_stream)
+        response_parts: list[str] = []
 
-    return "".join(response_parts)
-
-def generate(messages, cancel_event=None):
-    api_key = get_api_key()
-    model = get_model()
-    
-    if openai is None:
-        return None, "openai package is not installed."
-    
-    if not api_key:
-        return None, "OPENAI_API_KEY is not set in env."
-    
-    if hasattr(openai, "api_key"):
-        openai.api_key = api_key
-        
-    try:
-        client = openai.OpenAI(api_key=api_key)
-        scope = CancellationScope()
-        close_client = getattr(client, "close", None)
-        if callable(close_client):
-            close_client = scope.add(close_client)
         try:
-            assistant_message = run_cancellable(
-                lambda: _generate_stream(
-                    client,
-                    model,
-                    messages,
-                    cancel_event,
-                    scope,
-                ),
-                cancel_event,
-                _get_timeout_seconds(),
-                "OpenAI generation timed out.",
-                on_abandon=scope.cancel,
-            )
-        finally:
-            if callable(close_client):
-                close_client()
-    except InterruptedError:
-        return None, "Request cancelled."
-    except Exception as exc:
-        return None, str(exc)
+            for chunk in stream:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Request cancelled.")
 
-    return (assistant_message or "").strip(), None
+                if not chunk.choices:
+                    continue
+
+                content = chunk.choices[0].delta.content
+                if content:
+                    response_parts.append(content)
+        finally:
+            if callable(close_stream):
+                close_stream()
+
+        return "".join(response_parts)
+
+    @classmethod
+    def generate(cls, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None = None) -> tuple[str|None, str|None]:
+        api_key = cls.get_api_key()
+        model = cls.get_model()
+        
+        if openai is None:
+            return None, "openai package is not installed."
+        
+        if not api_key:
+            return None, f"{cls.instance().data.get("api_key_env")} is not set in env."
+
+        # if we require a model, but haven't specified one, we cannot continue
+        if not model and cls.instance().data.get("model_required"):
+            return None, f"{cls.instance().data.get("model_env")} is not set in env."
+            
+        try:
+            client = openai.OpenAI(api_key=api_key, base_url=cls.get_base_url())
+            scope = CancellationScope()
+            close_client = client.close
+            if callable(close_client):
+                close_client = scope.add(close_client)
+            try:
+                assistant_message = run_cancellable(
+                    lambda: cls._generate_stream(
+                        client,
+                        model,
+                        messages,
+                        cancel_event,
+                        scope,
+                    ),
+                    cancel_event,
+                    cls._get_timeout_seconds(),
+                    cls._get_timeout_message(),
+                    on_abandon=scope.cancel,
+                )
+            finally:
+                if callable(close_client):
+                    close_client()
+        except InterruptedError:
+            return None, "Request cancelled."
+        except Exception as exc:
+            return None, str(exc)
+
+        return (assistant_message or "").strip(), None

@@ -9,27 +9,27 @@ except ImportError:
     load_dotenv = None
 
 
-def _truthy(value):
+def _truthy(value: str|None) -> bool:
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
-def is_debug_enabled(default=False):
+def is_debug_enabled(default: bool = False) -> bool:
     configured_value = os.getenv("CODA_DEBUG")
     if configured_value is None:
         return default
     return _truthy(configured_value)
 
 
-def set_debug_enabled(enabled):
+def set_debug_enabled(enabled: bool) -> None:
     os.environ["CODA_DEBUG"] = "1" if enabled else "0"
 
 
-def debug_print(*args, **kwargs):
+def debug_print(*values: object) -> None:
     if is_debug_enabled(default=False):
-        print(*args, **kwargs)
+        print(*values)
 
 
-def reload_dotenv():
+def reload_dotenv() -> tuple[bool, str]:
     if load_dotenv is None:
         return False, "python-dotenv is not installed"
 

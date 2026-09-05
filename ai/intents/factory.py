@@ -1,5 +1,9 @@
 import os
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from types import ModuleType
+
 from ai.providers import registry as provider_registry
 
 from .local_classifier import LocalClassifierStrategy
@@ -20,7 +24,7 @@ def _local_classifier_enabled() -> bool:
 
     return value in ("1", "true", "yes", "on")
 
-def _get_local_classifier_provider():
+def _get_local_classifier_provider() -> ModuleType|None:
     providers = provider_registry.resolve_provider_list(
         os.getenv("CODA_LOCAL_PROVIDERS", ""),
         provider_type="local",
@@ -30,7 +34,7 @@ def _get_local_classifier_provider():
         return None
 
     provider_name = providers[0]
-    return provider_registry.get_provider_module(provider_name)
+    return provider_registry.get_provider(provider_name)
 
 
 def create_router(registry: IntentRegistry) -> IntentRouter:

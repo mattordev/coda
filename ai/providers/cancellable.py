@@ -3,7 +3,10 @@
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 import time
-from typing import Callable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from typing import Callable
 
 
 Result = TypeVar("Result")
@@ -14,7 +17,7 @@ class CancellationScope:
 
     def __init__(self) -> None:
         self._lock = Lock()
-        self._callbacks = []
+        self._callbacks: list[Callable[[], None]] = []
         self._cancelled = False
 
     def add(self, callback: Callable[[], None]) -> Callable[[], None]:
@@ -56,9 +59,9 @@ def run_cancellable(
     timeout_seconds: float,
     timeout_message: str,
     on_abandon: Callable[[], None] | None = None,
-) -> Result:
+) -> Result|None:
     """Return blocking work while polling cancellation and a hard deadline."""
-    results = Queue(maxsize=1)
+    results: Queue[tuple[Result|None, Exception|None]] = Queue(maxsize=1)
 
     def run() -> None:
         try:

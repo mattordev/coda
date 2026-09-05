@@ -1,13 +1,18 @@
 from dataclasses import replace
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
+from abc import abstractmethod
 
 from .models import IntentResult
 from .registry import IntentRegistry
+
+if TYPE_CHECKING:
+    from .models import Intent
 
 
 class DetectionStrategy(Protocol):
     name: str
 
+    @abstractmethod
     def detect(
         self,
         message: str,
@@ -16,7 +21,7 @@ class DetectionStrategy(Protocol):
         """Attempt to detect an intent from a message."""
 
 
-class ExactMatchStrategy:
+class ExactMatchStrategy(DetectionStrategy):
     name = "exact_match"
 
     def detect(
@@ -37,7 +42,7 @@ class ExactMatchStrategy:
         )
 
 
-class ExampleMatchStrategy:
+class ExampleMatchStrategy(DetectionStrategy):
     name = "example_match"
 
     def detect(
@@ -58,7 +63,7 @@ class ExampleMatchStrategy:
         )
 
 
-class CommandPrefixStrategy:
+class CommandPrefixStrategy(DetectionStrategy):
     name = "command_prefix"
 
     def detect(
@@ -70,7 +75,7 @@ class CommandPrefixStrategy:
         normalized_message = " ".join(
             message.strip().lower().split()
         )
-        matches = []
+        matches: list[tuple[int, Intent]] = []
 
         for intent in registry.all():
             triggers = (
