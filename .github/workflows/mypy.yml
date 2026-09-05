@@ -25,4 +25,4 @@ jobs:
         pip install -r requirements.txt
     - name: Analysing the code with Mypy
       run: |
-        mypy --install-types --non-interactive "**/*.py"
+        mypy --install-types --non-interactive '*.py'
