@@ -221,24 +221,34 @@ def speak_response(response):
     if _speech_submitter is not None:
         return _speech_submitter(response)
 
-    provider = _resolve_elevenlabs_provider()
+    cancel_event = Event()
 
-    if provider is not None:
+    for provider in resolve_speech_providers():
         try:
+            if not provider.is_available():
+                continue
+
             session = provider.create_session(response)
-            if session.play(Event()):
+            if session.play(cancel_event):
                 return True
 
-            return use_pyttsx3(response)
-        except Exception as e:
-            print(f"Error using Eleven Labs: {e}")
-
-            if "invalid api key" in str(e).lower():
+            runtime_state.debug_print(
+                f"[TTS] {provider.name}: playback did not complete. "
+                "Trying next provider."
+            )
+        except Exception as error:
+            if (
+                provider.name == "elevenlabs"
+                and "invalid api key" in str(error).lower()
+            ):
                 _eleven_labs_disabled = True
 
-            return use_pyttsx3(response)
+            runtime_state.debug_print(
+                f"[TTS] {provider.name}: {error}. Trying next provider."
+            )
 
-    return use_pyttsx3(response)
+    print(f"TTS disabled, response text: {response}")
+    return False
 
 
 def use_pyttsx3(message):

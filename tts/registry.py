@@ -72,4 +72,4 @@ def parse_provider_order(value: str | None) -> list[str]:
         seen.add(provider_name)
         provider_names.append(provider_name)
 
-    return provider_names
+    return provider_names or list(DEFAULT_PROVIDER_ORDER)

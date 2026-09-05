@@ -86,6 +86,37 @@ class RuntimeExecutionTests(unittest.TestCase):
             flush=True,
         )
 
+    def test_execution_loop_signals_completion_when_reporting_fails(self):
+        queues = RuntimeQueues()
+        stop_event = threading.Event()
+        request = RuntimeRequest(
+            message="connected",
+            source=InputSource.MANUAL,
+        )
+        queues.requests.put(request)
+        command_result = SimpleNamespace(
+            handled=True,
+            response_text=None,
+            open_follow_up=False,
+        )
+
+        with (
+            patch.object(coda_runtime, "runtime_queues", queues),
+            patch.object(
+                coda_runtime.command,
+                "run",
+                return_value=command_result,
+            ),
+            patch(
+                "builtins.print",
+                side_effect=[None, RuntimeError("console failed")],
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "console failed"):
+                coda_runtime._execution_loop(stop_event)
+
+        self.assertTrue(request.execution_complete.is_set())
+
     def test_execution_loop_queues_manual_response_without_voice_follow_up(self):
         queues = RuntimeQueues()
         stop_event = threading.Event()

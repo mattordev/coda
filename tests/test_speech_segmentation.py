@@ -14,6 +14,12 @@ class SpokenTextSegmentationTests(unittest.TestCase):
             ["Everything is running normally."],
         )
 
+    def test_leading_ellipsis_does_not_read_end_of_text_as_prefix(self):
+        self.assertEqual(
+            split_spoken_text("... Continue carefully. Everything is ready."),
+            ["...", "Continue carefully.", "Everything is ready."],
+        )
+
     def test_splits_complete_sentences_and_keeps_punctuation(self):
         self.assertEqual(
             split_spoken_text(

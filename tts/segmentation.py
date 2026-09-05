@@ -36,7 +36,11 @@ def split_spoken_text(text: str) -> list[str]:
         if prefix.lower().endswith(_NON_TERMINAL_ABBREVIATIONS):
             continue
 
-        preceding_character = text[match.start() - 1]
+        preceding_character = (
+            text[match.start() - 1]
+            if match.start() > segment_start
+            else ""
+        )
         if match.group().startswith(".") and preceding_character.isupper():
             continue
         

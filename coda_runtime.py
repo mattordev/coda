@@ -485,29 +485,30 @@ def _execution_loop(stop_event):
             active_request_state.clear(request.request_id)
             runtime_queues.requests.task_done()
             
-        if execution_result.cancelled:
-            outcome = "Cancelled"
-        elif execution_result.error is not None:
-            outcome = "Failed"
-        elif not execution_result.handled:
-            outcome = "Not handled"
-        else:
-            outcome = "Completed"
+        try:
+            if execution_result.cancelled:
+                outcome = "Cancelled"
+            elif execution_result.error is not None:
+                outcome = "Failed"
+            elif not execution_result.handled:
+                outcome = "Not handled"
+            else:
+                outcome = "Completed"
 
-        execution_duration = time.perf_counter() - execution_started_at
+            execution_duration = time.perf_counter() - execution_started_at
 
-        if debug_enabled:
-            outcome_message = (
-                f"[RUNTIME] {outcome} {request_label} "
-                f"in {execution_duration:.2f}s"
-            )
-        else:
-            outcome_message = f"[RUNTIME] Request {outcome.lower()}"
+            if debug_enabled:
+                outcome_message = (
+                    f"[RUNTIME] {outcome} {request_label} "
+                    f"in {execution_duration:.2f}s"
+                )
+            else:
+                outcome_message = f"[RUNTIME] Request {outcome.lower()}"
 
-        print(outcome_message, flush=True)
-        request.execution_complete.set()
-
-        runtime_queues.events.put(execution_result)
+            print(outcome_message, flush=True)
+            runtime_queues.events.put(execution_result)
+        finally:
+            request.execution_complete.set()
         
 def _event_loop(stop_event):
     """Process runtime results until shutdown"""

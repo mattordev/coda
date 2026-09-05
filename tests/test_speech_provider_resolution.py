@@ -27,6 +27,7 @@ class SpeechProviderResolutionTests(unittest.TestCase):
 
     def test_synchronous_speech_uses_resolved_cloud_provider(self):
         provider = Mock(name="cloud_provider")
+        provider.is_available.return_value = True
         session = provider.create_session.return_value
         session.play.return_value = True
 
@@ -34,8 +35,8 @@ class SpeechProviderResolutionTests(unittest.TestCase):
             patch.object(speech, "_speech_submitter", None),
             patch.object(
                 speech,
-                "_resolve_elevenlabs_provider",
-                return_value=provider,
+                "resolve_speech_providers",
+                return_value=[provider],
             ),
             patch.object(
                 speech.dashboard_state,
@@ -48,6 +49,31 @@ class SpeechProviderResolutionTests(unittest.TestCase):
         provider.create_session.assert_called_once_with("hello")
         cancel_event = session.play.call_args.args[0]
         self.assertFalse(cancel_event.is_set())
+
+    def test_synchronous_speech_follows_provider_fallback_order(self):
+        first_provider = Mock(name="first_provider")
+        first_provider.name = "pockettts"
+        first_provider.is_available.return_value = True
+        first_provider.create_session.return_value.play.return_value = False
+        fallback_provider = Mock(name="fallback_provider")
+        fallback_provider.name = "pyttsx3"
+        fallback_provider.is_available.return_value = True
+        fallback_provider.create_session.return_value.play.return_value = True
+
+        with (
+            patch.object(speech, "_speech_submitter", None),
+            patch.object(
+                speech,
+                "resolve_speech_providers",
+                return_value=[first_provider, fallback_provider],
+            ),
+            patch.object(speech.dashboard_state, "record_ai_response"),
+        ):
+            played = speech.speak_response("hello")
+
+        self.assertTrue(played)
+        first_provider.create_session.assert_called_once_with("hello")
+        fallback_provider.create_session.assert_called_once_with("hello")
 
     def test_offline_resolution_returns_local_providers(self):
         pocket_provider = Mock(name="pocket_provider")

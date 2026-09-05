@@ -10,6 +10,7 @@ class TTSProviderRegistryTests(unittest.TestCase):
 
         self.assertEqual(registry.parse_provider_order(None), expected)
         self.assertEqual(registry.parse_provider_order("   "), expected)
+        self.assertEqual(registry.parse_provider_order(", ,"), expected)
 
     def test_explicit_provider_order_is_preserved(self):
         result = registry.parse_provider_order(
