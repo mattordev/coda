@@ -75,7 +75,8 @@ class OpenAIProvider(Provider):
 
         # if we require a model, but haven't specified one, we cannot continue
         if not model and self.data.get("model_required"):
-            return None, f"{self.data.get("model_env")} is not set in env."
+            model_env = self.data.get("model_env")
+            return None, f"{model_env} is not set in env."
             
         try:
             client = openai.OpenAI(api_key=api_key, base_url=self.get_base_url())
