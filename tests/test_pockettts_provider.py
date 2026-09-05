@@ -12,6 +12,7 @@ from tts.pockettts_provider import (
     PocketTTSSession,
     _LoadedPocketTTSRuntime,
     _load_runtime,
+    _split_for_token_limit,
 )
 
 
@@ -94,6 +95,38 @@ class FakeRuntime:
 
 
 class PocketTTSProviderTests(unittest.TestCase):
+    def test_splits_oversized_text_below_pocket_token_limit(self):
+        text = "one two three four five six seven eight nine ten eleven"
+        count_tokens = lambda value: len(value.split()) * 10
+
+        chunks = _split_for_token_limit(
+            text,
+            count_tokens,
+            target_tokens=40,
+        )
+
+        self.assertEqual(
+            chunks,
+            [
+                "one two three four",
+                "five six seven eight",
+                "nine ten eleven",
+            ],
+        )
+        self.assertTrue(all(count_tokens(chunk) <= 40 for chunk in chunks))
+
+    def test_prefers_clause_boundary_for_oversized_text(self):
+        text = "one two, three four five six"
+        count_tokens = lambda value: len(value.split()) * 10
+
+        chunks = _split_for_token_limit(
+            text,
+            count_tokens,
+            target_tokens=50,
+        )
+
+        self.assertEqual(chunks, ["one two,", "three four five six"])
+
     def test_runtime_adapter_loads_model_voice_and_float32_pcm(self):
         chunk = Mock()
         chunk.detach.return_value.cpu.return_value.numpy.return_value = np.array(
@@ -101,6 +134,9 @@ class PocketTTSProviderTests(unittest.TestCase):
             dtype=np.float64,
         )
         model = Mock(sample_rate=24000)
+        tokenizer = Mock()
+        tokenizer.return_value.tokens = np.array([[1]])
+        model.flow_lm.conditioner.tokenizer = tokenizer
         model.generate_audio_stream.return_value = [chunk]
         model_type = Mock()
         model_type.load_model.return_value = model
@@ -145,6 +181,9 @@ class PocketTTSProviderTests(unittest.TestCase):
             dtype=np.float32,
         )
         model = Mock(sample_rate=24000)
+        tokenizer = Mock()
+        tokenizer.return_value.tokens = np.array([[1]])
+        model.flow_lm.conditioner.tokenizer = tokenizer
 
         def generate(_state, text):
             if text == "first":

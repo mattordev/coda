@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from collections.abc import Callable, Iterator
 from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
@@ -18,6 +19,53 @@ class PocketTTSRuntime(Protocol):
 
 RuntimeFactory = Callable[[str, str | None], PocketTTSRuntime]
 PLAYBACK_TAIL_SECONDS = 0.2
+POCKET_TOKEN_LIMIT = 50
+POCKET_CHUNK_TARGET = 45
+
+
+def _split_for_token_limit(
+    text: str,
+    count_tokens: Callable[[str], int],
+    target_tokens: int = POCKET_CHUNK_TARGET,
+) -> list[str]:
+    """Split oversized Pocket input at words with token-count headroom."""
+    if count_tokens(text) <= POCKET_TOKEN_LIMIT:
+        return [text]
+
+    words = re.findall(r"\S+", text)
+    chunks = []
+    current_words = []
+
+    for word in words:
+        candidate_words = [*current_words, word]
+        candidate = " ".join(candidate_words)
+
+        if current_words and count_tokens(candidate) > target_tokens:
+            boundary_index = None
+            for index in range(len(current_words) - 1, -1, -1):
+                if not current_words[index].rstrip("\"')]").endswith(
+                    (",", ";", ":", "\N{EM DASH}", "\N{EN DASH}")
+                ):
+                    continue
+
+                remainder = [*current_words[index + 1:], word]
+                if count_tokens(" ".join(remainder)) <= target_tokens:
+                    boundary_index = index
+                    break
+
+            if boundary_index is None:
+                chunks.append(" ".join(current_words))
+                current_words = [word]
+            else:
+                chunks.append(" ".join(current_words[:boundary_index + 1]))
+                current_words = [*current_words[boundary_index + 1:], word]
+        else:
+            current_words = candidate_words
+
+    if current_words:
+        chunks.append(" ".join(current_words))
+
+    return chunks
 
 
 class _LoadedPocketTTSRuntime:
@@ -29,17 +77,23 @@ class _LoadedPocketTTSRuntime:
 
     def stream_pcm(self, text: str) -> Iterator[bytes]:
         with self._generation_lock:
-            for chunk in self._model.generate_audio_stream(
-                self._voice_state,
-                text,
-            ):
-                yield (
-                    chunk.detach()
-                    .cpu()
-                    .numpy()
-                    .astype("<f4", copy=False)
-                    .tobytes()
-                )
+            tokenizer = self._model.flow_lm.conditioner.tokenizer
+            count_tokens = lambda value: len(
+                tokenizer(value).tokens[0].tolist()
+            )
+
+            for text_chunk in _split_for_token_limit(text, count_tokens):
+                for audio_chunk in self._model.generate_audio_stream(
+                    self._voice_state,
+                    text_chunk,
+                ):
+                    yield (
+                        audio_chunk.detach()
+                        .cpu()
+                        .numpy()
+                        .astype("<f4", copy=False)
+                        .tobytes()
+                    )
 
 
 def _load_runtime(language: str, voice: str | None) -> PocketTTSRuntime:

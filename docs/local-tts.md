@@ -184,9 +184,11 @@ not modified.
 Pocket generates 24 kHz mono float32 PCM frames incrementally. CODA writes each
 frame to `ffplay` as it arrives instead of waiting for a complete waveform. A
 short silence tail lets the playback device drain without clipping the final
-phoneme. If a provider genuinely fails, CODA attempts the next provider for
-only the incomplete sentence. Sentences already played are not repeated, and
-a successful fallback remains selected for the rest of that response.
+phoneme. Oversized Pocket sentences are additionally divided with headroom
+below the model's 50-token generation limit so long clauses do not silently
+lose words. If a provider genuinely fails, CODA attempts the next provider for
+only the incomplete sentence. Sentences already played are not repeated, and a
+successful fallback remains selected for the rest of that response.
 
 Cancellation has deliberately different semantics:
 
