@@ -29,7 +29,7 @@ def _split_for_token_limit(
     target_tokens: int = POCKET_CHUNK_TARGET,
 ) -> list[str]:
     """Split oversized Pocket input at words with token-count headroom."""
-    if count_tokens(text) <= POCKET_TOKEN_LIMIT:
+    if count_tokens(text) <= target_tokens:
         return [text]
 
     words = re.findall(r"\S+", text)

@@ -205,7 +205,7 @@ briefly. A later request may wait for that cleanup before it begins speaking.
 
 ## Status and diagnostics
 
-`coda coda status` reports Text-To-Speech as `Available` when at least one
+`coda program status` reports Text-To-Speech as `Available` when at least one
 configured provider passes its availability check, otherwise `Unavailable`.
 This is aggregate status; it does not claim that every configured provider is
 ready.

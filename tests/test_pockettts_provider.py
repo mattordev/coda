@@ -95,6 +95,17 @@ class FakeRuntime:
 
 
 class PocketTTSProviderTests(unittest.TestCase):
+    def test_preserves_headroom_for_inputs_near_hard_limit(self):
+        for token_count in range(45, 51):
+            with self.subTest(token_count=token_count):
+                words = [f"word{index}" for index in range(token_count)]
+                chunks = _split_for_token_limit(
+                    " ".join(words), lambda value: len(value.split())
+                )
+                self.assertEqual(" ".join(chunks).split(), words)
+                self.assertTrue(all(len(chunk.split()) <= 45 for chunk in chunks))
+                self.assertEqual(len(chunks), 1 if token_count == 45 else 2)
+
     def test_splits_oversized_text_below_pocket_token_limit(self):
         text = "one two three four five six seven eight nine ten eleven"
         count_tokens = lambda value: len(value.split()) * 10
