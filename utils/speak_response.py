@@ -1,14 +1,16 @@
 import socket
 import os
+from threading import Event
 
-from elevenlabs import play, set_api_key
 import requests
 from ai.providers.cancellable import CancellationScope
 import utils.dashboard_state as dashboard_state
 import utils.runtime_state as runtime_state
 from runtime.speech_playback import SpeechProvider
 from tts.elevenlabs_provider import ElevenLabsProvider
+from tts.pockettts_provider import PocketTTSProvider
 from tts.pyttsx3_provider import Pyttsx3Provider
+from tts import registry as tts_registry
 from typing import Callable
 
 try:
@@ -19,6 +21,7 @@ except ImportError:
 _api_key_loaded = False
 _eleven_labs_disabled = False
 _elevenlabs_provider: ElevenLabsProvider | None = None
+_pockettts_provider: PocketTTSProvider | None = None
 _pyttsx3_provider = Pyttsx3Provider()
 
 SpeechSubmitter = Callable[[str], bool]
@@ -49,8 +52,7 @@ def ensure_api_key_loaded():
         return True
 
     try:
-        eleven_labs_api_key = load_api_key()
-        set_api_key(eleven_labs_api_key)
+        load_api_key()
         _api_key_loaded = True
         return True
     except Exception as error:
@@ -63,6 +65,7 @@ def reload_config():
     global _api_key_loaded
     global _eleven_labs_disabled
     global _elevenlabs_provider
+    global _pockettts_provider
 
     if load_dotenv is not None:
         load_dotenv(override=True)
@@ -71,7 +74,20 @@ def reload_config():
     _eleven_labs_disabled = False
     _elevenlabs_provider = None
 
-    return ensure_api_key_loaded()
+    if _pockettts_provider is not None:
+        _pockettts_provider.close()
+    _pockettts_provider = None
+
+    return is_tts_available()
+
+
+def shutdown() -> None:
+    """Release retained TTS provider state during application shutdown."""
+    global _pockettts_provider
+
+    if _pockettts_provider is not None:
+        _pockettts_provider.close()
+        _pockettts_provider = None
 
 
 def is_connected():
@@ -86,23 +102,18 @@ def is_connected():
 
 
 def is_tts_available():
-    """Return whether a configured cloud or local TTS path is available."""
-    has_eleven_labs = (
-        not _eleven_labs_disabled
-        and bool(os.getenv("ELEVENLABS_API_KEY", "").strip())
-        and is_connected()
-    )
-    if has_eleven_labs:
-        return True
+    """Return whether a configured TTS provider is available."""
+    for provider in resolve_speech_providers():
+        try:
+            if provider.is_available():
+                return True
+        except Exception as error:
+            runtime_state.debug_print(
+                f"[TTS] Provider {provider.name} availability check "
+                f"failed: {error}"
+            )
 
-    try:
-        import pyttsx3 as tts
-
-        speaker = tts.init()
-        speaker.stop()
-        return True
-    except Exception:
-        return False
+    return False
     
 def _generate_elevenlabs_audio(
     response: str,
@@ -150,21 +161,49 @@ def _generate_elevenlabs_audio(
     finally:
         close_session()
     
-def resolve_speech_providers() -> list[SpeechProvider]:
+def _resolve_elevenlabs_provider() -> SpeechProvider | None:
     global _elevenlabs_provider
-    
-    providers: list[SpeechProvider] = []
-    
-    if is_connected() and ensure_api_key_loaded():
-        if _elevenlabs_provider is None:
-            _elevenlabs_provider = ElevenLabsProvider(
-                _generate_elevenlabs_audio
-            )
-            
-        providers.append(_elevenlabs_provider)
-    
-    providers.append(_pyttsx3_provider)
-    return providers
+
+    if not is_connected() or not ensure_api_key_loaded():
+        return None
+
+    if _elevenlabs_provider is None:
+        _elevenlabs_provider = ElevenLabsProvider(
+            _generate_elevenlabs_audio
+        )
+
+    return _elevenlabs_provider
+
+
+def _resolve_pyttsx3_provider() -> SpeechProvider:
+    return _pyttsx3_provider
+
+
+def _resolve_pockettts_provider() -> SpeechProvider:
+    global _pockettts_provider
+
+    if _pockettts_provider is None:
+        _pockettts_provider = PocketTTSProvider()
+
+    return _pockettts_provider
+
+
+_TTS_PROVIDER_RESOLVERS: tts_registry.ProviderResolvers = {
+    "elevenlabs": _resolve_elevenlabs_provider,
+    "pockettts": _resolve_pockettts_provider,
+    "pyttsx3": _resolve_pyttsx3_provider,
+}
+
+
+def resolve_speech_providers() -> list[SpeechProvider]:
+    provider_names = tts_registry.parse_provider_order(
+        os.getenv("TTS_PROVIDER_ORDER")
+    )
+
+    return tts_registry.resolve_providers(
+        provider_names,
+        _TTS_PROVIDER_RESOLVERS,
+    )
 
 def configure_speech_submitter(
     submitter: SpeechSubmitter | None,
@@ -182,21 +221,34 @@ def speak_response(response):
     if _speech_submitter is not None:
         return _speech_submitter(response)
 
-    if is_connected() and ensure_api_key_loaded():
-        try:
-            audio = _generate_elevenlabs_audio(response)
-            
-            play(audio)
-            return True
-        except Exception as e:
-            print(f"Error using Eleven Labs: {e}")
+    cancel_event = Event()
 
-            if "invalid api key" in str(e).lower():
+    for provider in resolve_speech_providers():
+        try:
+            if not provider.is_available():
+                continue
+
+            session = provider.create_session(response)
+            if session.play(cancel_event):
+                return True
+
+            runtime_state.debug_print(
+                f"[TTS] {provider.name}: playback did not complete. "
+                "Trying next provider."
+            )
+        except Exception as error:
+            if (
+                provider.name == "elevenlabs"
+                and "invalid api key" in str(error).lower()
+            ):
                 _eleven_labs_disabled = True
 
-            return use_pyttsx3(response)
+            runtime_state.debug_print(
+                f"[TTS] {provider.name}: {error}. Trying next provider."
+            )
 
-    return use_pyttsx3(response)
+    print(f"TTS disabled, response text: {response}")
+    return False
 
 
 def use_pyttsx3(message):

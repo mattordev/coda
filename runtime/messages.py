@@ -20,6 +20,11 @@ class RuntimeRequest:
         repr=False,
         compare=False,
     )
+    execution_complete: Event = field(
+        default_factory=Event,
+        repr=False,
+        compare=False,
+    )
     replace_active: bool = False
     
 @dataclass(frozen=True)

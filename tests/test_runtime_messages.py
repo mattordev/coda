@@ -19,6 +19,7 @@ class RuntimeMessageTests(unittest.TestCase):
 
         self.assertNotEqual(first.request_id, second.request_id)
         self.assertIsNot(first.cancel_event, second.cancel_event)
+        self.assertIsNot(first.execution_complete, second.execution_complete)
 
     def test_speech_task_shares_request_cancellation(self):
         request = RuntimeRequest("say hello", InputSource.MANUAL)

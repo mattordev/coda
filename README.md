@@ -20,7 +20,8 @@ eventually revived as the assistant it is today.
 - Use ordered fallback across multiple local and cloud LLM providers.
 - Keep sensitive requests local or sanitise them before cloud fallback.
 - Prefer local Whisper speech recognition with Google as a fallback.
-- Speak responses through ElevenLabs with a local `pyttsx3` fallback.
+- Speak through local neural Pocket TTS, optional ElevenLabs, and a final
+  `pyttsx3` fallback.
 - Load self-registering commands from the `commands` directory.
 - Report live runtime state and transcripts through the dashboard.
 
@@ -76,19 +77,36 @@ Known limitations:
 
 CODA requires Python 3.11 or 3.12.
 
-Create and activate a virtual environment, then install the locked dependencies:
+On Ubuntu, install the audio prerequisites before the Python dependencies so
+PyAudio can build against the system audio libraries. FFmpeg supplies `ffplay`
+for streamed TTS playback, and eSpeak backs the emergency `pyttsx3` provider:
 
 ```text
+sudo apt-get update
+sudo apt-get install ffmpeg portaudio19-dev libespeak1 flac
+```
+
+On Windows, install [FFmpeg](https://ffmpeg.org/download.html), make sure
+`ffplay` is on `PATH`, and verify it with `ffplay -version`.
+
+Create a virtual environment and install the locked dependencies.
+
+Windows PowerShell:
+
+```powershell
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-On Ubuntu, install the audio prerequisites first:
+Linux:
 
-```text
-sudo apt-get update
-sudo apt-get install libportaudio0 libportaudio2 libportaudiocpp0 portaudio19-dev flac
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 Copy `docs/.env.example` to `.env` in the project root and fill in the settings
@@ -343,6 +361,34 @@ documentation, see [LLM Providers](docs/providers.md).
 - `ELEVENLABS_API_KEY` enables ElevenLabs speech output.
 - `CODA_ELEVENLABS_TIMEOUT` bounds audio generation before CODA falls back to
   another speech provider (default: 30 seconds).
+- `TTS_PROVIDER_ORDER` sets the ordered speech fallback chain. The default is
+  `elevenlabs,pockettts,pyttsx3`.
+- `CODA_POCKET_TTS_LANGUAGE` selects PocketTTS's retained language model and
+  defaults to `english`.
+- `CODA_POCKET_TTS_VOICE` selects a built-in voice, local audio prompt or
+  exported voice state. Leaving it blank uses the language model's default
+  voice (Alba for English). Raw-audio voice cloning additionally requires
+  access to Pocket's gated voice-cloning weights.
+
+PocketTTS runs on CPU and streams speech as it is generated. Its model and
+selected voice are loaded once, then reused until `debug reload` or application
+shutdown. The first use downloads the required model and voice assets; after
+they are cached, PocketTTS can operate without a network connection. Playback
+stops immediately when cancelled while remaining synthesis output is drained
+and discarded before the next response begins.
+
+CODA's provider-independent spoken-text normaliser targets English with
+en-GB-oriented phrasing. It expands supported numbers, percentages, GBP and
+USD amounts, 24-hour times, English month-name dates, explicit version tokens,
+system initialisms and common computing units. It deliberately leaves IP
+addresses, URLs, filenames, paths, arbitrary dotted text and ambiguous numeric
+dates unchanged. The original response remains available for display and
+conversation history. Every configured provider receives the same spoken copy
+during routing and fallback.
+
+See [Local Text-to-Speech](docs/local-tts.md) for installation, provider order,
+asset caching, offline and privacy behaviour, licences, cancellation semantics,
+benchmarks and troubleshooting.
 
 The remaining provider, privacy, speech and model options are documented in
 [`docs/.env.example`](docs/.env.example).
@@ -362,6 +408,7 @@ Commands are self-registering modules that own their intent metadata and
 - [Intent Routing](docs/intent-routing.md)
 - [Main Program Flow](docs/main-program-flow.md)
 - [Concurrent Runtime](docs/concurrent-runtime.md)
+- [Local Text-to-Speech](docs/local-tts.md)
 - [LLM Providers](docs/providers.md)
 - [Privacy Routing](docs/privacy-routing.md)
 

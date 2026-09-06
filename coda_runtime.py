@@ -16,6 +16,7 @@ import utils.voice_recognizer as voice_recognizer
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.dashboard_state as dashboard_state
+from utils.console import configure_stdout_encoding
 from colorama import Fore, init
 
 import semantic_version
@@ -56,7 +57,6 @@ shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
 latest_request_lock = threading.Lock()
 latest_request_id = None
-
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -485,28 +485,30 @@ def _execution_loop(stop_event):
             active_request_state.clear(request.request_id)
             runtime_queues.requests.task_done()
             
-        if execution_result.cancelled:
-            outcome = "Cancelled"
-        elif execution_result.error is not None:
-            outcome = "Failed"
-        elif not execution_result.handled:
-            outcome = "Not handled"
-        else:
-            outcome = "Completed"
+        try:
+            if execution_result.cancelled:
+                outcome = "Cancelled"
+            elif execution_result.error is not None:
+                outcome = "Failed"
+            elif not execution_result.handled:
+                outcome = "Not handled"
+            else:
+                outcome = "Completed"
 
-        execution_duration = time.perf_counter() - execution_started_at
+            execution_duration = time.perf_counter() - execution_started_at
 
-        if debug_enabled:
-            outcome_message = (
-                f"[RUNTIME] {outcome} {request_label} "
-                f"in {execution_duration:.2f}s"
-            )
-        else:
-            outcome_message = f"[RUNTIME] Request {outcome.lower()}"
+            if debug_enabled:
+                outcome_message = (
+                    f"[RUNTIME] {outcome} {request_label} "
+                    f"in {execution_duration:.2f}s"
+                )
+            else:
+                outcome_message = f"[RUNTIME] Request {outcome.lower()}"
 
-        print(outcome_message, flush=True)
-                
-        runtime_queues.events.put(execution_result)
+            print(outcome_message, flush=True)
+            runtime_queues.events.put(execution_result)
+        finally:
+            request.execution_complete.set()
         
 def _event_loop(stop_event):
     """Process runtime results until shutdown"""
@@ -718,6 +720,7 @@ def shutdown_runtime(timeout_seconds=4.0):
 
     speech.configure_speech_submitter(None)
     stop_speech_thread(timeout_seconds=timeout_seconds)
+    speech.shutdown()
     stop_event_thread(timeout_seconds=timeout_seconds)
     stop_heartbeat_thread(timeout_seconds=timeout_seconds)
     return True
@@ -817,12 +820,12 @@ def _run_runtime():
                 start_voice_thread()
                 continue
 
-            if not _has_wakeword(normalized_manual_message, wakewords):
+            if not _has_wakeword(manual_message, wakewords):
                 print("[MANUAL] Wakeword not detected. Prefix your request with a wakeword.")
                 continue
 
             command_message = _strip_text_before_wakeword(
-                normalized_manual_message,
+                manual_message,
                 wakewords,
             )
 
@@ -830,12 +833,16 @@ def _run_runtime():
                 print("[MANUAL] Wakeword detected without follow-up text.")
                 continue
 
-            submit_runtime_request(
-                RuntimeRequest(
-                    message=command_message,
-                    source=InputSource.MANUAL,
-                )
+            if voice_recognizer.is_stop_phrase(command_message):
+                cancel_active_request()
+                continue
+
+            manual_request = RuntimeRequest(
+                message=command_message,
+                source=InputSource.MANUAL,
             )
+            submit_runtime_request(manual_request)
+            manual_request.execution_complete.wait()
         else:
             if keyboard_toggle_available:
                 try:
@@ -856,6 +863,7 @@ def _run_runtime():
 
 def main():
     """Run CODA and guarantee runtime cleanup on every exit path."""
+    configure_stdout_encoding()
     shutdown_started.clear()
 
     try:

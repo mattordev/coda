@@ -42,6 +42,9 @@ class RuntimeShutdownTests(unittest.TestCase):
             coda_runtime,
             "stop_speech_thread",
         ) as stop_speech, mock.patch.object(
+            coda_runtime.speech,
+            "shutdown",
+        ) as shutdown_speech, mock.patch.object(
             coda_runtime,
             "stop_event_thread",
         ) as stop_events, mock.patch.object(
@@ -57,6 +60,7 @@ class RuntimeShutdownTests(unittest.TestCase):
         stop_execution.assert_called_once_with(timeout_seconds=1.5)
         configure_speech.assert_called_once_with(None)
         stop_speech.assert_called_once_with(timeout_seconds=1.5)
+        shutdown_speech.assert_called_once_with()
         stop_events.assert_called_once_with(timeout_seconds=1.5)
         stop_heartbeat.assert_called_once_with(timeout_seconds=1.5)
 
@@ -83,6 +87,9 @@ class RuntimeShutdownTests(unittest.TestCase):
             coda_runtime,
             "stop_speech_thread",
         ), mock.patch.object(
+            coda_runtime.speech,
+            "shutdown",
+        ) as shutdown_speech, mock.patch.object(
             coda_runtime,
             "stop_event_thread",
         ), mock.patch.object(
@@ -95,6 +102,7 @@ class RuntimeShutdownTests(unittest.TestCase):
         self.assertTrue(first_result)
         self.assertFalse(second_result)
         stop_voice.assert_called_once_with(timeout_seconds=4.0)
+        shutdown_speech.assert_called_once_with()
 
     def test_shutdown_cancels_active_work_without_starting_pending_request(self):
         queues = RuntimeQueues()
@@ -150,6 +158,9 @@ class RuntimeShutdownTests(unittest.TestCase):
         ), mock.patch.object(
             coda_runtime,
             "stop_speech_thread",
+        ), mock.patch.object(
+            coda_runtime.speech,
+            "shutdown",
         ), mock.patch.object(
             coda_runtime,
             "stop_event_thread",

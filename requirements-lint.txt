@@ -3,5 +3,4 @@ psutil
 requests
 SpeechRecognition
 tqdm
-elevenlabs
 pyttsx3

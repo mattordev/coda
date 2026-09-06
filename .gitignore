@@ -6,3 +6,4 @@ version.json
 dashboard_state.json
 telemetry_state.json
 .venv
+.venv-pocket-tts/

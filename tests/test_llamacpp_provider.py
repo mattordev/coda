@@ -154,6 +154,7 @@ class LlamaCppProviderTests(unittest.TestCase):
         )
 
         response.close.assert_called()
+        self.assertEqual(response.encoding, "utf-8")
 
     def test_generate_discards_partial_response_when_cancelled(self):
         cancel_event = Event()
