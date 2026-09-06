@@ -19,7 +19,6 @@ class PocketTTSRuntime(Protocol):
 
 RuntimeFactory = Callable[[str, str | None], PocketTTSRuntime]
 PLAYBACK_TAIL_SECONDS = 0.2
-POCKET_TOKEN_LIMIT = 50
 POCKET_CHUNK_TARGET = 45
 
 
