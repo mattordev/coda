@@ -1,6 +1,7 @@
 import os
+from threading import Event
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.cancellable import CancellationScope
 
 try:
     import openai
@@ -17,8 +18,7 @@ def get_api_key():
 
 def get_model():
     return (
-        os.getenv("CODA_GEMINI_MODEL", "gemini-3.7-flash").strip()
-        or "gemini-3.7-flash"
+        os.getenv("CODA_GEMINI_MODEL", "gemini-3.7-flash").strip() or "gemini-3.7-flash"
     )
 
 
@@ -38,11 +38,11 @@ def _get_timeout_seconds():
 
 
 def _generate_stream(
+    scope,
+    cancel_event,
     client,
     model,
     messages,
-    cancel_event,
-    scope,
 ):
     stream = client.chat.completions.create(
         model=model,
@@ -78,7 +78,7 @@ def _generate_stream(
     return "".join(response_parts)
 
 
-def generate(messages, cancel_event=None):
+def generate(messages, cancel_event: Event | None = None):
     api_key = get_api_key()
     model = get_model()
 
@@ -102,18 +102,14 @@ def generate(messages, cancel_event=None):
             close_client = scope.add(close_client)
 
         try:
-            assistant_message = run_cancellable(
-                lambda: _generate_stream(
-                    client,
-                    model,
-                    messages,
-                    cancel_event,
-                    scope,
-                ),
+            assistant_message = scope.run_cancellable(
+                _generate_stream,
                 cancel_event,
                 _get_timeout_seconds(),
                 "Gemini generation timed out.",
-                on_abandon=scope.cancel,
+                client,
+                model,
+                messages,
             )
 
         finally:

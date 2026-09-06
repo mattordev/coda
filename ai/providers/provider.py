@@ -4,10 +4,17 @@ from abc import ABC, abstractmethod
 
 from enum import StrEnum
 import os
-from typing import TypedDict, TYPE_CHECKING
+from typing import ParamSpec, TypeVar, TypedDict, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Required, NotRequired
+    from typing import Callable, Concatenate, Required, NotRequired
+    from threading import Event
+
+from ai.providers.cancellable import CancellationScope
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 class Provider(ABC):
     class Type(StrEnum):
@@ -28,7 +35,16 @@ class Provider(ABC):
     def _get_data() -> Details:
         pass
 
-    def get_base_url(self) -> str|None:
+    @staticmethod
+    @abstractmethod
+    def _get_name() -> str:
+        pass
+
+    @classmethod
+    def _get_timeout_message(cls) -> str:
+        return f"{cls._get_name()} has timed out."
+
+    def get_base_url(self) -> str | None:
         env_key = self.data.get("base_url_env", "")
 
         default_url = self.data.get("default_base_url", "")
@@ -77,3 +93,23 @@ class Provider(ABC):
             return float(value)
         except ValueError:
             return default
+
+    @classmethod
+    def _run_cancellable_wrapper(
+        cls,
+        function: Callable[Concatenate[CancellationScope, Event | None, _P], _R],
+        timeout_seconds: float,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> _R | None:
+        scope = CancellationScope()
+        cancel_event = Event()
+
+        return scope.run_cancellable(
+            function,
+            cancel_event,
+            timeout_seconds,
+            cls._get_timeout_message(),
+            *args,
+            **kwargs,
+        )

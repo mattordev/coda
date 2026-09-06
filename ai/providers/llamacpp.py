@@ -4,7 +4,7 @@ import os
 import requests
 from requests.exceptions import Timeout
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.cancellable import CancellationScope
 
 _model_cache = None
 
@@ -65,9 +65,7 @@ def get_model(http_client=requests):
         )
 
     if not models:
-        return None, (
-            "No model was reported by the configured llama.cpp server."
-        )
+        return None, ("No model was reported by the configured llama.cpp server.")
 
     model = models[0].get("id")
     if not model:
@@ -160,9 +158,7 @@ def _generate_request(messages, cancel_event, http_client, scope):
     except InterruptedError:
         return None, "Request cancelled."
     except Timeout:
-        return None, (
-            f"llama.cpp timed out after {timeout_seconds} seconds."
-        )
+        return None, (f"llama.cpp timed out after {timeout_seconds} seconds.")
     except Exception as exc:
         return None, str(exc)
 

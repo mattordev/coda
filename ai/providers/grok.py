@@ -1,6 +1,6 @@
 import os
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.cancellable import CancellationScope
 
 try:
     import openai
@@ -16,10 +16,7 @@ def get_api_key():
 
 
 def get_model():
-    return (
-        os.getenv("CODA_GROK_MODEL", "grok-4.5").strip()
-        or "grok-4.5"
-    )
+    return os.getenv("CODA_GROK_MODEL", "grok-4.5").strip() or "grok-4.5"
 
 
 def reload_config():
@@ -62,10 +59,7 @@ def _generate_stream(
 
     try:
         for chunk in stream:
-            if (
-                cancel_event is not None
-                and cancel_event.is_set()
-            ):
+            if cancel_event is not None and cancel_event.is_set():
                 raise InterruptedError("Request cancelled.")
 
             if not chunk.choices:

@@ -7,11 +7,13 @@ if TYPE_CHECKING:
     from typing import Iterable
 
 import openai
+
 if TYPE_CHECKING:
     from openai.types.chat import ChatCompletionMessageParam
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.cancellable import CancellationScope
 from ai.providers.provider import Provider
+
 
 class OpenAIProvider(Provider):
     @staticmethod
@@ -21,21 +23,27 @@ class OpenAIProvider(Provider):
             "api_key_env": "OPENAI_API_KEY",
             "model_env": "CODA_OPENAI_MODEL",
             "model_required": False,
-            "default_model": "gpt-4o-mini"
+            "default_model": "gpt-4o-mini",
         }
-    
+
     @staticmethod
-    def _get_timeout_message() -> str:
-        return "OpenAI generation timed out."
+    def _get_name() -> str:
+        return "OpenAI"
 
     def reload_config(self) -> None:
         openai.api_key = self.get_api_key() or None
-            
+
     def describe(self) -> str:
         return f"openai (model: {self.get_configured_model()})"
-        
+
     @staticmethod
-    def _generate_stream(client: openai.OpenAI, model: str, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None, scope: CancellationScope) -> str:
+    def _generate_stream(
+        scope: CancellationScope,
+        cancel_event: Event | None,
+        client: openai.OpenAI,
+        model: str,
+        messages: Iterable[ChatCompletionMessageParam],
+    ) -> str:
         stream = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -63,44 +71,41 @@ class OpenAIProvider(Provider):
 
         return "".join(response_parts)
 
-    def generate(self, messages: Iterable[ChatCompletionMessageParam], cancel_event: Event|None = None) -> tuple[str|None, str|None]:
+    def generate(
+        self,
+        messages: Iterable[ChatCompletionMessageParam],
+        cancel_event: Event | None = None,
+    ) -> tuple[str | None, str | None]:
         api_key = self.get_api_key()
         model = self.get_configured_model()
-        
+
         if openai is None:
             return None, "openai package is not installed."
-        
+
         if not api_key:
-            return None, f"{self.data.get("api_key_env")} is not set in env."
+            api_key_env = self.data.get("api_key_env")
+            return None, f"{api_key_env} is not set in env."
 
         # if we require a model, but haven't specified one, we cannot continue
         if not model and self.data.get("model_required"):
             model_env = self.data.get("model_env")
             return None, f"{model_env} is not set in env."
-            
+
         try:
             client = openai.OpenAI(api_key=api_key, base_url=self.get_base_url())
             scope = CancellationScope()
-            close_client = client.close
-            if callable(close_client):
-                close_client = scope.add(close_client)
+            close_client = scope.add(client.close)
+
             try:
-                assistant_message = run_cancellable(
-                    lambda: self._generate_stream(
-                        client,
-                        model,
-                        messages,
-                        cancel_event,
-                        scope,
-                    ),
-                    cancel_event,
+                assistant_message = self._run_cancellable_wrapper(
+                    self._generate_stream,
                     self._get_timeout_seconds(),
-                    self._get_timeout_message(),
-                    on_abandon=scope.cancel,
+                    client,
+                    model,
+                    messages,
                 )
             finally:
-                if callable(close_client):
-                    close_client()
+                close_client()
         except InterruptedError:
             return None, "Request cancelled."
         except Exception as exc:
