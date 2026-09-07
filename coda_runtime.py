@@ -265,7 +265,7 @@ def load_wakewords():
 # compares local version.json with remote version on github.
 # - if remote newer, prompts user for an update.
 # - if user accepts, runs the update_manager which handles the update process and restarts the program.
-# - returns true if an update was performed, false otherwise
+# - returns a prepared update, or None/False when continuing this runtime
 def check_update_available(version_url):
     try:
         # Try to load the local version file
@@ -292,7 +292,7 @@ def check_update_available(version_url):
                 if prompt.lower() == "y":
                     # Update the program using the update_manager
                     import utils.update_manager as update_manager
-                    return update_manager.main() is True
+                    return update_manager.prepare_update()
                 else:
                     init(autoreset=True)
                     print(
@@ -749,7 +749,7 @@ def json_dict_to_string_array(jsonData):
 #####################
 
 
-def _run_runtime():
+def _run_runtime(skip_update_check=False):
     global commands
     global wakewords
     global manual_assisstant_input
@@ -763,19 +763,23 @@ def _run_runtime():
         "powder", "kodi", "system", "jeff"
         ]
 
-    if check_update_available(version_url):
-        # if there's an update available, re-find the commands
-        setup_commands()
-        print("Setting up commands as a new version was found...")
-    else:
-        try:
-            # load the commands from JSON.
-            commands = load_commands()
-            wakewords = load_wakewords()
-        except FileNotFoundError:
-            run_first_time_setup()
+    update = None if skip_update_check else check_update_available(version_url)
+    if update:
+        # Return before starting workers or loading updated commands into old code.
+        return update
+    try:
+        # load the commands from JSON.
+        commands = load_commands()
+        wakewords = load_wakewords()
+    except FileNotFoundError:
+        run_first_time_setup()
 
     command.configure_intent_router(commands)
+
+    # The replacement proves imports and command/configuration setup succeeded,
+    # but waits for the updater to commit before starting workers or reading input.
+    from utils.update_bootstrap import acknowledge_handoff
+    acknowledge_handoff(Path(__file__).resolve().parent)
 
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
@@ -860,19 +864,29 @@ def _run_runtime():
             time.sleep(0.05)
 
 
-def main():
+def main(skip_update_check=False):
     """Run CODA and guarantee runtime cleanup on every exit path."""
     configure_stdout_encoding()
     shutdown_started.clear()
 
+    update = None
     try:
-        _run_runtime()
+        update = _run_runtime(skip_update_check=skip_update_check)
     except KeyboardInterrupt:
         pass
     finally:
         shutdown_runtime()
 
+    if update:
+        from utils.update_manager import complete_update
+        from utils.update_bootstrap import wait_for_process
+        child = complete_update(update)
+        if child is not None:
+            return wait_for_process(child)
+        print("Update failed. Restart CODA after checking the recovery messages above.")
+        return 1
     print("Exiting C.O.D.A")
+    return 0
 
 
 if __name__ == "__main__":

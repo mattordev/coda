@@ -7,3 +7,4 @@ dashboard_state.json
 telemetry_state.json
 .venv
 .coda-update-*/
+.coda-update-active.json

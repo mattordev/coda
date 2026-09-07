@@ -1,7 +1,11 @@
 import json
+from dataclasses import dataclass
 import platform
 import shutil
+import subprocess
+import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -13,6 +17,12 @@ except ImportError:
     pyuac = None
 from colorama import Fore, init
 from tqdm import tqdm
+
+from utils.update_bootstrap import (
+    ACTIVE_ENVIRONMENT, HANDOFF_ENV, launch_environment,
+    managed_environment, wait_for_process,
+)
+from utils.update_dependencies import prepare_environment
 
 # Updates CODA to the latest version, if available, directly from the GitHub repository.
 # Keeping these up top so its easy to swap to releases later.
@@ -174,9 +184,10 @@ def activate_updated_program(root, workspace):
                 saved.append(name)
             _safe_child(staged, name).rename(target)
             installed.append(name)
-    except Exception:
+    except BaseException:
         rollback_from_backup(root, workspace, installed, saved)
         raise
+    return installed, saved
 
 
 def rollback_from_backup(root, workspace, installed, saved):
@@ -201,40 +212,163 @@ def rollback_from_backup(root, workspace, installed, saved):
         raise OSError("Rollback incomplete; recovery files retained: " + "; ".join(errors))
 
 
-def main(install_root=None):
-    """Stage within the install directory and return explicit success/failure."""
+@dataclass(frozen=True)
+class PreparedUpdate:
+    """A fully staged update, not yet activated in the running installation."""
+
+    root: Path
+    workspace: Path
+    python: Path
+    arguments: tuple[str, ...]
+
+
+def _validate_install_root(root):
+    _reject_links(root)
+    root = root.resolve(strict=True)
+    if not root.is_dir() or not (root / "main.py").is_file():
+        raise ValueError("Update target is not a CODA installation")
+    if any((parent / ".git").exists() for parent in (root, *root.parents)):
+        raise ValueError(
+            "Automatic source updates are disabled in Git checkouts. "
+            "Use Git to update this installation after saving your work."
+        )
+    return root
+
+
+def prepare_update(install_root=None, arguments=None):
+    """Stage source and dependencies without changing the live installation."""
     root = Path(install_root) if install_root is not None else INSTALL_ROOT
     workspace = None
     try:
-        _reject_links(root)
-        root = root.resolve(strict=True)
-        if not root.is_dir() or not (root / "main.py").is_file():
-            raise ValueError("Update target is not a CODA installation")
         # Git checkouts include worktrees (.git can be a file) and nested installs.
         # Never replace development work with a downloaded release snapshot.
-        if any((parent / ".git").exists() for parent in (root, *root.parents)):
-            raise ValueError(
-                "Automatic source updates are disabled in Git checkouts. "
-                "Use Git to update this installation after saving your work."
-            )
+        root = _validate_install_root(root)
         workspace = Path(tempfile.mkdtemp(prefix=".coda-update-", dir=root))
         update_program(workspace)
         extract_download(workspace)
         setup_updated_program(workspace)
         validate_new_version(workspace)
         preserve_local_files(root, workspace)
-        activate_updated_program(root, workspace)
+        staged = workspace / NEW_VERSION_DIR
+        # Older releases cannot participate in the supervised startup handshake.
+        if not (staged / "utils" / "update_bootstrap.py").is_file():
+            raise ValueError("Downloaded release does not support safe restart; update manually")
+        python = prepare_environment(workspace, staged, sys.executable)
     except Exception as e:
         print(f"Error during update: {e}")
         if workspace is not None:
             print(f"Update recovery files retained at {workspace}")
-        return False
+        return None
+
+    return PreparedUpdate(
+        root, workspace, python,
+        tuple(sys.argv[1:] if arguments is None else arguments),
+    )
+
+
+def _stop_failed_child(child):
+    if child.poll() is None:
+        child.terminate()
+    try:
+        child.wait(timeout=6)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=6)
+
+
+def restart_candidate(update):
+    """Launch a child which waits for acceptance before running any workers."""
+    env = launch_environment(update.python)
+    env[HANDOFF_ENV] = update.workspace.name
+    return subprocess.Popen(
+        [str(update.python), str(update.root / "main.py"), *update.arguments],
+        cwd=update.root, env=env,
+    )
+
+
+def wait_for_candidate(update, child, timeout=45):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            raise RuntimeError("Updated CODA exited before startup was ready")
+        if (update.workspace / "restart-ready").is_file():
+            return
+        time.sleep(0.05)
+    raise TimeoutError("Updated CODA did not acknowledge startup in time")
+
+
+def complete_update(update):
+    """Activate only after old-runtime shutdown; roll back failed startup."""
+    root, workspace = update.root, update.workspace
+    journal = None
+    child = None
+    selection_changed = False
+    previous_selection = None
+    marker = None
+    try:
+        # Staging can take minutes: repeat the development-checkout guard at
+        # the activation boundary, and bind recovery to this exact attempt.
+        _validate_install_root(root)
+        if _safe_child(root, workspace.name) != workspace:
+            raise ValueError("Prepared workspace is outside the installation")
+        marker = _safe_child(root, ACTIVE_ENVIRONMENT)
+        previous_selection = marker.read_bytes() if marker.exists() else None
+        if previous_selection is not None:
+            with (workspace / "previous-environment.json").open("xb") as handle:
+                handle.write(previous_selection)
+        # Verify the prepared interpreter is exactly the environment this attempt owns.
+        relative = str(Path(workspace.name) / "environment")
+        if managed_environment(root, relative) != update.python:
+            raise ValueError("Prepared interpreter is outside its managed environment")
+        journal = activate_updated_program(root, workspace)
+        child = restart_candidate(update)
+        wait_for_candidate(update, child)
+        selection = workspace / ACTIVE_ENVIRONMENT
+        selection.write_text(json.dumps({"environment": relative}), encoding="utf-8")
+        selection.replace(marker)
+        selection_changed = True
+        with (workspace / "restart-proceed").open("x", encoding="utf-8") as handle:
+            handle.write("proceed")
+    except BaseException as error:
+        # Never restore sources underneath a child that might still be running.
+        if child is not None:
+            try:
+                _stop_failed_child(child)
+            except (OSError, subprocess.TimeoutExpired) as stop_error:
+                print(f"Cannot stop updated CODA; manual recovery required: {stop_error}")
+                print(f"Recovery files retained at {workspace}")
+                return None
+        try:
+            if selection_changed:
+                if previous_selection is None:
+                    marker.unlink()
+                else:
+                    restored = workspace / "previous-environment.json"
+                    restored.write_bytes(previous_selection)
+                    restored.replace(marker)
+            if journal is not None:
+                rollback_from_backup(root, workspace, *journal)
+        except (OSError, ValueError) as recovery_error:
+            print(f"Automatic recovery incomplete: {recovery_error}")
+        print(f"Update activation/restart failed: {error}")
+        print(f"Recovery files retained at {workspace}")
+        return None
 
     init(autoreset=True)
-    print(Fore.GREEN + "Source update complete!")
+    print(Fore.GREEN + "Update activated; handing over to the new runtime.")
     print(Fore.BLUE + f"Previous files retained at {workspace / BACKUP_DIR}")
-    print("Install the updated requirements and restart CODA before continuing.")
-    return True
+    return child
+
+
+def main(install_root=None):
+    """Standalone startup-only update; never overwrite a running environment."""
+    update = prepare_update(install_root, arguments=())
+    if update is None:
+        return False
+    child = complete_update(update)
+    if child is None:
+        return False
+    return wait_for_process(child) == 0
 
 
 def _can_attempt_uac_elevation():

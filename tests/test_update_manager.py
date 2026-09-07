@@ -3,7 +3,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from utils import update_manager as updater
 
@@ -18,6 +18,25 @@ class UpdateManagerTests(unittest.TestCase):
         (self.root / ".venv").mkdir()
         (self.root / ".venv" / "keep").write_text("environment", encoding="utf-8")
         (self.root / "notes.txt").write_text("personal", encoding="utf-8")
+        dependencies = patch.object(updater, "prepare_environment", side_effect=self.environment)
+        self.dependencies = dependencies.start()
+        self.addCleanup(dependencies.stop)
+        restart = patch.object(updater, "restart_candidate", return_value=Mock())
+        self.child = restart.start().return_value
+        self.child.wait.return_value = 0
+        self.addCleanup(restart.stop)
+        readiness = patch.object(updater, "wait_for_candidate")
+        self.readiness = readiness.start()
+        self.addCleanup(readiness.stop)
+
+    def environment(self, workspace, _staged, _python):
+        from utils.update_bootstrap import environment_python
+        environment = workspace / "environment"
+        python = environment_python(environment)
+        python.parent.mkdir(parents=True)
+        python.write_text("fake interpreter")
+        (environment / "pyvenv.cfg").write_text("test environment")
+        return python
 
     def download(self, workspace):
         with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
@@ -27,6 +46,7 @@ class UpdateManagerTests(unittest.TestCase):
                 "requirements.txt": "requests",
                 ".env": "release default",
                 "wakewords.json": "[]",
+                "utils/update_bootstrap.py": "# restart protocol fixture",
             }.items():
                 archive.writestr(f"coda-main/{name}", value)
 
@@ -47,7 +67,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual((self.root / "main.py").read_text(), "new code")
         self.assert_local_files()
         self.assertEqual((stale / "keep").read_text(), "previous backup")
-        attempt = next(self.root.glob(".coda-update-*"))
+        attempt = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
         self.assertEqual((attempt / updater.BACKUP_DIR / "main.py").read_text(), "old code")
 
     def test_download_failure_never_activates_stale_backup(self):
@@ -62,9 +82,9 @@ class UpdateManagerTests(unittest.TestCase):
 
     def test_repeated_updates_keep_separate_backups(self):
         self.assertTrue(self.run_update())
-        first = next(self.root.glob(".coda-update-*"))
+        first = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
         self.assertTrue(self.run_update())
-        self.assertEqual(len(list(self.root.glob(".coda-update-*"))), 2)
+        self.assertEqual(len([p for p in self.root.glob(".coda-update-*") if p.is_dir()]), 2)
         self.assertEqual((first / updater.BACKUP_DIR / "main.py").read_text(), "old code")
         self.assert_local_files()
 
@@ -80,14 +100,14 @@ class UpdateManagerTests(unittest.TestCase):
 
         with patch.object(Path, "rename", fail_install_and_restore):
             self.assertFalse(self.run_update())
-        attempt = next(self.root.glob(".coda-update-*"))
+        attempt = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
         self.assertEqual((attempt / updater.BACKUP_DIR / "main.py").read_text(), "old code")
         self.assertEqual((attempt / updater.NEW_VERSION_DIR / "main.py").read_text(), "new code")
         self.assert_local_files()
 
     def test_partial_activation_restores_only_this_attempt(self):
         original_rename = Path.rename
-        for failure_at in (1, 2, 3, 4, 5, 6, 7):
+        for failure_at in range(1, 9):
             with self.subTest(failure_at=failure_at):
                 calls = 0
 
@@ -187,11 +207,102 @@ class UpdateManagerTests(unittest.TestCase):
             patch("builtins.open", unittest.mock.mock_open(read_data='{"version":"1.0.0"}')),
             patch.object(coda_runtime.requests, "get") as get,
             patch("builtins.input", return_value="y"),
-            patch.object(updater, "main", return_value=False),
+            patch.object(updater, "prepare_update", return_value=None),
         ):
             get.return_value.status_code = 200
             get.return_value.json.return_value = {"version": "1.4.4"}
             self.assertFalse(coda_runtime.check_update_available("unused"))
+
+    def test_dependency_failure_does_not_activate_source(self):
+        self.dependencies.side_effect = RuntimeError("installation failed")
+        self.assertFalse(self.run_update())
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
+        self.assertFalse((self.root / updater.ACTIVE_ENVIRONMENT).exists())
+
+    def test_prepare_does_not_replace_source_and_retains_arguments(self):
+        with patch.object(updater, "update_program", side_effect=self.download):
+            prepared = updater.prepare_update(self.root, arguments=["-m", "--mic", "Yeti Orb"])
+        self.assertIsNotNone(prepared)
+        self.assertEqual(prepared.arguments, ("-m", "--mic", "Yeti Orb"))
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
+
+    def test_restart_spawn_failure_restores_source_and_selection(self):
+        marker = self.root / updater.ACTIVE_ENVIRONMENT
+        marker.write_text('{"environment":"old selection"}')
+        with patch.object(updater, "restart_candidate", side_effect=OSError("cannot start")):
+            self.assertFalse(self.run_update())
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assertEqual(marker.read_text(), '{"environment":"old selection"}')
+        self.assert_local_files()
+
+    def test_readiness_failure_stops_child_before_rollback(self):
+        events = []
+        self.readiness.side_effect = TimeoutError("no startup acknowledgement")
+        rollback = updater.rollback_from_backup
+
+        def restore(*args):
+            events.append("restore")
+            return rollback(*args)
+
+        with (
+            patch.object(updater, "_stop_failed_child", side_effect=lambda _child: events.append("stop")),
+            patch.object(updater, "rollback_from_backup", side_effect=restore),
+        ):
+            self.assertFalse(self.run_update())
+        self.assertEqual(events, ["stop", "restore"])
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
+
+    def test_child_cannot_be_stopped_does_not_roll_back_underneath_it(self):
+        self.readiness.side_effect = TimeoutError("not ready")
+        with (
+            patch.object(updater, "_stop_failed_child", side_effect=OSError("cannot stop")),
+            patch.object(updater, "rollback_from_backup") as rollback,
+        ):
+            self.assertFalse(self.run_update())
+        rollback.assert_not_called()
+        attempt = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
+        self.assertEqual((attempt / updater.BACKUP_DIR / "main.py").read_text(), "old code")
+
+    def test_success_persists_new_environment_for_future_launches(self):
+        self.assertTrue(self.run_update())
+        from utils.update_bootstrap import selected_python
+        python = selected_python(self.root)
+        self.assertTrue(python.is_file())
+        self.assertEqual(python.parent.parent.name, "environment")
+        self.child.wait.assert_called_once()
+
+    def test_selection_commit_failure_restores_previous_source(self):
+        original_replace = Path.replace
+
+        def fail_selection(source, target):
+            if source.name == updater.ACTIVE_ENVIRONMENT:
+                raise PermissionError("selection locked")
+            return original_replace(source, target)
+
+        with patch.object(Path, "replace", fail_selection):
+            self.assertFalse(self.run_update())
+        self.assertFalse((self.root / updater.ACTIVE_ENVIRONMENT).exists())
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
+
+    def test_failure_after_selection_commit_restores_previous_selection(self):
+        marker = self.root / updater.ACTIVE_ENVIRONMENT
+        marker.write_text('{"environment":"previous environment"}')
+        original_open = Path.open
+
+        def fail_proceed(path, *args, **kwargs):
+            if path.name == "restart-proceed":
+                raise PermissionError("handoff write failed")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", fail_proceed):
+            self.assertFalse(self.run_update())
+        self.assertEqual(marker.read_text(), '{"environment":"previous environment"}')
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
 
 
 if __name__ == "__main__":
