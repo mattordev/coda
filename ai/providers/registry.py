@@ -2,30 +2,51 @@ import os
 
 from .provider import Provider
 
-from .openai import OpenAIProvider
-from .openrouter import OpenRouterProvider
+_SUPPORTED_PROVIDERS: dict[str, Provider] = {}
 
-_SUPPORTED_PROVIDERS: dict[str, Provider] = {
-    "openai": OpenAIProvider(),
-    "openrouter": OpenRouterProvider(),
-    # "gemini": {
-    #     "type": "cloud",
-    #     "api_key_env": "GEMINI_API_KEY",
-    #     "model_env": "CODA_GEMINI_MODEL",
-    #     "model_required": False,
-    # },
-    # "grok": {
-    #     "type": "cloud",
-    #     "api_key_env": "XAI_API_KEY",
-    #     "model_env": "CODA_GROK_MODEL",
-    #     "model_required": False,
-    # },
-    # "openrouter": {
-    #     "type": "cloud",
-    #     "api_key_env": "OPENROUTER_API_KEY",
-    #     "model_env": "CODA_OPENROUTER_MODEL",
-    #     "model_required": True,
-    # },
+try:
+    from . import OpenAIProvider
+
+    _SUPPORTED_PROVIDERS["openai"] = OpenAIProvider()
+except ImportError:
+    pass
+
+try:
+    from . import OpenRouterProvider
+
+    _SUPPORTED_PROVIDERS["openrouter"] = OpenRouterProvider()
+except ImportError:
+    pass
+
+try:
+    from . import GeminiProvider
+
+    _SUPPORTED_PROVIDERS["gemini"] = GeminiProvider()
+except ImportError:
+    pass
+
+try:
+    from . import GrokProvider
+
+    _SUPPORTED_PROVIDERS["grok"] = GrokProvider()
+except ImportError:
+    pass
+
+try:
+    from . import OllamaProvider
+
+    _SUPPORTED_PROVIDERS["ollama"] = OllamaProvider()
+except ImportError:
+    pass
+
+try:
+    from . import LlamacppProvider
+
+    _SUPPORTED_PROVIDERS["llamacpp"] = LlamacppProvider()
+except ImportError:
+    pass
+
+__SUPPORTED_PROVIDERS: dict[str, Provider] = {
     # "ollama": {
     #     "type": "local",
     #     "model_env": "CODA_OLLAMA_MODEL",
@@ -60,7 +81,7 @@ def is_provider_configured(provider_name: str) -> bool:
     if provider.data.get("type") == "local":
         return True
 
-    api_key_env = provider.data.get("api_key_env_name")
+    api_key_env = provider.data.get("api_key_env")
 
     if not api_key_env:
         return False
@@ -99,7 +120,7 @@ def get_provider_api_key_env(provider_name: str) -> str | None:
     if provider is None:
         return None
 
-    return provider.data.get("api_key_env_name")
+    return provider.data.get("api_key_env")
 
 
 def get_provider_model_env(provider_name: str) -> str | None:

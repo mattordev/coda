@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from threading import Event
 
 from ai.providers.cancellable import CancellationScope
+from ai.providers.basellama import BaseLlamaProvider, LlamaModel
 from ai.providers.provider import Provider
 
 
@@ -51,7 +52,7 @@ class _OllamaChatChunk(TypedDict):
     done: bool
 
 
-class OllamaProvider(Provider):
+class OllamaProvider(BaseLlamaProvider):
     @staticmethod
     def _get_data() -> Provider.Details:
         return {
@@ -59,30 +60,24 @@ class OllamaProvider(Provider):
             "model_env": "CODA_OLLAMA_MODEL",
             "base_url_env": "CODA_OLLAMA_BASE_URL",
             "model_required": False,
+            "default_model": "nemotron-3-nano:4b",
             "default_base_url": "http://localhost:11434",
         }
 
-    def __init__(self) -> None:
-        self.active_session = requests.Session()
-        super().__init__()
+    @staticmethod
+    def _get_name() -> str:
+        return "Ollama"
 
     @staticmethod
     def preferred_models() -> list[str]:
         return ["nemotron-3-nano:4b"]
 
-    def get_base_url(self) -> str | None:
-        base_url = super().get_base_url()
-
-        if not base_url:
-            return None
-
-        return base_url.rstrip("/")
+    @classmethod
+    def get_models_url(cls) -> str:
+        return f"{cls.get_base_url()}/api/tags"
 
     def _get_cold_start_timeout_seconds(self) -> float:
         return self._get_float_env("CODA_OLLAMA_COLD_START_TIMEOUT", 120.0)
-
-    def reload_config(self) -> None:
-        self._model_cache = None
 
     def _get_request(self, url: str) -> _OllamaHttpResponse | None:
         try:
@@ -99,8 +94,8 @@ class OllamaProvider(Provider):
 
     def _get_models(
         self, url: str, *, raise_exception: bool = True
-    ) -> list[_OllamaModel]:
-        models: list[_OllamaModel] = []
+    ) -> list[LlamaModel]:
+        models: list[LlamaModel] = []
         try:
             response = self._get_request(url)
             if response is not None:
@@ -110,52 +105,6 @@ class OllamaProvider(Provider):
                 raise
 
         return models
-
-    def get_model(self) -> tuple[str | None, str | None]:
-        configured_model = self.get_configured_model()
-        if configured_model:
-            return configured_model, None
-
-        if self._model_cache:
-            return self._model_cache, None
-
-        model_env = self.data.get("model_env")
-        models: list[_OllamaModel] = []
-        try:
-            tags_url = f"{self.get_base_url()}/api/tags"
-            models = self._get_models(tags_url)
-        except Exception as exc:
-            return (
-                None,
-                f"Could not fetch Ollama models automatically. Set {model_env} explicitly. Details: {exc}",
-            )
-
-        if not models:
-            return (
-                None,
-                f"No Ollama models were found at the configured host. Set {model_env} after pulling a model on the host.",
-            )
-
-        model_names: list[str] = []
-        for model in models:
-            model_name = model.get("name") or model.get("model")
-            if model_name:
-                model_names.append(model_name)
-
-        selected_model: str | None = None
-        for preferred_model in self.preferred_models():
-            if preferred_model in model_names:
-                selected_model = preferred_model
-                break
-
-        if selected_model is None:
-            selected_model = model_names[0] if model_names else None
-
-        if not selected_model:
-            return None, "Ollama returned models but none included a usable name."
-
-        _model_cache = selected_model
-        return _model_cache, None
 
     def describe(self) -> str:
         model, error = self.get_model()
@@ -180,11 +129,11 @@ class OllamaProvider(Provider):
 
     def _generate_stream(
         self,
+        scope: CancellationScope,
+        cancel_event: Event | None,
         model_name: str,
         messages: list[_OllamaMessage],
         timeout_seconds: float,
-        scope: CancellationScope,
-        cancel_event: Event | None = None,
     ) -> tuple[str | None, str | None]:
         chat_url = f"{self.get_base_url()}/api/chat"
 
@@ -252,11 +201,11 @@ class OllamaProvider(Provider):
 
         try:
             result = self._generate_stream(
+                scope,
+                cancel_event,
                 model_name,
                 messages,
                 timeout_seconds,
-                scope,
-                cancel_event,
             )
         except InterruptedError:
             return None, "Request cancelled."
@@ -275,8 +224,6 @@ class OllamaProvider(Provider):
         self, messages: list[_OllamaMessage], cancel_event: Event | None = None
     ) -> tuple[str | None, str | None] | None:
         session = requests.Session()
-        scope = CancellationScope()
-        close_session = scope.add(session.close)
 
         timeout_seconds = max(
             self._get_timeout_seconds(), self._get_cold_start_timeout_seconds()
@@ -284,12 +231,13 @@ class OllamaProvider(Provider):
         timeout_seconds += min(self._get_timeout_seconds(), 10) * 2
 
         try:
-            return self._run_cancellable_wrapper(
-                self._generate_request, timeout_seconds, messages
+            return self._generate_request_wrapper(
+                self._generate_request,
+                session.close,
+                timeout_seconds,
+                messages,
             )
         except InterruptedError:
             return None, "Request cancelled."
         except Exception as exc:
             return None, str(exc)
-        finally:
-            close_session()

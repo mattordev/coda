@@ -1,7 +1,4 @@
-from ai.providers.openai import OpenAIProvider
-from ai.providers.provider import Provider
-
-from ai.providers.provider import Provider
+from . import Provider, OpenAIProvider
 
 
 class OpenRouterProvider(OpenAIProvider):

@@ -1,125 +1,40 @@
-import os
-from threading import Event
+from __future__ import annotations
 
-from ai.providers.cancellable import CancellationScope
+import openai
+from typing import TYPE_CHECKING
 
-try:
-    import openai
-except ImportError:
-    openai = None
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionChunk
+    from typing import Iterable
 
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+from ai.providers.openai import OpenAIProvider
 
 
-def get_api_key():
-    return os.getenv("GEMINI_API_KEY", "").strip()
+class GeminiProvider(OpenAIProvider):
+    @staticmethod
+    def _get_data() -> GeminiProvider.Details:
+        return {
+            "type": GeminiProvider.Type.CLOUD,
+            "api_key_env": "GEMINI_API_KEY",
+            "model_env": "CODA_GEMINI_MODEL",
+            "model_required": False,
+            "default_model": "gemini-3.7-flash",
+            "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        }
 
+    @staticmethod
+    def _get_name() -> str:
+        return "Gemini"
 
-def get_model():
-    return (
-        os.getenv("CODA_GEMINI_MODEL", "gemini-3.7-flash").strip() or "gemini-3.7-flash"
-    )
-
-
-def reload_config():
-    pass
-
-
-def describe():
-    return f"gemini (model: {get_model()})"
-
-
-def _get_timeout_seconds():
-    try:
-        return max(0.1, float(os.getenv("CODA_LLM_TIMEOUT", "45")))
-    except ValueError:
-        return 45.0
-
-
-def _generate_stream(
-    scope,
-    cancel_event,
-    client,
-    model,
-    messages,
-):
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-        reasoning_effort="none",
-    )
-
-    close_stream = getattr(stream, "close", None)
-
-    if callable(close_stream):
-        close_stream = scope.add(close_stream)
-
-    response_parts = []
-
-    try:
-        for chunk in stream:
-            if cancel_event is not None and cancel_event.is_set():
-                raise InterruptedError("Request cancelled.")
-
-            if not chunk.choices:
-                continue
-
-            content = chunk.choices[0].delta.content
-
-            if content:
-                response_parts.append(content)
-
-    finally:
-        if callable(close_stream):
-            close_stream()
-
-    return "".join(response_parts)
-
-
-def generate(messages, cancel_event: Event | None = None):
-    api_key = get_api_key()
-    model = get_model()
-
-    if openai is None:
-        return None, "openai package is not installed."
-
-    if not api_key:
-        return None, "GEMINI_API_KEY is not set in env."
-
-    try:
-        client = openai.OpenAI(
-            api_key=api_key,
-            base_url=GEMINI_BASE_URL,
+    @staticmethod
+    def _create_chat_completion_stream(
+        client: openai.OpenAI,
+        model: str,
+        messages: Iterable[ChatCompletionMessageParam],
+    ) -> openai.Stream[ChatCompletionChunk]:
+        return client.chat.completions.create(
+            model=model, messages=messages, stream=True, reasoning_effort="none"
         )
 
-        scope = CancellationScope()
-
-        close_client = getattr(client, "close", None)
-
-        if callable(close_client):
-            close_client = scope.add(close_client)
-
-        try:
-            assistant_message = scope.run_cancellable(
-                _generate_stream,
-                cancel_event,
-                _get_timeout_seconds(),
-                "Gemini generation timed out.",
-                client,
-                model,
-                messages,
-            )
-
-        finally:
-            if callable(close_client):
-                close_client()
-
-    except InterruptedError:
-        return None, "Request cancelled."
-
-    except Exception as exc:
-        return None, str(exc)
-
-    return (assistant_message or "").strip(), None
+    def reload_config(self) -> None:
+        pass

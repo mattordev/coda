@@ -1,15 +1,12 @@
 from __future__ import annotations
 
+import openai
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from threading import Event
     from typing import Iterable
-
-import openai
-
-if TYPE_CHECKING:
-    from openai.types.chat import ChatCompletionMessageParam
+    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionChunk
 
 from ai.providers.cancellable import CancellationScope
 from ai.providers.provider import Provider
@@ -34,24 +31,29 @@ class OpenAIProvider(Provider):
         openai.api_key = self.get_api_key() or None
 
     def describe(self) -> str:
-        return f"openai (model: {self.get_configured_model()})"
+        return f"{self._get_name()} (model: {self.get_configured_model()})"
 
     @staticmethod
+    def _create_chat_completion_stream(
+        client: openai.OpenAI,
+        model: str,
+        messages: Iterable[ChatCompletionMessageParam],
+    ) -> openai.Stream[ChatCompletionChunk]:
+        return client.chat.completions.create(
+            model=model, messages=messages, stream=True
+        )
+
+    @classmethod
     def _generate_stream(
+        cls,
         scope: CancellationScope,
         cancel_event: Event | None,
         client: openai.OpenAI,
         model: str,
         messages: Iterable[ChatCompletionMessageParam],
     ) -> str:
-        stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-        )
-        close_stream = stream.close
-        if callable(close_stream):
-            close_stream = scope.add(close_stream)
+        stream = cls._create_chat_completion_stream(client, model, messages)
+        close_stream = scope.add(stream.close)
         response_parts: list[str] = []
 
         try:
@@ -66,15 +68,12 @@ class OpenAIProvider(Provider):
                 if content:
                     response_parts.append(content)
         finally:
-            if callable(close_stream):
-                close_stream()
+            close_stream()
 
         return "".join(response_parts)
 
     def generate(
-        self,
-        messages: Iterable[ChatCompletionMessageParam],
-        cancel_event: Event | None = None,
+        self, messages: Iterable[ChatCompletionMessageParam]
     ) -> tuple[str | None, str | None]:
         api_key = self.get_api_key()
         model = self.get_configured_model()
@@ -93,19 +92,15 @@ class OpenAIProvider(Provider):
 
         try:
             client = openai.OpenAI(api_key=api_key, base_url=self.get_base_url())
-            scope = CancellationScope()
-            close_client = scope.add(client.close)
 
-            try:
-                assistant_message = self._run_cancellable_wrapper(
-                    self._generate_stream,
-                    self._get_timeout_seconds(),
-                    client,
-                    model,
-                    messages,
-                )
-            finally:
-                close_client()
+            assistant_message = self._generate_request_wrapper(
+                self._generate_stream,
+                client.close,
+                self._get_timeout_seconds(),
+                client,
+                model,
+                messages,
+            )
         except InterruptedError:
             return None, "Request cancelled."
         except Exception as exc:
