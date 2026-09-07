@@ -292,8 +292,7 @@ def check_update_available(version_url):
                 if prompt.lower() == "y":
                     # Update the program using the update_manager
                     import utils.update_manager as update_manager
-                    update_manager.main()
-                    return True  # Updated successfully
+                    return update_manager.main() is True
                 else:
                     init(autoreset=True)
                     print(
