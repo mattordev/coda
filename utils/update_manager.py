@@ -16,17 +16,14 @@ try:
 except ImportError:
     pyuac = None
 from colorama import Fore, init
-from tqdm import tqdm
 
 from utils.update_bootstrap import (
     ACTIVE_ENVIRONMENT, HANDOFF_ENV, launch_environment,
     managed_environment, wait_for_process,
 )
 from utils.update_dependencies import prepare_environment
+from utils.update_releases import latest_release, read_installed_version, download_archive
 
-# Updates CODA to the latest version, if available, directly from the GitHub repository.
-# Keeping these up top so its easy to swap to releases later.
-REPO_ZIP_URL = "https://github.com/mattordev/coda/archive/main.zip"
 # Temp download/extract folders used during update.
 ZIP_NAME = "coda.zip"
 EXTRACT_DIR = "coda"
@@ -55,14 +52,8 @@ EXCLUDED_FROM_BACKUP = frozenset({
 })
 
 
-def update_program(workspace):
-    # Pull latest source zip from GitHub.
-    with requests.get(REPO_ZIP_URL, stream=True, timeout=30) as response:
-        response.raise_for_status()
-        with (workspace / ZIP_NAME).open("wb") as handle:
-            for data in tqdm(response.iter_content(chunk_size=8192)):
-                if data:
-                    handle.write(data)
+def update_program(workspace, release):
+    download_archive(workspace, ZIP_NAME, release)
 
 
 def extract_download(workspace):
@@ -71,6 +62,8 @@ def extract_download(workspace):
     extract_path = workspace / EXTRACT_DIR
     extract_path.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(workspace / ZIP_NAME, "r") as zip_ref:
+        if len(zip_ref.infolist()) > 10000 or sum(item.file_size for item in zip_ref.infolist()) > 512 * 1024 * 1024:
+            raise ValueError("Downloaded archive exceeds extraction limits")
         for member in zip_ref.infolist():
             member_path = (extract_path / member.filename).resolve()
             try:
@@ -85,11 +78,12 @@ def extract_download(workspace):
         zip_ref.extractall(extract_path)
 
 
-def setup_updated_program(workspace):
+def setup_updated_program(workspace, release):
     # Move extracted project into our staging folder.
-    src = workspace / EXTRACT_DIR / "coda-main"
+    extracted = workspace / EXTRACT_DIR
+    src = extracted / release.archive_root
     dst = workspace / NEW_VERSION_DIR
-    if not src.exists():
+    if not src.is_dir() or list(extracted.iterdir()) != [src]:
         raise FileNotFoundError(f"Expected extracted source at: {src}")
 
     dst.mkdir()
@@ -111,7 +105,7 @@ def preserve_local_files(root, workspace):
             shutil.copy2(src, dst)
 
 
-def validate_new_version(workspace):
+def validate_new_version(workspace, release):
     # Minimal sanity check so we do not activate junk downloads.
     staged = workspace / NEW_VERSION_DIR
     _validate_tree(staged)
@@ -121,14 +115,8 @@ def validate_new_version(workspace):
     for item in staged.iterdir():
         if _reserved(item.name):
             raise ValueError(f"Update contains reserved path: {item.name}")
-    version_file = staged / "version.json"
-    if not version_file.exists():
-        raise FileNotFoundError("Downloaded update does not include version.json")
-
-    with open(version_file, "r", encoding="utf-8") as json_file:
-        json_data = json.load(json_file)
-        if not isinstance(json_data.get("version"), str) or not json_data["version"].strip():
-            raise ValueError("Downloaded version.json has no valid version string")
+    if read_installed_version(staged) != release.version:
+        raise ValueError("Downloaded version.json does not match the selected release")
 
 
 def _reject_links(path):
@@ -235,7 +223,7 @@ def _validate_install_root(root):
     return root
 
 
-def prepare_update(install_root=None, arguments=None):
+def prepare_update(install_root=None, arguments=None, release=None):
     """Stage source and dependencies without changing the live installation."""
     root = Path(install_root) if install_root is not None else INSTALL_ROOT
     workspace = None
@@ -243,11 +231,19 @@ def prepare_update(install_root=None, arguments=None):
         # Git checkouts include worktrees (.git can be a file) and nested installs.
         # Never replace development work with a downloaded release snapshot.
         root = _validate_install_root(root)
+        installed = read_installed_version(root)
+        release = release if release is not None else latest_release()
+        if release.version <= installed:
+            return None
         workspace = Path(tempfile.mkdtemp(prefix=".coda-update-", dir=root))
-        update_program(workspace)
+        # Record the exact confirmed identity for recovery; do not rediscover latest.
+        (workspace / "release.json").write_text(json.dumps({
+            "tag": release.tag, "version": str(release.version), "commit": release.commit,
+        }), encoding="utf-8")
+        update_program(workspace, release)
         extract_download(workspace)
-        setup_updated_program(workspace)
-        validate_new_version(workspace)
+        setup_updated_program(workspace, release)
+        validate_new_version(workspace, release)
         preserve_local_files(root, workspace)
         staged = workspace / NEW_VERSION_DIR
         # Older releases cannot participate in the supervised startup handshake.
@@ -264,6 +260,23 @@ def prepare_update(install_root=None, arguments=None):
         root, workspace, python,
         tuple(sys.argv[1:] if arguments is None else arguments),
     )
+
+
+def check_for_update(install_root=None):
+    """Startup discovery: fail closed and never prompt a development checkout."""
+    root = Path(install_root) if install_root is not None else INSTALL_ROOT
+    try:
+        root = _validate_install_root(root)
+        installed = read_installed_version(root)
+        release = latest_release()
+        if release.version <= installed:
+            return None
+        prompt = input(f"CODA {release.tag} is available. Update from {installed}? (y/n): ")
+        if prompt.strip().lower() == "y":
+            return prepare_update(root, release=release)
+    except (OSError, ValueError, requests.RequestException, EOFError) as error:
+        print(f"Automatic update skipped: {error}")
+    return None
 
 
 def _stop_failed_child(child):

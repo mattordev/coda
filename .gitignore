@@ -1,7 +1,6 @@
 *.pyc
 commands.json
 .vscode
-version.json
 .env
 dashboard_state.json
 telemetry_state.json

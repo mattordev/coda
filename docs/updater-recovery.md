@@ -1,9 +1,96 @@
-# Updater recovery work
+# Updates and recovery
 
-Source activation/rollback (#128) and staged dependencies/restart (#129) are
-implemented. Continue updating manually until release selection and end-to-end
-upgrade validation (#130) are complete. Close all other CODA instances before
-attempting an update; this is a startup updater, not a live hot-update system.
+This documents the updater planned for v1.4.4: release selection (#130), source
+activation/rollback (#128), and staged dependencies/restart (#129). It does not
+mean that v1.4.4 has been published or that its Windows/Linux release validation
+has passed. Keep the manual-update guidance in published release notes until
+those checks are complete. Close all other CODA instances before attempting an
+update; this is a startup updater, not a live hot-update system.
+
+## First upgrade from an older installation
+
+**Do not use the built-in updater in v1.4.2 or earlier to obtain this repair.**
+Decline its update prompt and close CODA. That older code cannot retroactively
+gain the new dependency, Git-checkout, or rollback protections simply because
+a repaired version exists upstream.
+
+When v1.4.4 is published:
+
+1. Back up the old installation, including `.env`, `wakewords.json`,
+   `commands.json`, and any local customisations. Do not publish these backups;
+   they may contain credentials.
+2. Download the **v1.4.4 release's source archive** from
+   [GitHub Releases](https://github.com/mattordev/coda/releases), not the latest
+   main-branch archive. Extract it into a new directory beside the old install.
+   Keep the original directory intact for recovery.
+3. Copy your configuration files into the new directory. Merge any missing
+   settings from `docs/.env.example` without replacing existing credentials or
+   intentional overrides. Review custom code separately; copying old source
+   over the new release can restore the unsafe updater.
+4. In the **new directory**, create a fresh Python 3.11 environment and install
+   the release's requirements. Do not copy or relocate the old `.venv`.
+
+Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+if ($LASTEXITCODE -ne 0) { throw "Environment creation failed" }
+& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed" }
+& .\.venv\Scripts\python.exe -m pip check
+if ($LASTEXITCODE -ne 0) { throw "Dependency verification failed" }
+& .\.venv\Scripts\python.exe main.py -m
+```
+
+Linux shell:
+
+```sh
+python3.11 -m venv .venv &&
+.venv/bin/python -m pip install -r requirements.txt &&
+.venv/bin/python -m pip check &&
+.venv/bin/python main.py -m
+```
+
+Follow the platform prerequisites in the README, including PortAudio where
+needed. Pocket TTS and ElevenLabs playback require FFmpeg's `ffplay` on PATH.
+Existing model caches can be reused if your cache settings still identify the
+same location; a fresh Python environment does not include those model assets.
+Check manual-mode commands, configuration, and the providers you use before
+retiring the old installation. If setup fails, close the new instance and use
+the unchanged old installation while investigating.
+
+Git-based development installations should save their work and update through
+Git, then install the chosen version's requirements. The repaired automatic
+updater deliberately refuses Git checkouts; do not remove `.git` to bypass it.
+
+## Release selection
+
+- Discovery uses this repository's latest published stable GitHub release,
+  not `main/version.json` or `main.zip`. A draft, prerelease, missing release,
+  invalid semantic version, or missing local `version.json` stops automatic
+  updating without creating replacement version metadata.
+- The local version is read from the installation directory, independently of
+  the terminal's working directory. Equal or older release versions are not
+  installed. The release tag and staged `version.json` must identify the same
+  version; release CI checks that tagged versions match the tracked metadata.
+- The tag is resolved to a full commit SHA, following at most five annotated
+  tags. The archive is fetched from the fixed GitHub codeload URL for that SHA;
+  `target_commitish` and mutable branch archives are not used. Confirmation and
+  preparation use the same selected commit, with another version check before
+  preparation. The extracted root must be `coda-<40-character commit SHA>`.
+- Metadata requests use 5-second connect and 15-second read/inactivity timeouts,
+  a 1 MiB response limit, and a 45-second discovery budget. Archive requests use
+  the same connection/inactivity timeouts and a 180-second transfer budget.
+  Budgets are checked between chunks/calls; they are not a hard wall-clock
+  cancellation guarantee for an in-progress socket operation.
+- Archives are limited to 128 MiB compressed, 512 MiB expanded, and 10,000
+  entries. Source metadata and archive layout are checked before dependency
+  installation. Offline, rate-limited, malformed, missing, or over-limit
+  responses leave the running installation unchanged; there is no fallback to
+  mutable main-branch source.
+
+Only installations already running the repaired updater can use this flow for
+later releases. Publishing v1.4.4 does not make the older updater safe to use.
 
 ## What source activation protects
 
@@ -83,16 +170,23 @@ selection file and use the original interpreter; do not leave the new selection
 pointing at incompatible dependencies. No old environment is automatically
 deleted. Do not share dependency logs publicly without checking for credentials.
 
-This step still downloads the main-branch source archive and does not remove
-files deleted upstream. Releases without the new restart bootstrap are refused
-before activation. Versioned release selection and an upgrade path from older
-updaters remain #130, not proof supplied by these staging/restart tests.
+The updater does not remove files deleted upstream. Releases without the new
+restart bootstrap are refused before activation. A commit-addressed archive
+pins the selected source; it is not an independently signed release or a test
+of provider hardware, audio quality, or downloaded model assets.
 
 ## Validation
 
 Unit tests inject dependency, activation, and startup failures. Offline process
 tests create disposable Python environments and exercise handoff, rollback, and
 later-launch environment selection without downloading models or running CODA
-against hardware. CI runs the tests on Windows and Ubuntu with Python 3.11/3.12.
+against hardware. Full-flow fixtures also exercise mocked release discovery and
+archive transfer, install a small real wheel offline, and verify that the new
+dependency is available to the restarted process. These are fixture upgrades,
+not validation of a published v1.4.4 archive.
+
+The configured CI matrix runs the tests on Windows and Ubuntu
+with Python 3.11/3.12; a configured job is not evidence that this branch has
+passed it. Remote matrix results and the actual release remain release gates.
 Set `CODA_RUN_UPDATE_ENV_SMOKE=1` to additionally create a real environment with
 pip and verify an offline requirements install plus `pip check`.

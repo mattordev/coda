@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from utils import update_manager as updater
+from utils.update_releases import Release, stable_version
 
 
 class UpdateManagerTests(unittest.TestCase):
@@ -14,6 +15,11 @@ class UpdateManagerTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "main.py").write_text("old code", encoding="utf-8")
+        (self.root / "version.json").write_text('{"version":"1.4.2"}', encoding="utf-8")
+        self.release = Release("v1.4.4", stable_version("1.4.4"), "a" * 40)
+        discovery = patch.object(updater, "latest_release", side_effect=lambda: self.release)
+        discovery.start()
+        self.addCleanup(discovery.stop)
         (self.root / ".env").write_text("local settings", encoding="utf-8")
         (self.root / ".venv").mkdir()
         (self.root / ".venv" / "keep").write_text("environment", encoding="utf-8")
@@ -38,17 +44,17 @@ class UpdateManagerTests(unittest.TestCase):
         (environment / "pyvenv.cfg").write_text("test environment")
         return python
 
-    def download(self, workspace):
+    def download(self, workspace, release):
         with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
             for name, value in {
                 "main.py": "new code",
-                "version.json": json.dumps({"version": "1.4.4"}),
+                "version.json": json.dumps({"version": str(release.version)}),
                 "requirements.txt": "requests",
                 ".env": "release default",
                 "wakewords.json": "[]",
                 "utils/update_bootstrap.py": "# restart protocol fixture",
             }.items():
-                archive.writestr(f"coda-main/{name}", value)
+                archive.writestr(f"{release.archive_root}/{name}", value)
 
     def run_update(self):
         with patch.object(updater, "update_program", side_effect=self.download):
@@ -83,6 +89,7 @@ class UpdateManagerTests(unittest.TestCase):
     def test_repeated_updates_keep_separate_backups(self):
         self.assertTrue(self.run_update())
         first = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
+        self.release = Release("v1.4.5", stable_version("1.4.5"), "b" * 40)
         self.assertTrue(self.run_update())
         self.assertEqual(len([p for p in self.root.glob(".coda-update-*") if p.is_dir()]), 2)
         self.assertEqual((first / updater.BACKUP_DIR / "main.py").read_text(), "old code")
@@ -107,7 +114,7 @@ class UpdateManagerTests(unittest.TestCase):
 
     def test_partial_activation_restores_only_this_attempt(self):
         original_rename = Path.rename
-        for failure_at in range(1, 9):
+        for failure_at in range(1, 10):
             with self.subTest(failure_at=failure_at):
                 calls = 0
 
@@ -121,7 +128,7 @@ class UpdateManagerTests(unittest.TestCase):
                 with patch.object(Path, "rename", fail_once):
                     self.assertFalse(self.run_update())
                 self.assertEqual((self.root / "main.py").read_text(), "old code")
-                self.assertFalse((self.root / "version.json").exists())
+                self.assertEqual(json.loads((self.root / "version.json").read_text())["version"], "1.4.2")
                 self.assertFalse((self.root / "requirements.txt").exists())
                 self.assert_local_files()
 
@@ -168,10 +175,10 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual((nested / "main.py").read_text(), "nested code")
 
     def test_reserved_archive_entries_cannot_replace_environment(self):
-        def download(workspace):
-            self.download(workspace)
+        def download(workspace, release):
+            self.download(workspace, release)
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "a") as archive:
-                archive.writestr("coda-main/.venv/replacement", "bad")
+                archive.writestr(f"{release.archive_root}/.venv/replacement", "bad")
 
         with patch.object(updater, "update_program", side_effect=download):
             self.assertFalse(updater.main(self.root))
@@ -179,7 +186,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual((self.root / "main.py").read_text(), "old code")
 
     def test_path_traversal_archive_is_rejected(self):
-        def download(workspace):
+        def download(workspace, _release):
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
                 archive.writestr("../../escaped", "bad")
 
@@ -189,8 +196,8 @@ class UpdateManagerTests(unittest.TestCase):
         self.assert_local_files()
 
     def test_archive_symlinks_are_rejected(self):
-        def download(workspace):
-            entry = zipfile.ZipInfo("coda-main/linked")
+        def download(workspace, release):
+            entry = zipfile.ZipInfo(f"{release.archive_root}/linked")
             entry.create_system = 3
             entry.external_attr = 0o120777 << 16
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
@@ -203,15 +210,8 @@ class UpdateManagerTests(unittest.TestCase):
     def test_caller_propagates_update_failure(self):
         import coda_runtime
 
-        with (
-            patch("builtins.open", unittest.mock.mock_open(read_data='{"version":"1.0.0"}')),
-            patch.object(coda_runtime.requests, "get") as get,
-            patch("builtins.input", return_value="y"),
-            patch.object(updater, "prepare_update", return_value=None),
-        ):
-            get.return_value.status_code = 200
-            get.return_value.json.return_value = {"version": "1.4.4"}
-            self.assertFalse(coda_runtime.check_update_available("unused"))
+        with patch.object(updater, "check_for_update", return_value=None):
+            self.assertIsNone(coda_runtime.check_update_available())
 
     def test_dependency_failure_does_not_activate_source(self):
         self.dependencies.side_effect = RuntimeError("installation failed")
@@ -303,6 +303,72 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), '{"environment":"previous environment"}')
         self.assertEqual((self.root / "main.py").read_text(), "old code")
         self.assert_local_files()
+
+    def test_equal_or_older_release_is_not_prompted_or_prepared(self):
+        for version in ("1.4.2", "1.4.0"):
+            self.release = Release(f"v{version}", stable_version(version), "a" * 40)
+            with self.subTest(version=version), patch("builtins.input") as prompt:
+                self.assertIsNone(updater.check_for_update(self.root))
+                self.assertIsNone(updater.prepare_update(self.root))
+            prompt.assert_not_called()
+            self.dependencies.assert_not_called()
+        self.assertFalse(list(self.root.glob(".coda-update-*")))
+
+    def test_missing_local_version_never_creates_default_or_discovers_release(self):
+        (self.root / "version.json").unlink()
+        with patch.object(updater, "latest_release") as discover:
+            self.assertIsNone(updater.check_for_update(self.root))
+        discover.assert_not_called()
+        self.assertFalse((self.root / "version.json").exists())
+        self.assert_local_files()
+
+    def test_git_checkout_is_not_prompted_or_checked_remotely(self):
+        (self.root / ".git").mkdir()
+        with patch.object(updater, "latest_release") as discover, patch("builtins.input") as prompt:
+            self.assertIsNone(updater.check_for_update(self.root))
+        discover.assert_not_called()
+        prompt.assert_not_called()
+
+    def test_confirmed_release_is_carried_to_preparation_without_rediscovery(self):
+        confirmed = self.release
+
+        def confirm(_prompt):
+            self.release = Release("v1.4.5", stable_version("1.4.5"), "b" * 40)
+            return "y"
+
+        with patch("builtins.input", side_effect=confirm), patch.object(updater, "prepare_update") as prepare:
+            updater.check_for_update(self.root)
+        prepare.assert_called_once_with(self.root, release=confirmed)
+
+    def test_archive_root_must_match_confirmed_commit(self):
+        wrong = Release(self.release.tag, self.release.version, "b" * 40)
+        with patch.object(updater, "update_program", side_effect=lambda workspace, _release: self.download(workspace, wrong)):
+            self.assertIsNone(updater.prepare_update(self.root))
+        self.dependencies.assert_not_called()
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+
+    def test_version_mismatch_is_rejected_before_dependency_installation(self):
+        def download(workspace, release):
+            with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
+                for name, value in {"main.py": "new code", "requirements.txt": "requests==1.0.0",
+                                    "version.json": '{"version":"1.4.3"}'}.items():
+                    archive.writestr(f"{release.archive_root}/{name}", value)
+
+        with patch.object(updater, "update_program", side_effect=download):
+            self.assertIsNone(updater.prepare_update(self.root))
+        self.dependencies.assert_not_called()
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+        self.assert_local_files()
+
+    def test_expanded_archive_limits_are_checked_before_extraction(self):
+        info = Mock(file_size=513 * 1024 * 1024)
+        archive = Mock()
+        archive.infolist.return_value = [info]
+        with patch.object(updater.zipfile, "ZipFile") as zip_file, patch.object(updater, "update_program"):
+            zip_file.return_value.__enter__.return_value = archive
+            self.assertIsNone(updater.prepare_update(self.root, release=self.release))
+        archive.extractall.assert_not_called()
+        self.dependencies.assert_not_called()
 
 
 if __name__ == "__main__":
