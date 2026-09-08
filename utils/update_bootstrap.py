@@ -78,9 +78,15 @@ def wait_for_process(process):
                 return process.wait(timeout=6)
 
 
+def _interpreter_path(python):
+    # Canonicalize directory aliases (including Windows 8.3 paths), but not
+    # the executable itself: POSIX venvs may link to the same base Python.
+    return python.parent.resolve() / python.name
+
+
 def redirect_to_selected_environment(root, arguments):
     python = selected_python(root)
-    if python is None or python.absolute() == Path(sys.executable).absolute():
+    if python is None or _interpreter_path(python) == _interpreter_path(Path(sys.executable)):
         return None
     process = subprocess.Popen(
         [str(python), str(root / "main.py"), *arguments],
@@ -95,7 +101,7 @@ def acknowledge_handoff(root):
     if attempt_name is None:
         return False
     python = managed_environment(root, str(Path(attempt_name) / "environment"))
-    if python.absolute() != Path(sys.executable).absolute():
+    if _interpreter_path(python) != _interpreter_path(Path(sys.executable)):
         raise ValueError("Update handoff is not running in the staged environment")
     workspace = python.parent.parent.parent
     ready = _plain_path(workspace / "restart-ready")

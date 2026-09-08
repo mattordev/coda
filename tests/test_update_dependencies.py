@@ -13,7 +13,7 @@ class UpdateDependenciesTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.workspace = Path(self.temp.name)
+        self.workspace = Path(self.temp.name).resolve()
         self.staged = self.workspace / "staged"
         self.staged.mkdir()
         (self.staged / "requirements.txt").write_text("example==1.2.3\n", encoding="utf-8")
@@ -80,7 +80,7 @@ class UpdateDependenciesTests(unittest.TestCase):
     def test_each_subprocess_failure_stops_later_steps_and_retains_log(self):
         for failure_index in range(3):
             with self.subTest(failure_index=failure_index), tempfile.TemporaryDirectory() as temp:
-                workspace = Path(temp)
+                workspace = Path(temp).resolve()
                 staged = workspace / "staged"
                 staged.mkdir()
                 (staged / "requirements.txt").write_text("example==1.2.3")

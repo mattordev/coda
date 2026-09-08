@@ -13,6 +13,46 @@ from utils import update_manager as updater
 
 
 class BootstrapTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows short-path aliases")
+    def test_short_path_interpreter_accepts_handoff_without_redirect(self):
+        import ctypes
+
+        with tempfile.TemporaryDirectory(prefix="coda-long-path-regression-") as directory:
+            root = Path(directory).resolve()
+            environment = root / ".coda-update-test" / "environment"
+            python = bootstrap.environment_python(environment)
+            python.parent.mkdir(parents=True)
+            python.touch()
+            (environment / "pyvenv.cfg").touch()
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetShortPathNameW(str(python), buffer, len(buffer))
+            self.assertGreater(length, 0)
+            self.assertLess(length, len(buffer))
+            alias = Path(buffer.value)
+            if alias == python:
+                self.skipTest("8.3 aliases disabled on this filesystem")
+            (root / bootstrap.ACTIVE_ENVIRONMENT).write_text(
+                json.dumps({"environment": ".coda-update-test/environment"}), encoding="utf-8"
+            )
+            (environment.parent / "restart-proceed").touch()
+            with patch.object(bootstrap.sys, "executable", str(alias)), \
+                    patch.dict(os.environ, {bootstrap.HANDOFF_ENV: ".coda-update-test"}), \
+                    patch.object(bootstrap.subprocess, "Popen") as popen:
+                self.assertIsNone(bootstrap.redirect_to_selected_environment(root, []))
+                self.assertTrue(bootstrap.acknowledge_handoff(root))
+            popen.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "POSIX virtualenv executable symlinks")
+    def test_distinct_environments_with_same_base_interpreter_stay_distinct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "first" / "bin" / "python"
+            second = Path(directory) / "second" / "bin" / "python"
+            for python in (first, second):
+                python.parent.mkdir(parents=True)
+                python.symlink_to(sys.executable)
+            self.assertEqual(first.resolve(), second.resolve())
+            self.assertNotEqual(bootstrap._interpreter_path(first), bootstrap._interpreter_path(second))
+
     def test_invalid_environment_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -68,7 +108,7 @@ class OfflineRestartTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.workspace = self.root / ".coda-update-test"
         self.staged = self.workspace / updater.NEW_VERSION_DIR
         (self.staged / "utils").mkdir(parents=True)

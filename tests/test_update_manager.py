@@ -13,7 +13,7 @@ class UpdateManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         (self.root / "main.py").write_text("old code", encoding="utf-8")
         (self.root / "version.json").write_text('{"version":"1.4.2"}', encoding="utf-8")
         self.release = Release("v1.4.4", stable_version("1.4.4"), "a" * 40)
