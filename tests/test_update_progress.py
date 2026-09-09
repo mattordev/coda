@@ -25,6 +25,14 @@ class UpdateProgressTests(unittest.TestCase):
             with self.subTest(budget=budget), self.assertRaises(ValueError):
                 UpdateProgress("Installing", io.StringIO(), budget=budget)
 
+    def test_timing_shows_elapsed_and_estimated_duration(self):
+        progress = UpdateProgress("Installing", io.StringIO(), estimate=15)
+        progress.started = 10
+        with patch("utils.update_progress.time.monotonic", return_value=22.4):
+            timing = progress._timing()
+        self.assertIn("12.40s", timing)
+        self.assertIn("elapsed / ~15s estimated", timing)
+
     def test_redirected_output_has_no_animation_or_colour(self):
         stream = io.StringIO()
         with UpdateProgress("Installing", stream) as progress:
@@ -49,6 +57,7 @@ class UpdateProgressTests(unittest.TestCase):
         self.assertIn("[####################]", stream.getvalue())
         self.assertTrue(stream.getvalue().endswith("\n"))
         self.assertIn(Fore.BLUE, stream.getvalue())
+        self.assertIn("elapsed / ~15s estimated", stream.getvalue())
         self.assertIn(f"{Fore.GREEN}{Style.BRIGHT}done{Style.RESET_ALL}", stream.getvalue())
         self.assertNotIn("\x1b[42m", stream.getvalue())
 

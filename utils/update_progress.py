@@ -45,6 +45,10 @@ class UpdateProgress:
         elapsed = "<0.01s" if seconds < 0.01 else f"{seconds:.2f}s"
         return f"{colour}{Style.BRIGHT}{elapsed}{Style.RESET_ALL}"
 
+    def _timing(self):
+        estimate = f"{self.estimate:g}s"
+        return f"{self._duration()} elapsed / ~{estimate} estimated"
+
     def _estimated_bar(self):
         elapsed = max(0.0, time.monotonic() - self.started)
         ratio = elapsed / self.estimate
@@ -57,7 +61,7 @@ class UpdateProgress:
         bar = self._estimated_bar()
         self._write(
             f"\r{Fore.BLUE}{Style.BRIGHT}[{bar}]{Style.RESET_ALL} "
-            f"{self.label} (estimated; {self._duration()})"
+            f"{self.label} ({self._timing()})"
         )
 
     def _animate(self):
@@ -85,7 +89,7 @@ class UpdateProgress:
             bar = "#" * 20 if error_type is None else "#" * self.filled + "-" * (20 - self.filled)
             self._write(
                 f"\r{Fore.BLUE}{Style.BRIGHT}[{bar}]{Style.RESET_ALL} "
-                f"{self.label} (estimated; {self._duration()}) "
+                f"{self.label} ({self._timing()}) "
                 f"{status_colour}{Style.BRIGHT}{status}{Style.RESET_ALL}\n"
             )
         else:
