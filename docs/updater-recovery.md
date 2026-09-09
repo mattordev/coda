@@ -121,6 +121,13 @@ and verification. This is activity feedback, not a percentage or a guarantee tha
 network traffic is flowing. Redirected output uses plain stage messages instead.
 Detailed dependency output remains in the attempt's private `dependency-install.log`.
 
+Elapsed time is green below 50% of the stage budget, amber/yellow from 50% to
+below 80%, and red at 80% or above. Downloads use their 180-second budget;
+dependency stages use their respective subprocess timeouts. Extraction/validation
+uses a 60-second display budget only, not an enforced timeout. These colours are
+timing guidance, not failure detection; a slow stage can still finish successfully.
+The amber/yellow shade depends on the terminal's ANSI palette.
+
 1. Before changing live source, create a fresh environment at the permanent path
    `.coda-update-<attempt>/environment` using the current Python version.
    The existing `.venv` is not modified, moved, or deleted.

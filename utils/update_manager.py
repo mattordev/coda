@@ -24,6 +24,7 @@ from utils.update_bootstrap import (
 from utils.update_dependencies import prepare_environment
 from utils.update_releases import latest_release, read_installed_version, download_archive
 from utils.update_progress import UpdateProgress
+from utils.update_releases import ARCHIVE_SECONDS
 
 # Temp download/extract folders used during update.
 ZIP_NAME = "coda.zip"
@@ -241,7 +242,7 @@ def prepare_update(install_root=None, arguments=None, release=None):
         (workspace / "release.json").write_text(json.dumps({
             "tag": release.tag, "version": str(release.version), "commit": release.commit,
         }), encoding="utf-8")
-        with UpdateProgress("Downloading update"):
+        with UpdateProgress("Downloading update", budget=ARCHIVE_SECONDS):
             update_program(workspace, release)
         with UpdateProgress("Extracting and validating update"):
             extract_download(workspace)
