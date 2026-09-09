@@ -54,8 +54,8 @@ EXCLUDED_FROM_BACKUP = frozenset({
 })
 
 
-def update_program(workspace, release):
-    download_archive(workspace, ZIP_NAME, release)
+def update_program(workspace, release, progress=None):
+    download_archive(workspace, ZIP_NAME, release, progress=progress)
 
 
 def extract_download(workspace):
@@ -242,8 +242,8 @@ def prepare_update(install_root=None, arguments=None, release=None):
         (workspace / "release.json").write_text(json.dumps({
             "tag": release.tag, "version": str(release.version), "commit": release.commit,
         }), encoding="utf-8")
-        with UpdateProgress("Downloading update", budget=ARCHIVE_SECONDS):
-            update_program(workspace, release)
+        with UpdateProgress("Downloading update", budget=ARCHIVE_SECONDS) as progress:
+            update_program(workspace, release, progress.update_transfer)
         with UpdateProgress("Extracting and validating update", estimate=3):
             extract_download(workspace)
             setup_updated_program(workspace, release)

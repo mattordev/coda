@@ -44,7 +44,7 @@ class UpdateManagerTests(unittest.TestCase):
         (environment / "pyvenv.cfg").write_text("test environment")
         return python
 
-    def download(self, workspace, release):
+    def download(self, workspace, release, progress=None):
         with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
             for name, value in {
                 "main.py": "new code",
@@ -55,6 +55,8 @@ class UpdateManagerTests(unittest.TestCase):
                 "utils/update_bootstrap.py": "# restart protocol fixture",
             }.items():
                 archive.writestr(f"{release.archive_root}/{name}", value)
+        if progress is not None:
+            progress(1, 1)
 
     def run_update(self):
         with patch.object(updater, "update_program", side_effect=self.download):
@@ -175,8 +177,8 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual((nested / "main.py").read_text(), "nested code")
 
     def test_reserved_archive_entries_cannot_replace_environment(self):
-        def download(workspace, release):
-            self.download(workspace, release)
+        def download(workspace, release, progress=None):
+            self.download(workspace, release, progress)
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "a") as archive:
                 archive.writestr(f"{release.archive_root}/.venv/replacement", "bad")
 
@@ -186,7 +188,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertEqual((self.root / "main.py").read_text(), "old code")
 
     def test_path_traversal_archive_is_rejected(self):
-        def download(workspace, _release):
+        def download(workspace, _release, progress=None):
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
                 archive.writestr("../../escaped", "bad")
 
@@ -196,7 +198,7 @@ class UpdateManagerTests(unittest.TestCase):
         self.assert_local_files()
 
     def test_archive_symlinks_are_rejected(self):
-        def download(workspace, release):
+        def download(workspace, release, progress=None):
             entry = zipfile.ZipInfo(f"{release.archive_root}/linked")
             entry.create_system = 3
             entry.external_attr = 0o120777 << 16
@@ -342,13 +344,16 @@ class UpdateManagerTests(unittest.TestCase):
 
     def test_archive_root_must_match_confirmed_commit(self):
         wrong = Release(self.release.tag, self.release.version, "b" * 40)
-        with patch.object(updater, "update_program", side_effect=lambda workspace, _release: self.download(workspace, wrong)):
+        with patch.object(
+            updater, "update_program",
+            side_effect=lambda workspace, _release, progress=None: self.download(workspace, wrong, progress),
+        ):
             self.assertIsNone(updater.prepare_update(self.root))
         self.dependencies.assert_not_called()
         self.assertEqual((self.root / "main.py").read_text(), "old code")
 
     def test_version_mismatch_is_rejected_before_dependency_installation(self):
-        def download(workspace, release):
+        def download(workspace, release, progress=None):
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:
                 for name, value in {"main.py": "new code", "requirements.txt": "requests==1.0.0",
                                     "version.json": '{"version":"1.4.3"}'}.items():

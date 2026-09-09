@@ -65,7 +65,7 @@ class Release:
         return f"coda-{self.commit}"
 
 
-def response_chunks(url, *, byte_limit, deadline, headers=None):
+def response_chunks(url, *, byte_limit, deadline, headers=None, progress=None):
     """Bound inactivity, response size and elapsed time between read chunks."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
@@ -81,6 +81,9 @@ def response_chunks(url, *, byte_limit, deadline, headers=None):
         length = response.headers.get("Content-Length")
         if length is not None and (int(length) < 0 or int(length) > byte_limit):
             raise ValueError("Update response exceeds its size limit")
+        total = int(length) if length is not None else None
+        if progress is not None:
+            progress(0, total)
         received = 0
         for chunk in response.iter_content(chunk_size=16384):
             if time.monotonic() >= deadline:
@@ -89,6 +92,8 @@ def response_chunks(url, *, byte_limit, deadline, headers=None):
             if received > byte_limit:
                 raise ValueError("Update response exceeds its size limit")
             if chunk:
+                if progress is not None:
+                    progress(received, total)
                 yield chunk
         if length is not None and received != int(length):
             raise ValueError("Update response was truncated")
@@ -131,11 +136,12 @@ def latest_release():
     raise ValueError("Release tag could not be resolved")
 
 
-def download_archive(workspace, filename, release):
+def download_archive(workspace, filename, release, progress=None):
     with (workspace / filename).open("xb") as handle:
         for chunk in response_chunks(
             release.archive_url, byte_limit=ARCHIVE_BYTES,
             deadline=time.monotonic() + ARCHIVE_SECONDS,
+            progress=progress,
         ):
             handle.write(chunk)
 

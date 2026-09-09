@@ -19,6 +19,7 @@ class UpdateProgress:
         self.budget = budget
         self.estimate = estimate
         self.filled = 0
+        self.transfer = None
         self.stream = sys.stdout if stream is None else stream
         self.interactive = self.stream.isatty()
         self.stop = threading.Event()
@@ -46,10 +47,37 @@ class UpdateProgress:
         return f"{colour}{Style.BRIGHT}{elapsed}{Style.RESET_ALL}"
 
     def _timing(self):
+        if self.transfer is not None:
+            received, total = self.transfer
+            elapsed = max(0.0, time.monotonic() - self.started)
+            if received > 0 and elapsed > 0:
+                speed = received / elapsed
+                remaining = max(0.0, total - received) / speed
+                return (
+                    f"{self._duration()} elapsed / ~{remaining:.2f}s remaining; "
+                    f"{received / total:.0%}; {self._format_speed(speed)}"
+                )
         estimate = f"{self.estimate:g}s"
         return f"{self._duration()} elapsed / ~{estimate} estimated"
 
+    @staticmethod
+    def _format_speed(bytes_per_second):
+        if bytes_per_second >= 1024 * 1024:
+            return f"{bytes_per_second / (1024 * 1024):.1f} MiB/s"
+        if bytes_per_second >= 1024:
+            return f"{bytes_per_second / 1024:.1f} KiB/s"
+        return f"{bytes_per_second:.0f} B/s"
+
+    def update_transfer(self, received, total):
+        """Switch to measured download progress when a valid total is known."""
+        if total is not None and total > 0 and 0 <= received <= total:
+            self.transfer = (received, total)
+
     def _estimated_bar(self):
+        if self.transfer is not None:
+            received, total = self.transfer
+            self.filled = min(20, int(received / total * 20))
+            return "#" * self.filled + "-" * (20 - self.filled)
         elapsed = max(0.0, time.monotonic() - self.started)
         ratio = elapsed / self.estimate
         # Reach 90% at the estimate, then approach (but never reach) full.

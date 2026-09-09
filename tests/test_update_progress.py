@@ -33,6 +33,24 @@ class UpdateProgressTests(unittest.TestCase):
         self.assertIn("12.40s", timing)
         self.assertIn("elapsed / ~15s estimated", timing)
 
+    def test_transfer_uses_measured_percentage_speed_and_remaining_time(self):
+        progress = UpdateProgress("Downloading", io.StringIO(), estimate=15)
+        progress.started = 10
+        progress.update_transfer(5 * 1024 * 1024, 20 * 1024 * 1024)
+        with patch("utils.update_progress.time.monotonic", return_value=12):
+            timing = progress._timing()
+            bar = progress._estimated_bar()
+        self.assertIn("2.00s", timing)
+        self.assertIn("~6.00s remaining", timing)
+        self.assertIn("25%", timing)
+        self.assertIn("2.5 MiB/s", timing)
+        self.assertEqual(bar, "#####---------------")
+
+    def test_transfer_without_total_keeps_estimated_fallback(self):
+        progress = UpdateProgress("Downloading", io.StringIO(), estimate=15)
+        progress.update_transfer(10, None)
+        self.assertIsNone(progress.transfer)
+
     def test_redirected_output_has_no_animation_or_colour(self):
         stream = io.StringIO()
         with UpdateProgress("Installing", stream) as progress:

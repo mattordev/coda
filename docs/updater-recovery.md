@@ -124,6 +124,9 @@ creation, 300 for dependency installation, and 30 for verification. These are di
 estimates, not measured byte/package progress, timeouts, or a guarantee that network
 traffic is flowing. No artificial delay is added. Redirected output uses plain stage messages instead.
 The display includes both values, for example `12.40s elapsed / ~15s estimated`.
+For archive downloads with a valid `Content-Length`, the bar switches to measured
+bytes and shows percentage, average transfer speed, and estimated time remaining.
+If the server omits the total size, the time-based estimate remains in use.
 Detailed dependency output remains in the attempt's private `dependency-install.log`.
 
 Elapsed time is green below 50% of the stage budget, amber/yellow from 50% to

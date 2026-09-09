@@ -301,6 +301,13 @@ class InstalledVersionTests(unittest.TestCase):
                 releases.download_archive(self.root, "release.zip", selected)
         chunks.assert_not_called()
 
+    def test_download_forwards_progress_callback(self):
+        selected = releases.Release("v1.4.4", Version("1.4.4"), COMMIT)
+        progress = MagicMock()
+        with patch.object(releases, "response_chunks", return_value=iter([b"zip"])) as chunks:
+            releases.download_archive(self.root, "release.zip", selected, progress=progress)
+        self.assertIs(chunks.call_args.kwargs["progress"], progress)
+
 
 if __name__ == "__main__":
     unittest.main()
