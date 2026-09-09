@@ -43,12 +43,12 @@ class UpdateProgressTests(unittest.TestCase):
         with patch.object(stream, "isatty", return_value=True), \
                 patch("utils.update_progress.just_fix_windows_console"):
             with UpdateProgress("Installing", stream) as progress:
-                progress._frame(4)
+                progress._frame()
         self.assertFalse(progress.thread.is_alive())
         self.assertIn("\x1b[", stream.getvalue())
-        self.assertIn("[    #", stream.getvalue())
+        self.assertIn("[####################]", stream.getvalue())
         self.assertTrue(stream.getvalue().endswith("\n"))
-        self.assertIn(Fore.YELLOW, stream.getvalue())
+        self.assertIn(Fore.BLUE, stream.getvalue())
         self.assertIn(f"{Fore.GREEN}{Style.BRIGHT}done{Style.RESET_ALL}", stream.getvalue())
         self.assertNotIn("\x1b[42m", stream.getvalue())
 
@@ -62,6 +62,24 @@ class UpdateProgressTests(unittest.TestCase):
         self.assertFalse(progress.thread.is_alive())
         self.assertIn(f"{Fore.RED}{Style.BRIGHT}stopped{Style.RESET_ALL}", stream.getvalue())
         self.assertNotIn("\x1b[41m", stream.getvalue())
+        self.assertNotIn("[####################]", stream.getvalue())
+
+    def test_estimated_fill_is_monotonic_and_never_full(self):
+        progress = UpdateProgress("Installing", io.StringIO(), estimate=10)
+        progress.started = 0
+        previous = 0
+        for seconds, expected in ((0, 0), (5, 9), (10, 18), (20, 18), (100, 19), (10000, 19)):
+            with self.subTest(seconds=seconds), \
+                    patch("utils.update_progress.time.monotonic", return_value=seconds):
+                bar = progress._estimated_bar()
+                self.assertEqual(len(bar), 20)
+                self.assertEqual(bar.count("#"), expected)
+                self.assertGreaterEqual(expected, previous)
+                previous = expected
+
+    def test_estimate_must_be_positive(self):
+        with self.assertRaises(ValueError):
+            UpdateProgress("Installing", io.StringIO(), estimate=0)
 
     def test_elapsed_preserves_fractional_seconds(self):
         progress = UpdateProgress("Downloading", io.StringIO())

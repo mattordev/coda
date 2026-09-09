@@ -244,7 +244,7 @@ def prepare_update(install_root=None, arguments=None, release=None):
         }), encoding="utf-8")
         with UpdateProgress("Downloading update", budget=ARCHIVE_SECONDS):
             update_program(workspace, release)
-        with UpdateProgress("Extracting and validating update"):
+        with UpdateProgress("Extracting and validating update", estimate=3):
             extract_download(workspace)
             setup_updated_program(workspace, release)
             validate_new_version(workspace, release)

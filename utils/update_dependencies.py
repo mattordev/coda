@@ -44,7 +44,7 @@ def _run_step(command, step, timeout, workspace, process_env, log):
     log.write(f"\n--- {step} ---\n".encode("utf-8"))
     log.flush()
     try:
-        with UpdateProgress(f"Dependencies: {step}", budget=timeout):
+        with UpdateProgress(f"Dependencies: {step}", budget=timeout, estimate=timeout / 4):
             subprocess.run(
                 command,
                 check=True,

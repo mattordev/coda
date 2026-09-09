@@ -115,10 +115,14 @@ later releases. Publishing v1.4.4 does not make the older updater safe to use.
 
 ## Dependencies and restart
 
-Interactive terminals show a Colorama-coloured ASCII activity bar and elapsed
+Interactive terminals show a blue Colorama-coloured estimated ASCII bar and elapsed
 seconds during download, extraction, environment creation, dependency installation,
-and verification. This is activity feedback, not a percentage or a guarantee that
-network traffic is flowing. Redirected output uses plain stage messages instead.
+and verification. The bar fills toward 90% over an estimated duration, then slows
+and stays below full until success. Stopped stages retain their partial bar.
+Estimates are 15 seconds for download, 3 for extraction/validation, 30 for environment
+creation, 300 for dependency installation, and 30 for verification. These are display
+estimates, not measured byte/package progress, timeouts, or a guarantee that network
+traffic is flowing. No artificial delay is added. Redirected output uses plain stage messages instead.
 Detailed dependency output remains in the attempt's private `dependency-install.log`.
 
 Elapsed time is green below 50% of the stage budget, amber/yellow from 50% to
