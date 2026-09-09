@@ -1,14 +1,23 @@
+from __future__ import annotations
+
 import threading
 import unittest
 from threading import Event
 from types import SimpleNamespace
 from unittest import mock
 
-from ai.providers import openrouter as openrouter_provider
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Generator, Iterable, Self
+    from openai.types.chat import ChatCompletionMessageParam
+
+from ai.providers import openai as openai_provider
+from ai.providers.openrouter import OpenRouterProvider
 
 
 class OpenRouterProviderTests(unittest.TestCase):
-    def _chunk(self, content=None, *, choices=True):
+    def _chunk(self, content: str|None = None, *, choices: bool = True) -> SimpleNamespace:
         if not choices:
             return SimpleNamespace(choices=[])
 
@@ -20,7 +29,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             ]
         )
 
-    def _openai(self, stream):
+    def _openai(self, stream: Any) -> tuple[SimpleNamespace, mock.MagicMock]:
         client = mock.MagicMock()
         client.chat.completions.create.return_value = stream
 
@@ -30,38 +39,34 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         return module, client
 
-    def test_get_api_key(self):
+    def test_get_api_key(self) -> None:
         with mock.patch.dict(
             "os.environ",
             {"OPENROUTER_API_KEY": "test-key"},
         ):
             self.assertEqual(
-                openrouter_provider.get_api_key(),
+                OpenRouterProvider.get_api_key(),
                 "test-key",
             )
 
-    def test_get_model_uses_configured_value(self):
-        with mock.patch.dict(
-            "os.environ",
-            {"CODA_OPENROUTER_MODEL": "openai/gpt-4.1-mini"},
-        ):
-            self.assertEqual(
-                openrouter_provider.get_model(),
-                "openai/gpt-4.1-mini",
-            )
+    def test_get_model_uses_configured_value(self) -> None:
+        model_name = "openai/gpt-4.1-mini"
+        
+        with mock.patch.dict("os.environ", {"CODA_OPENROUTER_MODEL": model_name}):
+            self.assertEqual(OpenRouterProvider.get_configured_model(), model_name)
 
-    def test_get_model_has_no_default(self):
+    def test_get_model_has_no_default(self) -> None:
         with mock.patch.dict(
             "os.environ",
             {},
             clear=True,
         ):
             self.assertEqual(
-                openrouter_provider.get_model(),
+                OpenRouterProvider.get_configured_model(),
                 "",
             )
 
-    def test_generate_returns_error_when_api_key_is_missing(self):
+    def test_generate_returns_error_when_api_key_is_missing(self) -> None:
         with mock.patch.dict(
             "os.environ",
             {
@@ -69,7 +74,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             },
             clear=True,
         ):
-            result, error = openrouter_provider.generate(
+            result, error = OpenRouterProvider.generate(
                 [{"role": "user", "content": "hi"}]
             )
 
@@ -79,7 +84,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             "OPENROUTER_API_KEY is not set in env.",
         )
 
-    def test_generate_returns_error_when_model_is_missing(self):
+    def test_generate_returns_error_when_model_is_missing(self) -> None:
         with mock.patch.dict(
             "os.environ",
             {
@@ -87,7 +92,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             },
             clear=True,
         ):
-            result, error = openrouter_provider.generate(
+            result, error = OpenRouterProvider.generate(
                 [{"role": "user", "content": "hi"}]
             )
 
@@ -97,7 +102,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             "CODA_OPENROUTER_MODEL is not set in env.",
         )
 
-    def test_generate_accumulates_streamed_response_and_closes_stream(self):
+    def test_generate_accumulates_streamed_response_and_closes_stream(self) -> None:
         stream = mock.MagicMock()
 
         stream.__iter__.return_value = iter([
@@ -108,10 +113,10 @@ class OpenRouterProviderTests(unittest.TestCase):
         ])
 
         openai_module, client = self._openai(stream)
-        messages = [{"role": "user", "content": "hi"}]
+        messages: Iterable[ChatCompletionMessageParam] = [{"role": "user", "content": "hi"}]
 
         with mock.patch.object(
-            openrouter_provider,
+            openai_provider,
             "openai",
             openai_module,
         ), mock.patch.dict(
@@ -121,7 +126,7 @@ class OpenRouterProviderTests(unittest.TestCase):
                 "CODA_OPENROUTER_MODEL": "openai/gpt-4.1-mini",
             },
         ):
-            result, error = openrouter_provider.generate(messages)
+            result, error = OpenRouterProvider.generate(messages)
 
         self.assertEqual(
             (result, error),
@@ -130,7 +135,7 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         openai_module.OpenAI.assert_called_once_with(
             api_key="test-key",
-            base_url=openrouter_provider.OPENROUTER_BASE_URL,
+            base_url=OpenRouterProvider.get_base_url(),
         )
 
         client.chat.completions.create.assert_called_once_with(
@@ -141,10 +146,10 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         stream.close.assert_called_once_with()
 
-    def test_generate_discards_partial_response_and_closes_when_cancelled(self):
+    def test_generate_discards_partial_response_and_closes_when_cancelled(self) -> None:
         cancel_event = Event()
 
-        def chunks():
+        def chunks() -> Generator[SimpleNamespace, Any, None]:
             yield self._chunk("partial ")
             cancel_event.set()
             yield self._chunk("response")
@@ -155,7 +160,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         openai_module, _client = self._openai(stream)
 
         with mock.patch.object(
-            openrouter_provider,
+            openai_provider,
             "openai",
             openai_module,
         ), mock.patch.dict(
@@ -165,7 +170,7 @@ class OpenRouterProviderTests(unittest.TestCase):
                 "CODA_OPENROUTER_MODEL": "openai/gpt-4.1-mini",
             },
         ):
-            result, error = openrouter_provider.generate(
+            result, error = OpenRouterProvider.generate(
                 [{"role": "user", "content": "hi"}],
                 cancel_event=cancel_event,
             )
@@ -178,7 +183,7 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         stream.close.assert_called_once_with()
 
-    def test_generate_closes_stream_when_iteration_fails(self):
+    def test_generate_closes_stream_when_iteration_fails(self) -> None:
         stream = mock.MagicMock()
         stream.__iter__.side_effect = RuntimeError(
             "stream failed"
@@ -187,7 +192,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         openai_module, _client = self._openai(stream)
 
         with mock.patch.object(
-            openrouter_provider,
+            openai_provider,
             "openai",
             openai_module,
         ), mock.patch.dict(
@@ -197,7 +202,7 @@ class OpenRouterProviderTests(unittest.TestCase):
                 "CODA_OPENROUTER_MODEL": "openai/gpt-4.1-mini",
             },
         ):
-            result, error = openrouter_provider.generate(
+            result, error = OpenRouterProvider.generate(
                 [{"role": "user", "content": "hi"}]
             )
 
@@ -209,7 +214,7 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         stream.close.assert_called_once_with()
 
-    def test_cancel_releases_blocked_stream_creation(self):
+    def test_cancel_releases_blocked_stream_creation(self) -> None:
         create_started = Event()
         release_create = Event()
         cancel_event = Event()
@@ -217,7 +222,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         stream = mock.MagicMock()
         openai_module, client = self._openai(stream)
 
-        def create(**_kwargs):
+        def create(**_: Any) -> mock.MagicMock:
             create_started.set()
             release_create.wait(timeout=1.0)
             return stream
@@ -226,7 +231,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         results = []
 
         with mock.patch.object(
-            openrouter_provider,
+            openai_provider,
             "openai",
             openai_module,
         ), mock.patch.dict(
@@ -238,7 +243,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         ):
             worker = threading.Thread(
                 target=lambda: results.append(
-                    openrouter_provider.generate(
+                    OpenRouterProvider.generate(
                         [],
                         cancel_event=cancel_event,
                     )
@@ -265,33 +270,33 @@ class OpenRouterProviderTests(unittest.TestCase):
 
         client.close.assert_called()
 
-    def test_cancel_releases_blocked_next_chunk(self):
+    def test_cancel_releases_blocked_next_chunk(self) -> None:
         next_chunk_started = Event()
         release_chunk = Event()
         stream_closed = Event()
         cancel_event = Event()
 
         class BlockedStream:
-            def __iter__(self):
+            def __iter__(self) -> Self:
                 return self
 
-            def __next__(self):
+            def __next__(self) -> None:
                 next_chunk_started.set()
                 release_chunk.wait(timeout=1.0)
                 raise StopIteration
 
-            def close(self):
+            def close(self) -> None:
                 stream_closed.set()
                 release_chunk.set()
 
-        openai_module, _client = self._openai(
+        openai_module, _ = self._openai(
             BlockedStream()
         )
 
         results = []
 
         with mock.patch.object(
-            openrouter_provider,
+            openai_provider,
             "openai",
             openai_module,
         ), mock.patch.dict(
@@ -303,7 +308,7 @@ class OpenRouterProviderTests(unittest.TestCase):
         ):
             worker = threading.Thread(
                 target=lambda: results.append(
-                    openrouter_provider.generate(
+                    OpenRouterProvider.generate(
                         [],
                         cancel_event=cancel_event,
                     )

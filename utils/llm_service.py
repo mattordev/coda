@@ -301,11 +301,10 @@ def call_provider(
     privacy_result=None,
     cancel_event: Event | None = None,
 ):
-    provider_name = registry.normalize_provider_name(provider_name)
-    provider_module = registry.get_provider_module(provider_name)
+    provider_module = registry.get_provider(provider_name)
 
     if provider_module is None:
-        available = ", ".join(registry.SUPPORTED_PROVIDERS.keys())
+        available = ", ".join(registry._SUPPORTED_PROVIDERS.keys())
         return None, f"Unknown provider: {provider_name}. Available: {available}"
 
     return _generate_provider_response(

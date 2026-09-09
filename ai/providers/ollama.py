@@ -1,256 +1,243 @@
+from __future__ import annotations
+
+from enum import StrEnum
 import json
-import os
 
 import requests
 from requests.exceptions import Timeout
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from typing import TypedDict, TYPE_CHECKING
 
-_model_cache = None
-_preferred_models = (
-    "nemotron-3-nano:4b",
-)
+if TYPE_CHECKING:
+    from typing import Required, NotRequired
+    from threading import Event
 
-
-def _get_float_env(name, default):
-    value = os.getenv(name)
-    if value is None:
-        return default
-
-    try:
-        return float(value)
-    except ValueError:
-        return default
+from ai.providers.cancellable import CancellationScope
+from ai.providers.basellama import BaseLlamaProvider, LlamaModel
+from ai.providers.provider import Provider
 
 
-def get_base_url():
-    return os.getenv("CODA_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+class _OllamaRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
 
 
-def get_configured_model():
-    return os.getenv("CODA_OLLAMA_MODEL", "").strip()
+class _OllamaChatAPI(TypedDict):
+    model: Required[str]
+    messages: Required[list[_OllamaMessage]]
+    stream: NotRequired[bool]
 
 
-def get_timeout_seconds():
-    return _get_float_env("CODA_LLM_TIMEOUT", 45.0)
+class _OllamaHttpResponse(TypedDict):
+    models: Required[list[_OllamaModel]]
 
 
-def get_cold_start_timeout_seconds():
-    return _get_float_env("CODA_OLLAMA_COLD_START_TIMEOUT", 120.0)
+class _OllamaMessage(TypedDict):
+    role: Required[_OllamaRole]
+    content: Required[str]
 
 
-def reload_config():
-    global _model_cache
-
-    _model_cache = None
-
-
-def get_model(http_client=requests):
-    global _model_cache
-
-    configured_model = get_configured_model()
-    if configured_model:
-        return configured_model, None
-
-    if _model_cache:
-        return _model_cache, None
-
-    base_url = get_base_url()
-
-    try:
-        response = http_client.get(
-            f"{base_url}/api/tags",
-            timeout=min(get_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception as exc:
-        return None, (
-            "Could not fetch Ollama models automatically. "
-            "Set CODA_OLLAMA_MODEL explicitly. "
-            f"Details: {exc}"
-        )
-
-    if not models:
-        return None, (
-            "No Ollama models were found at the configured host. "
-            "Set CODA_OLLAMA_MODEL after pulling a model on the host."
-        )
-
-    model_names = []
-    for model in models:
-        model_name = model.get("name") or model.get("model")
-        if model_name:
-            model_names.append(model_name)
-
-    selected_model = None
-    for preferred_model in _preferred_models:
-        if preferred_model in model_names:
-            selected_model = preferred_model
-            break
-
-    if selected_model is None:
-        selected_model = model_names[0] if model_names else None
-
-    if not selected_model:
-        return None, "Ollama returned models but none included a usable name."
-
-    _model_cache = selected_model
-    return _model_cache, None
+class _OllamaModel(TypedDict):
+    name: NotRequired[str]
+    model: NotRequired[str]
 
 
-def is_model_loaded(model_name, http_client=requests):
-    base_url = get_base_url()
+class _OllamaChatChunk(TypedDict):
+    model: str
+    message: NotRequired[_OllamaMessage]
+    error: NotRequired[str]
+    response: NotRequired[str]
+    done: bool
 
-    try:
-        response = http_client.get(
-            f"{base_url}/api/ps",
-            timeout=min(get_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("models", [])
-    except Exception:
+
+class OllamaProvider(BaseLlamaProvider):
+    @staticmethod
+    def _get_data() -> Provider.Details:
+        return {
+            "type": Provider.Type.LOCAL,
+            "model_env": "CODA_OLLAMA_MODEL",
+            "base_url_env": "CODA_OLLAMA_BASE_URL",
+            "model_required": False,
+            "default_model": "nemotron-3-nano:4b",
+            "default_base_url": "http://localhost:11434",
+        }
+
+    @staticmethod
+    def _get_name() -> str:
+        return "Ollama"
+
+    @staticmethod
+    def preferred_models() -> list[str]:
+        return ["nemotron-3-nano:4b"]
+
+    @classmethod
+    def get_models_url(cls) -> str:
+        return f"{cls.get_base_url()}/api/tags"
+
+    def _get_cold_start_timeout_seconds(self) -> float:
+        return self._get_float_env("CODA_OLLAMA_COLD_START_TIMEOUT", 120.0)
+
+    def _get_request(self, url: str) -> _OllamaHttpResponse | None:
+        try:
+            response = self.active_session.get(
+                url, timeout=min(self._get_timeout_seconds(), 10)
+            )
+            response.raise_for_status()
+        except Exception:
+            return None
+
+        http_response: _OllamaHttpResponse = response.json()
+
+        return http_response
+
+    def _get_models(
+        self, url: str, *, raise_exception: bool = True
+    ) -> list[LlamaModel]:
+        models: list[LlamaModel] = []
+        try:
+            response = self._get_request(url)
+            if response is not None:
+                models = response.get("models", [])
+        except Exception:
+            if raise_exception:
+                raise
+
+        return models
+
+    def describe(self) -> str:
+        model, error = self.get_model()
+        if error:
+            return f"ollama (model resolution failed: {error})"
+
+        return f"ollama (model: {model})"
+
+    def is_model_loaded(self, model_name: str) -> bool:
+        ps_url = f"{self.get_base_url()}/api/ps"
+        models = self._get_models(ps_url, raise_exception=False)
+
+        if not models:
+            return False
+
+        for model in models:
+            loaded_name = model.get("name") or model.get("model")
+            if loaded_name == model_name:
+                return True
+
         return False
 
-    for model in models:
-        loaded_name = model.get("name") or model.get("model")
-        if loaded_name == model_name:
-            return True
+    def _generate_stream(
+        self,
+        scope: CancellationScope,
+        cancel_event: Event | None,
+        model_name: str,
+        messages: list[_OllamaMessage],
+        timeout_seconds: float,
+    ) -> tuple[str | None, str | None]:
+        chat_url = f"{self.get_base_url()}/api/chat"
 
-    return False
-
-
-def describe():
-    model, error = get_model()
-    if error:
-        return f"ollama (model resolution failed: {error})"
-
-    return f"ollama (model: {model})"
-
-
-def _generate_stream(
-    http_client,
-    base_url,
-    model,
-    messages,
-    timeout_seconds,
-    cancel_event,
-    scope,
-):
-    with http_client.post(
-        f"{base_url}/api/chat",
-        json={
-            "model": model,
+        post_json: _OllamaChatAPI = {
+            "model": model_name,
             "messages": messages,
             "stream": True,
-        },
-        timeout=timeout_seconds,
-        stream=True,
-    ) as response:
-        close_response = scope.add(response.close)
-        response.raise_for_status()
-        response_parts = []
+        }
 
-        for line in response.iter_lines(decode_unicode=True):
-            if cancel_event is not None and cancel_event.is_set():
-                raise InterruptedError("Request cancelled.")
+        with self.active_session.post(
+            chat_url, json=post_json, timeout=timeout_seconds, stream=True
+        ) as response:
+            close_response = scope.add(response.close)
+            response.raise_for_status()
+            response_parts: list[str] = []
 
-            if not line:
-                continue
+            line: str
+            for line in response.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Request cancelled.")
 
-            response_json = json.loads(line)
-            provider_error = response_json.get("error")
-            if provider_error:
-                return None, provider_error
+                if not line:
+                    continue
 
-            message = response_json.get("message", {})
-            content = message.get("content") or response_json.get("response")
-            if content:
-                response_parts.append(content)
+                response_json: _OllamaChatChunk = json.loads(line)
+                provider_error = response_json.get("error")
+                if provider_error:
+                    return None, provider_error
 
-            if response_json.get("done"):
-                break
+                message: _OllamaMessage | None = response_json.get("message")
+                if message:
+                    content = message.get("content") or response_json.get("response")
+                    if content:
+                        response_parts.append(content)
 
-        close_response()
-        return "".join(response_parts), None
+                if response_json.get("done"):
+                    break
 
+            close_response()
+            return "".join(response_parts), None
 
-def _generate_request(messages, cancel_event, http_client, scope):
-    model, error = get_model(http_client)
-    if error:
-        return None, error
+    def _generate_request(
+        self,
+        scope: CancellationScope,
+        cancel_event: Event | None,
+        messages: list[_OllamaMessage],
+    ) -> tuple[str | None, str | None]:
+        model_name, error = self.get_model()
+        if error or not model_name:
+            return None, error
 
-    base_url = get_base_url()
-    model_loaded = is_model_loaded(model, http_client)
-    timeout_seconds = (
-        get_timeout_seconds()
-        if model_loaded
-        else get_cold_start_timeout_seconds()
-    )
-    if model_loaded:
-        timeout_message = (
-            f"Ollama timed out after {timeout_seconds} seconds while using "
-            f"loaded model {model}."
+        model_loaded = self.is_model_loaded(model_name)
+        timeout_seconds = (
+            self._get_timeout_seconds()
+            if model_loaded
+            else self._get_cold_start_timeout_seconds()
         )
-    else:
-        timeout_message = (
-            f"Ollama timed out after {timeout_seconds} seconds while starting "
-            f"model {model}. The model may still be loading; try again in a "
-            "moment or increase CODA_OLLAMA_COLD_START_TIMEOUT."
-        )
+        if model_loaded:
+            timeout_message = f"Ollama timed out after {timeout_seconds} seconds while using loaded model {model_name}."
+        else:
+            timeout_message = (
+                f"Ollama timed out after {timeout_seconds} seconds while starting model {model_name}. "
+                f"The model may still be loading; try again in a moment or increase CODA_OLLAMA_COLD_START_TIMEOUT."
+            )
 
-    try:
-        result = _generate_stream(
-            http_client,
-            base_url,
-            model,
-            messages,
-            timeout_seconds,
-            cancel_event,
-            scope,
-        )
-    except InterruptedError:
-        return None, "Request cancelled."
-    except Timeout:
-        return None, timeout_message
-    except Exception as exc:
-        return None, str(exc)
-
-    assistant_message, provider_error = result
-    if provider_error:
-        return None, provider_error
-
-    return (assistant_message or "").strip(), None
-
-
-def generate(messages, cancel_event=None):
-    session = requests.Session()
-    scope = CancellationScope()
-    close_session = scope.add(session.close)
-    timeout_seconds = (
-        max(
-            get_timeout_seconds(),
-            get_cold_start_timeout_seconds(),
-        )
-        + (2 * min(get_timeout_seconds(), 10))
-    )
-
-    try:
-        return run_cancellable(
-            lambda: _generate_request(
-                messages,
-                cancel_event,
-                session,
+        try:
+            result = self._generate_stream(
                 scope,
-            ),
-            cancel_event,
-            timeout_seconds,
-            "Ollama request timed out.",
-            on_abandon=scope.cancel,
+                cancel_event,
+                model_name,
+                messages,
+                timeout_seconds,
+            )
+        except InterruptedError:
+            return None, "Request cancelled."
+        except Timeout:
+            return None, timeout_message
+        except Exception as exc:
+            return None, str(exc)
+
+        assistant_message, provider_error = result
+        if provider_error:
+            return None, provider_error
+
+        return (assistant_message or "").strip(), None
+
+    def generate(
+        self, messages: list[_OllamaMessage], cancel_event: Event | None = None
+    ) -> tuple[str | None, str | None] | None:
+        session = requests.Session()
+
+        timeout_seconds = max(
+            self._get_timeout_seconds(), self._get_cold_start_timeout_seconds()
         )
-    except InterruptedError:
-        return None, "Request cancelled."
-    except Exception as exc:
-        return None, str(exc)
-    finally:
-        close_session()
+        timeout_seconds += min(self._get_timeout_seconds(), 10) * 2
+
+        try:
+            return self._generate_request_wrapper(
+                self._generate_request,
+                session.close,
+                timeout_seconds,
+                messages,
+            )
+        except InterruptedError:
+            return None, "Request cancelled."
+        except Exception as exc:
+            return None, str(exc)

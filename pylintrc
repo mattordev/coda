@@ -11,4 +11,4 @@ disable=invalid-name
 
 [FORMAT]
 # Control the output format
-output-format=json
+output-format=text

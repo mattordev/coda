@@ -1,134 +1,40 @@
-import os
+from __future__ import annotations
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+import openai
+from typing import TYPE_CHECKING
 
-try:
-    import openai
-except ImportError:
-    openai = None
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionChunk
+    from typing import Iterable
 
-
-GROK_BASE_URL = "https://api.x.ai/v1"
-
-
-def get_api_key():
-    return os.getenv("XAI_API_KEY", "").strip()
+from ai.providers.openai import OpenAIProvider
 
 
-def get_model():
-    return (
-        os.getenv("CODA_GROK_MODEL", "grok-4.5").strip()
-        or "grok-4.5"
-    )
+class GrokProvider(OpenAIProvider):
+    @staticmethod
+    def _get_data() -> GrokProvider.Details:
+        return {
+            "type": GrokProvider.Type.CLOUD,
+            "api_key_env": "XAI_API_KEY",
+            "model_env": "CODA_GROK_MODEL",
+            "model_required": False,
+            "default_model": "grok-4.5",
+            "default_base_url": "https://api.x.ai/v1",
+        }
 
+    @staticmethod
+    def _get_name() -> str:
+        return "Grok"
 
-def reload_config():
-    pass
-
-
-def describe():
-    return f"grok (model: {get_model()})"
-
-
-def _get_timeout_seconds():
-    try:
-        return max(
-            0.1,
-            float(os.getenv("CODA_LLM_TIMEOUT", "45")),
-        )
-    except ValueError:
-        return 45.0
-
-
-def _generate_stream(
-    client,
-    model,
-    messages,
-    cancel_event,
-    scope,
-):
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-    )
-
-    close_stream = getattr(stream, "close", None)
-
-    if callable(close_stream):
-        close_stream = scope.add(close_stream)
-
-    response_parts = []
-
-    try:
-        for chunk in stream:
-            if (
-                cancel_event is not None
-                and cancel_event.is_set()
-            ):
-                raise InterruptedError("Request cancelled.")
-
-            if not chunk.choices:
-                continue
-
-            content = chunk.choices[0].delta.content
-
-            if content:
-                response_parts.append(content)
-
-    finally:
-        if callable(close_stream):
-            close_stream()
-
-    return "".join(response_parts)
-
-
-def generate(messages, cancel_event=None):
-    api_key = get_api_key()
-    model = get_model()
-
-    if openai is None:
-        return None, "openai package is not installed."
-
-    if not api_key:
-        return None, "XAI_API_KEY is not set in env."
-
-    try:
-        client = openai.OpenAI(
-            api_key=api_key,
-            base_url=GROK_BASE_URL,
+    @staticmethod
+    def _create_chat_completion_stream(
+        client: openai.OpenAI,
+        model: str,
+        messages: Iterable[ChatCompletionMessageParam],
+    ) -> openai.Stream[ChatCompletionChunk]:
+        return client.chat.completions.create(
+            model=model, messages=messages, stream=True, reasoning_effort="none"
         )
 
-        scope = CancellationScope()
-
-        close_client = getattr(client, "close", None)
-
-        if callable(close_client):
-            close_client = scope.add(close_client)
-
-        try:
-            assistant_message = run_cancellable(
-                lambda: _generate_stream(
-                    client,
-                    model,
-                    messages,
-                    cancel_event,
-                    scope,
-                ),
-                cancel_event,
-                _get_timeout_seconds(),
-                "Grok generation timed out.",
-                on_abandon=scope.cancel,
-            )
-
-        finally:
-            if callable(close_client):
-                close_client()
-
-    except InterruptedError:
-        return None, "Request cancelled."
-
-    except Exception as exc:
-        return None, str(exc)
-
-    return (assistant_message or "").strip(), None
+    def reload_config(self) -> None:
+        pass

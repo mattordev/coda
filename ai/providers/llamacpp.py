@@ -1,43 +1,33 @@
 import json
-import os
 
 import requests
 from requests.exceptions import Timeout
 
-from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.cancellable import CancellationScope
+from ai.providers.basellama import BaseLlamaProvider
+from ai.providers.provider import Provider
 
 _model_cache = None
 
 
-def _get_float_env(name, default):
-    value = os.getenv(name)
-    if value is None:
-        return default
+class LlamacppProvider(BaseLlamaProvider):
+    @staticmethod
+    def _get_data() -> Provider.Details:
+        return {
+            "type": Provider.Type.LOCAL,
+            "model_env": "CODA_LLAMACPP_MODEL",
+            "base_url_env": "CODA_LLAMACPP_BASE_URL",
+            "model_required": False,
+            "default_base_url": "http://localhost:8080",
+        }
 
-    try:
-        return float(value)
-    except ValueError:
-        return default
+    @staticmethod
+    def _get_name() -> str:
+        return "Llama.cpp"
 
-
-def get_base_url():
-    return os.getenv(
-        "CODA_LLAMACPP_BASE_URL",
-        "http://localhost:8080",
-    ).rstrip("/")
-
-
-def get_configured_model():
-    return os.getenv("CODA_LLAMACPP_MODEL", "").strip()
-
-
-def get_timeout_seconds():
-    return _get_float_env("CODA_LLM_TIMEOUT", 45.0)
-
-
-def reload_config():
-    global _model_cache
-    _model_cache = None
+    @classmethod
+    def get_models_url(cls) -> str:
+        return f"{cls.get_base_url()}/v1/models"
 
 
 def get_model(http_client=requests):
@@ -65,9 +55,7 @@ def get_model(http_client=requests):
         )
 
     if not models:
-        return None, (
-            "No model was reported by the configured llama.cpp server."
-        )
+        return None, ("No model was reported by the configured llama.cpp server.")
 
     model = models[0].get("id")
     if not model:
@@ -161,9 +149,7 @@ def _generate_request(messages, cancel_event, http_client, scope):
     except InterruptedError:
         return None, "Request cancelled."
     except Timeout:
-        return None, (
-            f"llama.cpp timed out after {timeout_seconds} seconds."
-        )
+        return None, (f"llama.cpp timed out after {timeout_seconds} seconds.")
     except Exception as exc:
         return None, str(exc)
 

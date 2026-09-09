@@ -127,7 +127,7 @@ class PrivacyRoutingTests(unittest.TestCase):
     def test_cancelled_provider_request_does_not_change_conversation_history(self):
         cancel_event = Event()
         cancel_event.set()
-        provider = registry.get_provider_module("ollama")
+        provider = registry.get_provider("ollama")
         original_history = list(llm_service.conversation_log)
 
         with mock.patch.object(provider, "generate") as generate:
@@ -144,7 +144,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
     def test_cancellation_during_provider_discards_request_and_response(self):
         cancel_event = Event()
-        provider = registry.get_provider_module("ollama")
+        provider = registry.get_provider("ollama")
         original_history = list(llm_service.conversation_log)
 
         def cancel_during_generation(_messages, **_kwargs):
@@ -168,7 +168,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
     def test_cancellation_during_response_analysis_restores_history(self):
         cancel_event = Event()
-        provider = registry.get_provider_module("ollama")
+        provider = registry.get_provider("ollama")
         original_history = list(llm_service.conversation_log)
         privacy_result = analyze_privacy("late response")
 
@@ -197,7 +197,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
     def test_cancellation_after_assistant_append_restores_history(self):
         cancel_event = Event()
-        provider = registry.get_provider_module("ollama")
+        provider = registry.get_provider("ollama")
         original_history = list(llm_service.conversation_log)
 
         def cancel_during_trim():
@@ -223,8 +223,8 @@ class PrivacyRoutingTests(unittest.TestCase):
         self.assertEqual(llm_service.conversation_log, original_history)
 
     def test_cloud_messages_redact_sensitive_history(self):
-        local_provider = registry.get_provider_module("ollama")
-        cloud_provider = registry.get_provider_module("openai")
+        local_provider = registry.get_provider("ollama")
+        cloud_provider = registry.get_provider("openai")
         captured = []
 
         with mock.patch.object(local_provider, "generate", return_value=("local ok", None)):
@@ -349,8 +349,8 @@ class PrivacyRoutingTests(unittest.TestCase):
         )
 
     def test_cloud_fallback_receives_sanitised_medium_risk_content(self):
-        local_provider = registry.get_provider_module("ollama")
-        cloud_provider = registry.get_provider_module("openai")
+        local_provider = registry.get_provider("ollama")
+        cloud_provider = registry.get_provider("openai")
         captured = []
 
         with mock.patch.object(local_provider, "generate", return_value=(None, "local failed")), \
@@ -445,7 +445,7 @@ class PrivacyRoutingTests(unittest.TestCase):
         )
 
     def test_sensitive_assistant_response_is_sanitised_for_future_cloud_history(self):
-        cloud_provider = registry.get_provider_module("openai")
+        cloud_provider = registry.get_provider("openai")
         captured = []
 
         with mock.patch.object(
