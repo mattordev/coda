@@ -30,6 +30,9 @@ class Provider(ABC):
         default_base_url: NotRequired[str]
         default_model: NotRequired[str]
 
+    class ProviderError(Exception):
+        pass
+
     @staticmethod
     @abstractmethod
     def _get_data() -> Details:

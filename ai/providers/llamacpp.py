@@ -1,13 +1,30 @@
+from __future__ import annotations
+
 import json
-
+from threading import Event
 import requests
-from requests.exceptions import Timeout
 
-from ai.providers.cancellable import CancellationScope
-from ai.providers.basellama import BaseLlamaProvider
+from typing import TypedDict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Required
+
+from ai.providers.basellama import BaseLlamaProvider, LlamaType
 from ai.providers.provider import Provider
 
-_model_cache = None
+if TYPE_CHECKING:
+
+    class _Model(TypedDict):
+        id: Required[str]
+
+    class _HttpResponse(TypedDict):
+        data: Required[list[_Model]]
+
+    class _ChoiceData(TypedDict):
+        delta: LlamaType.Message
+
+    class _StreamData(TypedDict):
+        choices: list[_ChoiceData]
 
 
 class LlamacppProvider(BaseLlamaProvider):
@@ -25,84 +42,59 @@ class LlamacppProvider(BaseLlamaProvider):
     def _get_name() -> str:
         return "Llama.cpp"
 
+    @staticmethod
+    def _model_to_llama_model(model: _Model) -> LlamaType.Model:
+        model_id = model.get("id")
+
+        return LlamaType.Model(name=model_id, model=model_id)
+
     @classmethod
-    def get_models_url(cls) -> str:
+    def _get_models_url(cls) -> str:
         return f"{cls.get_base_url()}/v1/models"
 
+    @classmethod
+    def _get_chat_url(cls) -> str:
+        return f"{cls.get_base_url()}/v1/chat/completions"
 
-def get_model(http_client=requests):
-    global _model_cache
+    def _get_request(self, url: str) -> _HttpResponse | None:
+        try:
+            response = self.active_session.get(
+                url, timeout=min(self._get_timeout_seconds(), 10)
+            )
+            response.raise_for_status()
+        except Exception:
+            return None
 
-    configured_model = get_configured_model()
-    if configured_model:
-        return configured_model, None
+        http_response: _HttpResponse = response.json()
 
-    if _model_cache:
-        return _model_cache, None
+        return http_response
 
-    try:
-        response = http_client.get(
-            f"{get_base_url()}/v1/models",
-            timeout=min(get_timeout_seconds(), 10),
-        )
-        response.raise_for_status()
-        models = response.json().get("data", [])
-    except Exception as exc:
-        return None, (
-            "Could not fetch llama.cpp model information automatically. "
-            "Set CODA_LLAMACPP_MODEL explicitly. "
-            f"Details: {exc}"
-        )
+    def _get_models(
+        self, url: str, *, raise_exception: bool = True
+    ) -> list[LlamaType.Model]:
+        models: list[LlamaType.Model] = []
+        try:
+            response = self._get_request(url)
+            if response is not None:
+                _models = response.get("data", [])
+                # here we want to translate a group of _Model to LlamaType.Model
+                models = [self._model_to_llama_model(_model) for _model in _models]
+        except Exception:
+            if raise_exception:
+                raise
 
-    if not models:
-        return None, ("No model was reported by the configured llama.cpp server.")
+        return models
 
-    model = models[0].get("id")
-    if not model:
-        return None, "llama.cpp returned a model without a usable id."
-
-    _model_cache = model
-    return model, None
-
-
-def describe():
-    model, error = get_model()
-
-    if error:
-        return f"llamacpp (model resolution failed: {error})"
-
-    return f"llamacpp (model: {model})"
-
-
-def _generate_stream(
-    http_client,
-    base_url,
-    model,
-    messages,
-    timeout_seconds,
-    cancel_event,
-    scope,
-):
-    with http_client.post(
-        f"{base_url}/v1/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "stream": True,
-        },
-        timeout=timeout_seconds,
-        stream=True,
-    ) as response:
-        close_response = scope.add(response.close)
-        response.raise_for_status()
-
-        response_parts = []
+    def _process_response(
+        self, response: requests.Response, cancel_event: Event | None = None
+    ) -> list[str]:
+        response_parts: list[str] = []
 
         for line in response.iter_lines(decode_unicode=True):
             if cancel_event is not None and cancel_event.is_set():
                 raise InterruptedError("Request cancelled.")
 
-            if not line:
+            if not isinstance(line, str):
                 continue
 
             if line.startswith("data: "):
@@ -111,7 +103,7 @@ def _generate_stream(
             if line == "[DONE]":
                 break
 
-            response_json = json.loads(line)
+            response_json: _StreamData = json.loads(line)
 
             choices = response_json.get("choices", [])
             if not choices:
@@ -123,66 +115,4 @@ def _generate_stream(
             if content:
                 response_parts.append(content)
 
-        close_response()
-        return "".join(response_parts), None
-
-
-def _generate_request(messages, cancel_event, http_client, scope):
-    model, error = get_model(http_client)
-
-    if error:
-        return None, error
-
-    timeout_seconds = get_timeout_seconds()
-
-    try:
-        result = _generate_stream(
-            http_client,
-            get_base_url(),
-            model,
-            messages,
-            timeout_seconds,
-            cancel_event,
-            scope,
-        )
-    except InterruptedError:
-        return None, "Request cancelled."
-    except Timeout:
-        return None, (f"llama.cpp timed out after {timeout_seconds} seconds.")
-    except Exception as exc:
-        return None, str(exc)
-
-    assistant_message, provider_error = result
-
-    if provider_error:
-        return None, provider_error
-
-    return (assistant_message or "").strip(), None
-
-
-def generate(messages, cancel_event=None):
-    session = requests.Session()
-    scope = CancellationScope()
-    close_session = scope.add(session.close)
-
-    timeout_seconds = get_timeout_seconds() + 10
-
-    try:
-        return run_cancellable(
-            lambda: _generate_request(
-                messages,
-                cancel_event,
-                session,
-                scope,
-            ),
-            cancel_event,
-            timeout_seconds,
-            "llama.cpp request timed out.",
-            on_abandon=scope.cancel,
-        )
-    except InterruptedError:
-        return None, "Request cancelled."
-    except Exception as exc:
-        return None, str(exc)
-    finally:
-        close_session()
+        return response_parts
