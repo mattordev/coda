@@ -115,6 +115,12 @@ later releases. Publishing v1.4.4 does not make the older updater safe to use.
 
 ## Dependencies and restart
 
+Interactive terminals show a Colorama-coloured ASCII activity bar and elapsed
+seconds during download, extraction, environment creation, dependency installation,
+and verification. This is activity feedback, not a percentage or a guarantee that
+network traffic is flowing. Redirected output uses plain stage messages instead.
+Detailed dependency output remains in the attempt's private `dependency-install.log`.
+
 1. Before changing live source, create a fresh environment at the permanent path
    `.coda-update-<attempt>/environment` using the current Python version.
    The existing `.venv` is not modified, moved, or deleted.

@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from utils.update_progress import UpdateProgress
+
 
 ENVIRONMENT_DIR = "environment"
 LOG_NAME = "dependency-install.log"
@@ -42,16 +44,17 @@ def _run_step(command, step, timeout, workspace, process_env, log):
     log.write(f"\n--- {step} ---\n".encode("utf-8"))
     log.flush()
     try:
-        subprocess.run(
-            command,
-            check=True,
-            timeout=timeout,
-            cwd=str(workspace),
-            env=process_env,
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
+        with UpdateProgress(f"Dependencies: {step}"):
+            subprocess.run(
+                command,
+                check=True,
+                timeout=timeout,
+                cwd=str(workspace),
+                env=process_env,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
     except (OSError, subprocess.SubprocessError) as error:
         reason = "timed out" if isinstance(error, subprocess.TimeoutExpired) else "failed"
         raise DependencyPreparationError(

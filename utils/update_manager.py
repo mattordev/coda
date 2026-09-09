@@ -23,6 +23,7 @@ from utils.update_bootstrap import (
 )
 from utils.update_dependencies import prepare_environment
 from utils.update_releases import latest_release, read_installed_version, download_archive
+from utils.update_progress import UpdateProgress
 
 # Temp download/extract folders used during update.
 ZIP_NAME = "coda.zip"
@@ -240,11 +241,13 @@ def prepare_update(install_root=None, arguments=None, release=None):
         (workspace / "release.json").write_text(json.dumps({
             "tag": release.tag, "version": str(release.version), "commit": release.commit,
         }), encoding="utf-8")
-        update_program(workspace, release)
-        extract_download(workspace)
-        setup_updated_program(workspace, release)
-        validate_new_version(workspace, release)
-        preserve_local_files(root, workspace)
+        with UpdateProgress("Downloading update"):
+            update_program(workspace, release)
+        with UpdateProgress("Extracting and validating update"):
+            extract_download(workspace)
+            setup_updated_program(workspace, release)
+            validate_new_version(workspace, release)
+            preserve_local_files(root, workspace)
         staged = workspace / NEW_VERSION_DIR
         # Older releases cannot participate in the supervised startup handshake.
         if not (staged / "utils" / "update_bootstrap.py").is_file():
