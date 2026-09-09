@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-from colorama import Fore, Style, just_fix_windows_console
+from colorama import Back, Fore, Style, just_fix_windows_console
 
 
 class UpdateProgress:
@@ -26,11 +26,14 @@ class UpdateProgress:
             # A closed console must not interrupt activation or recovery.
             self.stop.set()
 
+    def _elapsed(self):
+        seconds = max(0.0, time.monotonic() - self.started)
+        return "<0.01s" if seconds < 0.01 else f"{seconds:.2f}s"
+
     def _frame(self, tick):
         position = tick % 20
         bar = " " * position + "#" + " " * (19 - position)
-        elapsed = int(time.monotonic() - self.started)
-        self._write(f"\r{Fore.CYAN}[{bar}] {self.label} ({elapsed}s){Style.RESET_ALL}")
+        self._write(f"\r{Fore.YELLOW}[{bar}] {self.label} ({self._elapsed()}){Style.RESET_ALL}")
 
     def _animate(self):
         tick = 1
@@ -55,12 +58,10 @@ class UpdateProgress:
             self.thread.join()
         status = "done" if error_type is None else "stopped"
         if self.interactive:
-            colour = Fore.GREEN if error_type is None else Fore.RED
-            status_colour = Fore.LIGHTGREEN_EX if error_type is None else Fore.LIGHTRED_EX
-            elapsed = int(time.monotonic() - self.started)
+            status_colour = Back.GREEN if error_type is None else Back.RED
             self._write(
-                f"\r{colour}[{'#' * 20}] {self.label} ({elapsed}s) "
-                f"{status_colour}{Style.BRIGHT}{status}{Style.RESET_ALL}\n"
+                f"\r{Style.RESET_ALL}[{'#' * 20}] {self.label} ({self._elapsed()}) "
+                f"{status_colour}{Fore.BLACK}{Style.NORMAL} {status} {Style.RESET_ALL}\n"
             )
         else:
             self._write(f"[UPDATE] {self.label}: {status}\n")

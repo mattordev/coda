@@ -2,7 +2,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from colorama import Fore, Style
+from colorama import Back, Fore, Style
 
 from utils.update_progress import UpdateProgress
 
@@ -31,9 +31,10 @@ class UpdateProgressTests(unittest.TestCase):
         self.assertIn("\x1b[", stream.getvalue())
         self.assertIn("[    #", stream.getvalue())
         self.assertTrue(stream.getvalue().endswith("\n"))
-        self.assertIn(f"{Fore.LIGHTGREEN_EX}{Style.BRIGHT}done{Style.RESET_ALL}", stream.getvalue())
+        self.assertIn(Fore.YELLOW, stream.getvalue())
+        self.assertIn(f"{Back.GREEN}{Fore.BLACK}{Style.NORMAL} done {Style.RESET_ALL}", stream.getvalue())
 
-    def test_terminal_failure_status_is_bright_red(self):
+    def test_terminal_failure_status_has_red_background(self):
         stream = io.StringIO()
         with patch.object(stream, "isatty", return_value=True), \
                 patch("utils.update_progress.just_fix_windows_console"):
@@ -41,7 +42,14 @@ class UpdateProgressTests(unittest.TestCase):
                 with UpdateProgress("Installing", stream) as progress:
                     raise ValueError("fixture")
         self.assertFalse(progress.thread.is_alive())
-        self.assertIn(f"{Fore.LIGHTRED_EX}{Style.BRIGHT}stopped{Style.RESET_ALL}", stream.getvalue())
+        self.assertIn(f"{Back.RED}{Fore.BLACK}{Style.NORMAL} stopped {Style.RESET_ALL}", stream.getvalue())
+
+    def test_elapsed_preserves_fractional_seconds(self):
+        progress = UpdateProgress("Downloading", io.StringIO())
+        progress.started = 10
+        for now, expected in ((10, "<0.01s"), (10.004, "<0.01s"), (10.25, "0.25s"), (72.5, "62.50s")):
+            with self.subTest(now=now), patch("utils.update_progress.time.monotonic", return_value=now):
+                self.assertEqual(progress._elapsed(), expected)
 
     def test_closed_output_does_not_mask_operation(self):
         stream = io.StringIO()
