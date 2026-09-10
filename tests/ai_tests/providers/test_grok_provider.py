@@ -3,12 +3,10 @@ from unittest import mock
 
 from ai.providers import GrokProvider
 
-from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTest
+from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTestCase
 
 
-class GrokProviderTests(BaseAIProviderTest[GrokProvider]):
-    __unittest_skip__ = False
-
+class GrokProviderTests(BaseAIProviderTestCase[GrokProvider]):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName, GrokProvider)
 

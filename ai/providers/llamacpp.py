@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from typing import Required
 
 from ai.providers.basellama import BaseLlamaProvider, LlamaType
-from ai.providers.provider import Provider
+from . import Provider, ProviderError
 
 if TYPE_CHECKING:
 
@@ -88,19 +88,24 @@ class LlamacppProvider(BaseLlamaProvider):
     def _process_response(
         self, response: requests.Response, cancel_event: Event | None = None
     ) -> list[str]:
+        DATA_PREFIX = "data: "
+        TERMINATION_STR = "[DONE]"
+
         response_parts: list[str] = []
 
         for line in response.iter_lines(decode_unicode=True):
             if cancel_event is not None and cancel_event.is_set():
-                raise InterruptedError("Request cancelled.")
+                raise ProviderError.Cancellation("Request cancelled.")
 
             if not isinstance(line, str):
                 continue
 
-            if line.startswith("data: "):
-                line = line[6:]
+            if not line:
+                continue
 
-            if line == "[DONE]":
+            line = line.removeprefix(DATA_PREFIX)
+
+            if line == TERMINATION_STR:
                 break
 
             response_json: _StreamData = json.loads(line)

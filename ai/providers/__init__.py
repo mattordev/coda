@@ -1,4 +1,4 @@
-from .provider import Provider as Provider
+from .provider import Provider as Provider, ProviderError as ProviderError
 
 from .gemini import GeminiProvider as GeminiProvider
 from .openai import OpenAIProvider as OpenAIProvider

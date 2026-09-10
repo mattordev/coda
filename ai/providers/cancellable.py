@@ -15,6 +15,8 @@ Result = TypeVar("Result")
 
 _P = ParamSpec("_P")
 
+CANCELLATION_MESSAGE = "Request cancelled."
+
 
 class CancellationScope:
     """Own cleanup callbacks for provider resources created by worker code."""

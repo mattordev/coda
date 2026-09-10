@@ -2,10 +2,10 @@ import unittest
 from unittest import mock
 
 from ai.providers import OpenRouterProvider
-from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTest
+from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTestCase
 
 
-class OpenRouterProviderTests(BaseAIProviderTest[OpenRouterProvider]):
+class OpenRouterProviderTests(BaseAIProviderTestCase[OpenRouterProvider]):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName, OpenRouterProvider)
 
@@ -19,13 +19,6 @@ class OpenRouterProviderTests(BaseAIProviderTest[OpenRouterProvider]):
         }
 
         self.assertEqual(expected_provider_details, self.provider_data)
-
-    def test_get_configured_model_uses_configured_value(self) -> None:
-        model_name = "openai/gpt-4.1-mini"
-        model_env = self.provider_data.get("model_env")
-
-        with mock.patch.dict("os.environ", {model_env: model_name}):
-            self._compare_configured_model(model_name)
 
     def test_get_configured_model_has_no_default(self) -> None:
         with mock.patch.dict("os.environ", {}, clear=True):

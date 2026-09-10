@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from threading import Event
 
 from ai.providers.basellama import BaseLlamaProvider, LlamaType
-from . import Provider
+from . import Provider, ProviderError
 
 if TYPE_CHECKING:
 
@@ -112,7 +112,7 @@ class OllamaProvider(BaseLlamaProvider):
             response_json: LlamaType.ChatChunk = json.loads(line)
             provider_error = response_json.get("error")
             if provider_error:
-                raise self.ProviderError(provider_error)
+                raise ProviderError.Generic(provider_error)
 
             message: LlamaType.Message | None = response_json.get("message")
             if message:

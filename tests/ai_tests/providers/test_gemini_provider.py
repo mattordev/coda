@@ -2,10 +2,10 @@ import unittest
 from unittest import mock
 
 from ai.providers import GeminiProvider
-from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTest
+from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTestCase
 
 
-class GeminiProviderTests(BaseAIProviderTest[GeminiProvider]):
+class GeminiProviderTests(BaseAIProviderTestCase[GeminiProvider]):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName, GeminiProvider)
 

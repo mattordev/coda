@@ -16,6 +16,21 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+class ProviderError:
+
+    class Generic(Exception):
+        pass
+
+    class Timeout(Generic):
+        pass
+
+    class Cancellation(Generic):
+        pass
+
+    class InvalidModel(Generic):
+        pass
+
+
 class Provider(ABC):
     class Type(StrEnum):
         CLOUD = "cloud"
@@ -29,9 +44,6 @@ class Provider(ABC):
         api_key_env: NotRequired[str]
         default_base_url: NotRequired[str]
         default_model: NotRequired[str]
-
-    class ProviderError(Exception):
-        pass
 
     @staticmethod
     @abstractmethod
@@ -125,6 +137,7 @@ class Provider(ABC):
         function: Callable[Concatenate[CancellationScope, Event | None, _P], _R],
         close_callback: Callable[[], None],
         timeout_seconds: float,
+        cancel_event: Event | None,
         *args: _P.args,
         **kwargs: _P.kwargs,
     ) -> _R | None:
@@ -132,7 +145,6 @@ class Provider(ABC):
         A generic wrapper for sending a cancelable generation request
         to a provider using :func:`CancellationScope.run_cancellable`"""
         scope = CancellationScope()
-        cancel_event = Event()
 
         close_client = scope.add(close_callback)
 
@@ -145,5 +157,7 @@ class Provider(ABC):
                 *args,
                 **kwargs,
             )
+        except InterruptedError as e:
+            raise ProviderError.Cancellation(e)
         finally:
             close_client()

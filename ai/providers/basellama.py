@@ -8,8 +8,8 @@ from threading import Event
 if TYPE_CHECKING:
     from typing import NotRequired, Required
 
-from ai.providers.cancellable import CancellationScope
-from . import Provider
+from ai.providers.cancellable import CancellationScope, CANCELLATION_MESSAGE
+from . import Provider, ProviderError
 
 
 class LlamaType:
@@ -20,7 +20,7 @@ class LlamaType:
         TOOL = "tool"
 
     class Message(TypedDict):
-        role: Required[LlamaType.Role]
+        role: NotRequired[LlamaType.Role]
         content: Required[str]
 
     class Model(TypedDict):
@@ -28,11 +28,11 @@ class LlamaType:
         model: NotRequired[str]
 
     class ChatChunk(TypedDict):
-        model: str
+        model: NotRequired[str]
         message: NotRequired[LlamaType.Message]
         error: NotRequired[str]
         response: NotRequired[str]
-        done: bool
+        done: NotRequired[bool]
 
 
 class BaseLlamaProvider(Provider, ABC):
@@ -43,7 +43,9 @@ class BaseLlamaProvider(Provider, ABC):
         stream: NotRequired[bool]
 
     def __init__(self) -> None:
+        self.cached_model: str | None = None
         self.active_session = requests.Session()
+
         super().__init__()
 
     @staticmethod
@@ -90,7 +92,7 @@ class BaseLlamaProvider(Provider, ABC):
         pass
 
     def reload_config(self) -> None:
-        self._model_cache: str | None = None
+        self.cached_model = None
 
     def _is_model_loaded(self, model_name: str) -> bool:
         return True
@@ -111,20 +113,18 @@ class BaseLlamaProvider(Provider, ABC):
             "stream": True,
         }
 
-        with self.active_session.post(
+        response = self.active_session.post(
             chat_url, json=post_json, timeout=timeout_seconds, stream=True
-        ) as response:
-            close_response = scope.add(response.close)
-            response.raise_for_status()
-            response_parts: list[str] = []
+        )
 
-            try:
-                response_parts = self._process_response(response, cancel_event)
-            except self.ProviderError:
-                raise
+        close_response = scope.add(response.close)
+        response.raise_for_status()
+        response_parts: list[str] = []
 
-            close_response()
-            return "".join(response_parts)
+        response_parts = self._process_response(response, cancel_event)
+
+        close_response()
+        return "".join(response_parts)
 
     def _generate_request(
         self,
@@ -134,10 +134,7 @@ class BaseLlamaProvider(Provider, ABC):
         *,
         query_model_loaded: bool = False,
     ) -> str:
-        try:
-            model_name = self.get_model()
-        except self.ProviderError:
-            raise
+        model_name = self.get_model()
 
         timeout_seconds = self._get_timeout_seconds()
         timeout_message = f"{self._get_name()} timed out after {timeout_seconds} seconds while using model: {model_name}."
@@ -162,13 +159,13 @@ class BaseLlamaProvider(Provider, ABC):
                 timeout_seconds,
             )
         except InterruptedError as e:
-            raise self.ProviderError(f"Request cancelled. Details: {e}")
+            raise ProviderError.Cancellation(f"{CANCELLATION_MESSAGE} Details: {e}")
         except requests.Timeout as e:
-            raise self.ProviderError(f"{timeout_message}. Details: {e}")
-        except self.ProviderError:
+            raise ProviderError.Timeout(f"{timeout_message} Details: {e}")
+        except ProviderError.Generic:
             raise
         except Exception as e:
-            raise self.ProviderError(f"Uncaught exception. Details: {e}")
+            raise ProviderError.Generic(f"Uncaught exception. Details: {e}")
 
         return (result or "").strip()
 
@@ -176,7 +173,7 @@ class BaseLlamaProvider(Provider, ABC):
         model: str | None = None
         try:
             model = self.get_model()
-        except self.ProviderError as e:
+        except ProviderError.InvalidModel as e:
             return f"{self._get_name()} (model resolution failed: {e})"
 
         return f"{self._get_name()} (model: {model})"
@@ -192,20 +189,20 @@ class BaseLlamaProvider(Provider, ABC):
         if configured_model:
             return configured_model
 
-        if self._model_cache:
-            return self._model_cache
+        if self.cached_model:
+            return self.cached_model
 
         model_env = self.data.get("model_env")
         models: list[LlamaType.Model] = []
         try:
             models = self._get_models(self._get_models_url())
         except Exception as exc:
-            raise self.ProviderError(
+            raise ProviderError.InvalidModel(
                 f"Could not fetch {self._get_name()} models automatically. Set {model_env} explicitly. Details: {exc}"
             )
 
         if not models:
-            raise self.ProviderError(
+            raise ProviderError.InvalidModel(
                 f"No {self._get_name()} models were found at the configured host. Set {model_env} after pulling a model on the host."
             )
 
@@ -225,34 +222,30 @@ class BaseLlamaProvider(Provider, ABC):
             selected_model = model_names[0] if model_names else None
 
         if not selected_model:
-            raise self.ProviderError(
+            raise ProviderError.InvalidModel(
                 f"{self._get_name()} returned models but none included a usable name."
             )
 
-        self._model_cache = selected_model
-        return self._model_cache
+        self.cached_model = selected_model
+        return self.cached_model
 
     def generate(
-        self, messages: list[LlamaType.Message]
-    ) -> tuple[str | None, str | None] | None:
-        session = requests.Session()
-
+        self, messages: list[LlamaType.Message], cancel_event: Event | None = None
+    ) -> str | None:
         timeout_seconds = max(
             self._get_timeout_seconds(), self._get_cold_start_timeout_seconds()
         )
         timeout_seconds += min(self._get_timeout_seconds(), 10) * 2
 
         try:
-            return (
-                self._generate_request_wrapper(
-                    self._generate_request,
-                    session.close,
-                    timeout_seconds,
-                    messages,
-                ),
-                None,
+            response = self._generate_request_wrapper(
+                self._generate_request,
+                self.active_session.close,
+                timeout_seconds,
+                cancel_event,
+                messages,
             )
-        except InterruptedError:
-            return None, "Request cancelled."
-        except Exception as exc:
-            return None, str(exc)
+        except ProviderError.Cancellation:
+            response = CANCELLATION_MESSAGE
+
+        return response

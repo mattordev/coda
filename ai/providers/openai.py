@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from typing import Iterable
     from openai.types.chat import ChatCompletionMessageParam, ChatCompletionChunk
 
-from ai.providers.cancellable import CancellationScope
+from ai.providers.cancellable import CancellationScope, CANCELLATION_MESSAGE
 from ai.providers.provider import Provider
 
 
@@ -59,7 +59,7 @@ class OpenAIProvider(Provider):
         try:
             for chunk in stream:
                 if cancel_event is not None and cancel_event.is_set():
-                    raise InterruptedError("Request cancelled.")
+                    raise InterruptedError(CANCELLATION_MESSAGE)
 
                 if not chunk.choices:
                     continue
@@ -73,7 +73,9 @@ class OpenAIProvider(Provider):
         return "".join(response_parts)
 
     def generate(
-        self, messages: Iterable[ChatCompletionMessageParam]
+        self,
+        messages: Iterable[ChatCompletionMessageParam],
+        cancel_event: Event | None = None,
     ) -> tuple[str | None, str | None]:
         api_key = self.get_api_key()
         model = self.get_configured_model()
@@ -97,6 +99,7 @@ class OpenAIProvider(Provider):
                 self._generate_stream,
                 client.close,
                 self._get_timeout_seconds(),
+                cancel_event,
                 client,
                 model,
                 messages,
