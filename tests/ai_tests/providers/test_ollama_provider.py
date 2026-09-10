@@ -4,23 +4,23 @@ import unittest
 from threading import Event
 from unittest import mock
 
-from ai.providers import ollama
+from ai.providers import OllamaProvider
 
 
 class OllamaProviderTests(unittest.TestCase):
     def _response(self, chunks):
         response = mock.MagicMock()
         response.__enter__.return_value = response
-        response.iter_lines.return_value = [
-            json.dumps(chunk) for chunk in chunks
-        ]
+        response.iter_lines.return_value = [json.dumps(chunk) for chunk in chunks]
         return response
 
     def test_generate_accumulates_streamed_response(self):
-        response = self._response([
-            {"message": {"content": "hello "}, "done": False},
-            {"message": {"content": "world"}, "done": True},
-        ])
+        response = self._response(
+            [
+                {"message": {"content": "hello "}, "done": False},
+                {"message": {"content": "world"}, "done": True},
+            ]
+        )
         session = mock.MagicMock()
         session.post.return_value = response
 
@@ -37,17 +37,18 @@ class OllamaProviderTests(unittest.TestCase):
             "Session",
             return_value=session,
         ):
-            result, error = ollama.generate([{"role": "user", "content": "hi"}])
+            result, error = OllamaProvider().generate(
+                [{"role": "user", "content": "hi"}]
+            )
 
         self.assertEqual((result, error), ("hello world", None))
         session.post.assert_called_once_with(
-            f"{ollama.get_base_url()}/api/chat",
+            f"{OllamaProvider.get_base_url()}/api/chat",
             json={
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hi"}],
                 "stream": True,
             },
-            timeout=ollama.get_timeout_seconds(),
             stream=True,
         )
 
@@ -87,9 +88,11 @@ class OllamaProviderTests(unittest.TestCase):
         self.assertEqual(error, "Request cancelled.")
 
     def test_generate_returns_stream_error(self):
-        response = self._response([
-            {"error": "model failed", "done": True},
-        ])
+        response = self._response(
+            [
+                {"error": "model failed", "done": True},
+            ]
+        )
         session = mock.MagicMock()
         session.post.return_value = response
 
