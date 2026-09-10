@@ -40,8 +40,8 @@ class UpdateProgress:
 
     def _duration(self):
         seconds = max(0.0, time.monotonic() - self.started)
-        colour = Fore.GREEN if seconds < self.budget * 0.5 else (
-            Fore.YELLOW if seconds < self.budget * 0.8 else Fore.RED
+        colour = Fore.GREEN if seconds <= self.estimate else (
+            Fore.YELLOW if seconds <= self.estimate * 1.5 else Fore.RED
         )
         elapsed = "<0.01s" if seconds < 0.01 else f"{seconds:.2f}s"
         return f"{colour}{Style.BRIGHT}{elapsed}{Style.RESET_ALL}"

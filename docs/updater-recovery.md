@@ -88,6 +88,14 @@ updater deliberately refuses Git checkouts; do not remove `.git` to bypass it.
   installation. Offline, rate-limited, malformed, missing, or over-limit
   responses leave the running installation unchanged; there is no fallback to
   mutable main-branch source.
+- A validated release identity is cached locally for one hour, so repeated
+  ordinary startups do not repeatedly consume unauthenticated GitHub API quota.
+  Missing, stale, malformed, oversized, or invalid cache data triggers fresh
+  discovery. Failed cache writes do not prevent startup or release discovery.
+  When an update is accepted from cache, CODA asks whether to use that pinned
+  release or check GitHub again. A different freshly discovered release requires
+  a second confirmation; a failed refresh can fall back to the cached release
+  only with explicit confirmation.
 
 Only installations already running the repaired updater can use this flow for
 later releases. Publishing v1.4.4 does not make the older updater safe to use.
@@ -129,11 +137,10 @@ bytes and shows percentage, average transfer speed, and estimated time remaining
 If the server omits the total size, the time-based estimate remains in use.
 Detailed dependency output remains in the attempt's private `dependency-install.log`.
 
-Elapsed time is green below 50% of the stage budget, amber/yellow from 50% to
-below 80%, and red at 80% or above. Downloads use their 180-second budget;
-dependency stages use their respective subprocess timeouts. Extraction/validation
-uses a 60-second display budget only, not an enforced timeout. These colours are
-timing guidance, not failure detection; a slow stage can still finish successfully.
+Elapsed time is green through the displayed estimate, amber/yellow above 100% and
+through 150%, and red above 150%. Hard download and dependency timeouts remain
+separate from these estimates. These colours are timing guidance, not failure
+detection; a slow stage can still finish successfully.
 The amber/yellow shade depends on the terminal's ANSI palette.
 
 1. Before changing live source, create a fresh environment at the permanent path

@@ -7,3 +7,5 @@ telemetry_state.json
 .venv
 .coda-update-*/
 .coda-update-active.json
+.coda-release-cache.json
+.coda-release-cache-*

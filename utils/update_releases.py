@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 import time
 from urllib.parse import quote
 
@@ -18,6 +20,8 @@ DISCOVERY_SECONDS = 45
 METADATA_BYTES = 1024 * 1024
 ARCHIVE_BYTES = 128 * 1024 * 1024
 ARCHIVE_SECONDS = 180
+RELEASE_CACHE = ".coda-release-cache.json"
+RELEASE_CACHE_SECONDS = 3600
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
@@ -134,6 +138,50 @@ def latest_release():
             raise ValueError("Release tag does not resolve to a commit within five tag objects")
         obj = _metadata(f"git/tags/{obj['sha']}", deadline).get("object")
     raise ValueError("Release tag could not be resolved")
+
+
+def cached_latest_release(root, discover, *, refresh=False):
+    """Reuse a recently validated release identity across ordinary startups."""
+    cache = Path(root) / RELEASE_CACHE
+    now = time.time()
+    if not refresh:
+        try:
+            if cache.stat().st_size > 4096:
+                raise ValueError("Release cache is unexpectedly large")
+            with cache.open(encoding="utf-8") as handle:
+                data = json.load(handle)
+            checked = data.get("checked_at") if isinstance(data, dict) else None
+            if not isinstance(checked, (int, float)) or isinstance(checked, bool):
+                raise ValueError("Release cache has no valid timestamp")
+            if 0 <= now - checked < RELEASE_CACHE_SECONDS:
+                return Release(
+                    data.get("tag"), stable_version(data.get("version")), data.get("commit")
+                ), True
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    release = discover()
+    payload = json.dumps({
+        "checked_at": now,
+        "tag": release.tag,
+        "version": str(release.version),
+        "commit": release.commit,
+    })
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "x", encoding="utf-8", dir=root, prefix=".coda-release-cache-", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+        os.replace(temporary, cache)
+    except OSError:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+    return release, False
 
 
 def download_archive(workspace, filename, release, progress=None):

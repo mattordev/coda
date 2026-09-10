@@ -164,6 +164,52 @@ class ReleaseSelectionTests(unittest.TestCase):
                 releases.Release(tag, version, sha)
 
 
+class ReleaseCacheTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.release = releases.Release("v1.4.4", Version("1.4.4"), COMMIT)
+
+    def test_recent_valid_release_is_reused_without_discovery(self):
+        discover = MagicMock(return_value=self.release)
+        with patch.object(releases.time, "time", return_value=100):
+            selected, cached = releases.cached_latest_release(self.root, discover)
+        self.assertEqual(selected, self.release)
+        self.assertFalse(cached)
+        with patch.object(releases.time, "time", return_value=200):
+            selected, cached = releases.cached_latest_release(self.root, discover)
+        self.assertEqual(selected, self.release)
+        self.assertTrue(cached)
+        discover.assert_called_once()
+
+    def test_refresh_bypasses_cache_and_replaces_release(self):
+        newer = releases.Release("v1.4.5", Version("1.4.5"), "b" * 40)
+        with patch.object(releases.time, "time", return_value=100):
+            releases.cached_latest_release(self.root, MagicMock(return_value=self.release))
+        discover = MagicMock(return_value=newer)
+        with patch.object(releases.time, "time", return_value=101):
+            selected, cached = releases.cached_latest_release(self.root, discover, refresh=True)
+        self.assertEqual(selected, newer)
+        self.assertFalse(cached)
+        discover.assert_called_once()
+
+    def test_malformed_or_stale_cache_triggers_discovery(self):
+        cache = self.root / releases.RELEASE_CACHE
+        for content, now in (("not json", 100),
+                             (json.dumps({"checked_at": 0, "tag": "v1.4.4",
+                                          "version": "1.4.4", "commit": COMMIT}),
+                              releases.RELEASE_CACHE_SECONDS + 1)):
+            with self.subTest(content=content):
+                cache.write_text(content, encoding="utf-8")
+                discover = MagicMock(return_value=self.release)
+                with patch.object(releases.time, "time", return_value=now):
+                    selected, cached = releases.cached_latest_release(self.root, discover)
+                self.assertEqual(selected, self.release)
+                self.assertFalse(cached)
+                discover.assert_called_once()
+
+
 class ResponseBoundsTests(unittest.TestCase):
     def chunks(self, **overrides):
         options = {"byte_limit": 8, "deadline": 100}

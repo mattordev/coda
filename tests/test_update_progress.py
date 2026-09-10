@@ -8,17 +8,23 @@ from utils.update_progress import UpdateProgress
 
 
 class UpdateProgressTests(unittest.TestCase):
-    def test_duration_grades_thresholds_and_resets_colour(self):
-        progress = UpdateProgress("Installing", io.StringIO(), budget=100)
+    def test_duration_grades_estimate_thresholds_and_resets_colour(self):
+        progress = UpdateProgress("Installing", io.StringIO(), budget=1200, estimate=100)
         progress.started = 10
-        for seconds, colour in ((0, Fore.GREEN), (49.99, Fore.GREEN),
-                                (50, Fore.YELLOW), (79.99, Fore.YELLOW),
-                                (80, Fore.RED), (150, Fore.RED)):
+        for seconds, colour in ((0, Fore.GREEN), (99.99, Fore.GREEN),
+                                (100, Fore.GREEN), (100.01, Fore.YELLOW),
+                                (150, Fore.YELLOW), (150.01, Fore.RED)):
             with self.subTest(seconds=seconds), \
                     patch("utils.update_progress.time.monotonic", return_value=10 + seconds):
                 duration = progress._duration()
                 self.assertTrue(duration.startswith(colour + Style.BRIGHT))
                 self.assertTrue(duration.endswith(Style.RESET_ALL))
+
+    def test_dependency_install_slightly_over_estimate_is_amber(self):
+        progress = UpdateProgress("Installing", io.StringIO(), budget=1200, estimate=300)
+        progress.started = 10
+        with patch("utils.update_progress.time.monotonic", return_value=350):
+            self.assertTrue(progress._duration().startswith(Fore.YELLOW + Style.BRIGHT))
 
     def test_nonpositive_timing_budget_is_rejected(self):
         for budget in (0, -1):

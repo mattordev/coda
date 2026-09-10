@@ -22,7 +22,7 @@ from utils.update_bootstrap import (
     managed_environment, wait_for_process,
 )
 from utils.update_dependencies import prepare_environment
-from utils.update_releases import latest_release, read_installed_version, download_archive
+from utils.update_releases import cached_latest_release, latest_release, read_installed_version, download_archive
 from utils.update_progress import UpdateProgress
 from utils.update_releases import ARCHIVE_SECONDS
 
@@ -272,11 +272,34 @@ def check_for_update(install_root=None):
     try:
         root = _validate_install_root(root)
         installed = read_installed_version(root)
-        release = latest_release()
+        release, from_cache = cached_latest_release(root, latest_release)
         if release.version <= installed:
             return None
         prompt = input(f"CODA {release.tag} is available. Update from {installed}? (y/n): ")
         if prompt.strip().lower() == "y":
+            if from_cache:
+                choice = input(
+                    f"Use cached {release.tag}, or check GitHub for a newer release? (use/check): "
+                ).strip().lower()
+                if choice in ("check", "c"):
+                    try:
+                        refreshed, _ = cached_latest_release(root, latest_release, refresh=True)
+                    except (OSError, ValueError, requests.RequestException) as error:
+                        print(f"Release refresh failed: {error}")
+                        fallback = input(f"Use cached {release.tag} instead? (y/n): ")
+                        if fallback.strip().lower() != "y":
+                            return None
+                    else:
+                        if refreshed != release:
+                            confirm = input(
+                                f"GitHub reports {refreshed.tag}. Update to this release? (y/n): "
+                            )
+                            if confirm.strip().lower() != "y":
+                                return None
+                        release = refreshed
+                elif choice not in ("use", "u"):
+                    print("Update cancelled: choose 'use' or 'check'.")
+                    return None
             return prepare_update(root, release=release)
     except (OSError, ValueError, requests.RequestException, EOFError) as error:
         print(f"Automatic update skipped: {error}")

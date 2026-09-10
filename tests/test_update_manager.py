@@ -342,6 +342,29 @@ class UpdateManagerTests(unittest.TestCase):
             updater.check_for_update(self.root)
         prepare.assert_called_once_with(self.root, release=confirmed)
 
+    def test_cached_release_can_be_used_without_refresh(self):
+        with patch.object(
+            updater, "cached_latest_release", return_value=(self.release, True),
+        ) as cached, patch(
+            "builtins.input", side_effect=["y", "use"],
+        ), patch.object(updater, "prepare_update") as prepare:
+            updater.check_for_update(self.root)
+        cached.assert_called_once_with(self.root, updater.latest_release)
+        prepare.assert_called_once_with(self.root, release=self.release)
+
+    def test_cached_release_can_be_refreshed_and_new_version_reconfirmed(self):
+        newer = Release("v1.4.5", stable_version("1.4.5"), "b" * 40)
+        with patch.object(
+            updater, "cached_latest_release",
+            side_effect=[(self.release, True), (newer, False)],
+        ) as cached, patch(
+            "builtins.input", side_effect=["y", "check", "y"],
+        ), patch.object(updater, "prepare_update") as prepare:
+            updater.check_for_update(self.root)
+        self.assertEqual(cached.call_count, 2)
+        self.assertTrue(cached.call_args_list[1].kwargs["refresh"])
+        prepare.assert_called_once_with(self.root, release=newer)
+
     def test_archive_root_must_match_confirmed_commit(self):
         wrong = Release(self.release.tag, self.release.version, "b" * 40)
         with patch.object(
