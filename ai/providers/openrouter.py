@@ -15,6 +15,3 @@ class OpenRouterProvider(OpenAIProvider):
     @staticmethod
     def _get_name() -> str:
         return "OpenRouter"
-
-    def describe(self) -> str:
-        return f"openrouter (model: {self.get_configured_model() or 'not configured'})"

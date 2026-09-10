@@ -1,6 +1,6 @@
 import requests
 
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from enum import StrEnum
 from typing import TypedDict, TYPE_CHECKING
 from threading import Event
@@ -35,7 +35,7 @@ class LlamaType:
         done: bool
 
 
-class BaseLlamaProvider(Provider):
+class BaseLlamaProvider(Provider, ABC):
 
     class _ChatAPIJson(TypedDict):
         model: Required[str]
@@ -73,8 +73,8 @@ class BaseLlamaProvider(Provider):
 
         return base_url.rstrip("/")
 
-    @abstractmethod
     @classmethod
+    @abstractmethod
     def _get_chat_url(cls) -> str:
         pass
 
@@ -90,7 +90,7 @@ class BaseLlamaProvider(Provider):
         pass
 
     def reload_config(self) -> None:
-        self._model_cache = None
+        self._model_cache: str | None = None
 
     def _is_model_loaded(self, model_name: str) -> bool:
         return True
