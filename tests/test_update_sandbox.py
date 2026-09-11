@@ -84,6 +84,30 @@ class UpdateSandboxTests(unittest.TestCase):
             with self.assertRaises((FileNotFoundError, ValueError)):
                 sandboxer._manifest(Path(directory))
 
+    def test_status_counts_attempt_directories_not_active_marker(self):
+        with tempfile.TemporaryDirectory(
+            prefix="coda-update-sandbox-test-", dir=tempfile.gettempdir()
+        ) as directory:
+            root = Path(directory)
+            installation = root / sandboxer.INSTALLATION_NAME
+            installation.mkdir()
+            (installation / "version.json").write_text(
+                '{"version":"1.4.4"}', encoding="utf-8"
+            )
+            (installation / ".coda-update-test").mkdir()
+            (installation / ".coda-update-active.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            (root / sandboxer.MANIFEST_NAME).write_text(
+                '{"format":1,"from_version":"1.4.3","target_version":"1.4.4",'
+                '"target_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+                '"configuration_copied":false}', encoding="utf-8",
+            )
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                sandboxer.status(root)
+            self.assertIn("Generated update attempts: 1", output.getvalue())
+
     def test_wizard_can_exit_existing_sandbox_without_changes(self):
         with tempfile.TemporaryDirectory(
             prefix="coda-update-sandbox-test-", dir=tempfile.gettempdir()

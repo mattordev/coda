@@ -247,7 +247,10 @@ def status(sandbox):
     manifest = _manifest(sandbox)
     installation = sandbox / INSTALLATION_NAME
     current = _version(installation / "version.json") if installation.is_dir() else "missing"
-    attempts = len(list(installation.glob(".coda-update-*"))) if installation.is_dir() else 0
+    attempts = (
+        sum(path.is_dir() for path in installation.glob(".coda-update-*"))
+        if installation.is_dir() else 0
+    )
     print(f"Sandbox: {sandbox}")
     print(f"Current version: {current}")
     print(f"Test path: {manifest['from_version']} -> {manifest['target_version']}")
