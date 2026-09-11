@@ -1,9 +1,11 @@
 *.pyc
 commands.json
 .vscode
-version.json
 .env
 dashboard_state.json
 telemetry_state.json
 .venv
-.venv-pocket-tts/
+.coda-update-*/
+.coda-update-active.json
+.coda-release-cache.json
+.coda-release-cache-*
