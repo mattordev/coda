@@ -1,11 +1,11 @@
 # Updates and recovery
 
-This documents the updater planned for v1.4.4: release selection (#130), source
-activation/rollback (#128), and staged dependencies/restart (#129). It does not
-mean that v1.4.4 has been published or that its Windows/Linux release validation
-has passed. Keep the manual-update guidance in published release notes until
-those checks are complete. Close all other CODA instances before attempting an
-update; this is a startup updater, not a live hot-update system.
+This documents the updater introduced in v1.4.4: release selection (#130),
+source activation/rollback (#128), and staged dependencies/restart (#129).
+Release candidates and published artifacts still require their own validation;
+the implementation tests described here do not validate every artifact or
+machine. Close all other CODA instances before attempting an update; this is a
+startup updater, not a live hot-update system.
 
 ## First upgrade from an older installation
 
@@ -14,7 +14,7 @@ Decline its update prompt and close CODA. That older code cannot retroactively
 gain the new dependency, Git-checkout, or rollback protections simply because
 a repaired version exists upstream.
 
-When v1.4.4 is published:
+To make the first upgrade to v1.4.4:
 
 1. Back up the old installation, including `.env`, `wakewords.json`,
    `commands.json`, and any local customisations. Do not publish these backups;
@@ -214,7 +214,8 @@ dependency is available to the restarted process. These are fixture upgrades,
 not validation of a published v1.4.4 archive.
 
 The configured CI matrix runs the tests on Windows and Ubuntu
-with Python 3.11/3.12; a configured job is not evidence that this branch has
-passed it. Remote matrix results and the actual release remain release gates.
+with Python 3.11/3.12; a configured job is not evidence that a candidate has
+passed it. Remote matrix results and actual release-artifact validation remain
+release gates.
 Set `CODA_RUN_UPDATE_ENV_SMOKE=1` to additionally create a real environment with
 pip and verify an offline requirements install plus `pip check`.

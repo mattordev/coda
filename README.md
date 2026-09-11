@@ -46,6 +46,9 @@ The active roadmap is maintained in the
 - [v1.2.0 - Provider Routing & Privacy](https://github.com/mattordev/coda/milestone/1)
 - [v1.3.0 - Intent Routing & Command System](https://github.com/mattordev/coda/milestone/2)
 - [v1.4.0 - Concurrent Runtime & Interruptible Responses](https://github.com/mattordev/coda/milestone/3)
+- [v1.4.1 - Expanded Provider Support](https://github.com/mattordev/coda/milestone/8)
+- [v1.4.2 - Local-First TTS Providers](https://github.com/mattordev/coda/milestone/9)
+- [v1.4.4 - Reliable Updates and Recovery](https://github.com/mattordev/coda/milestone/10)
 
 ### Future Milestones
 
