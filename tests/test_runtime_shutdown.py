@@ -211,6 +211,36 @@ class RuntimeShutdownTests(unittest.TestCase):
         shutdown.assert_called_once_with()
         print_output.assert_called_once_with("Exiting C.O.D.A")
 
+    def test_prepared_update_activates_only_after_shutdown(self):
+        from utils import update_manager, update_bootstrap
+        update = object()
+        child = object()
+        events = []
+        with (
+            mock.patch.object(coda_runtime, "_run_runtime", return_value=update),
+            mock.patch.object(coda_runtime, "shutdown_runtime", side_effect=lambda: events.append("shutdown")),
+            mock.patch.object(update_manager, "complete_update", side_effect=lambda value: events.append("activate") or child) as activate,
+            mock.patch.object(update_bootstrap, "wait_for_process", return_value=0) as wait,
+        ):
+            self.assertEqual(coda_runtime.main(), 0)
+        self.assertEqual(events, ["shutdown", "activate"])
+        activate.assert_called_once_with(update)
+        wait.assert_called_once_with(child)
+
+    def test_prepared_update_does_not_start_old_runtime_workers(self):
+        update = object()
+        with (
+            mock.patch.object(coda_runtime, "_apply_cli_microphone_flags", return_value=True),
+            mock.patch.object(coda_runtime, "check_update_available", return_value=update),
+            mock.patch.object(coda_runtime, "start_execution_thread") as execution,
+            mock.patch.object(coda_runtime, "start_speech_thread") as speech,
+            mock.patch.object(coda_runtime, "load_commands") as commands,
+        ):
+            self.assertIs(coda_runtime._run_runtime(), update)
+        execution.assert_not_called()
+        speech.assert_not_called()
+        commands.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
