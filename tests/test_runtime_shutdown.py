@@ -9,6 +9,14 @@ from runtime.runtime_queue import RuntimeQueues
 
 
 class RuntimeShutdownTests(unittest.TestCase):
+    def setUp(self):
+        finalize_patch = mock.patch.object(
+            coda_runtime.telemetry_logger,
+            "finalize_session",
+        )
+        self.finalize_telemetry = finalize_patch.start()
+        self.addCleanup(finalize_patch.stop)
+
     def test_shutdown_cancels_active_request_and_stops_every_worker(self):
         shutdown_started = threading.Event()
         active_request_state = ActiveRequestState()
@@ -63,6 +71,7 @@ class RuntimeShutdownTests(unittest.TestCase):
         shutdown_speech.assert_called_once_with()
         stop_events.assert_called_once_with(timeout_seconds=1.5)
         stop_heartbeat.assert_called_once_with(timeout_seconds=1.5)
+        self.finalize_telemetry.assert_called_once_with()
 
     def test_shutdown_is_idempotent(self):
         shutdown_started = threading.Event()
