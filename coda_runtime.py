@@ -6,6 +6,7 @@ from runtime.active_request import ActiveRequestState
 from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 import utils.speak_response as speech
+from ai.telemetry import logger as telemetry_logger
 
 import os
 import sys
@@ -682,6 +683,7 @@ def shutdown_runtime(timeout_seconds=4.0):
     speech.shutdown()
     stop_event_thread(timeout_seconds=timeout_seconds)
     stop_heartbeat_thread(timeout_seconds=timeout_seconds)
+    telemetry_logger.finalize_session()
     return True
 
 
