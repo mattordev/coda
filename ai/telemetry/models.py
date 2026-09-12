@@ -7,6 +7,17 @@ from math import isfinite
 
 TELEMETRY_SCHEMA_VERSION = 1
 
+def _require_enum(
+    value: object,
+    enum_type: type[Enum],
+    field_name: str,
+) -> None:
+    """Require a value to be an instance of the expected enum type."""
+    if not isinstance(value, enum_type):
+        raise ValueError(
+            f"{field_name} must be a {enum_type.__name__}."
+        )
+
 
 class WorkloadPurpose(str, Enum):
     """The kind of work that caused the provider request."""
@@ -31,6 +42,29 @@ class AttemptOutcome(str, Enum):
     EMPTY_RESPONSE = "empty_response"
     CANCELLED = "cancelled"
     COOLDOWN_SKIPPED = "cooldown_skipped"
+
+
+class ProviderErrorCategory(str, Enum):
+    """A content-safe normalized category for provider failures."""
+
+    AUTHENTICATION = "authentication"
+    CONFIGURATION = "configuration"
+    RATE_LIMIT = "rate_limit"
+    TIMEOUT = "timeout"
+    CONNECTION = "connection"
+    INVALID_REQUEST = "invalid_request"
+    INVALID_RESPONSE = "invalid_response"
+    PROVIDER_ERROR = "provider_error"
+    UNKNOWN = "unknown"
+
+
+class PrivacyAction(str, Enum):
+    """The privacy-policy action applied to an attempt."""
+
+    RAW = "raw"
+    SANITIZE = "sanitize"
+    SUMMARIZE = "summarize"
+    BLOCK = "block"
 
 
 @dataclass(frozen=True)
@@ -108,6 +142,23 @@ class ProviderCapabilities:
 
     def __post_init__(self) -> None:
         """Validate capability identity and numeric limits."""
+        _require_enum(
+            self.locality,
+            ProviderLocality,
+            "locality",
+        )
+
+        for field_name in (
+            "streaming",
+            "tool_calling",
+            "mcp_workflow_compatible",
+        ):
+            _require_enum(
+                getattr(self, field_name),
+                CapabilitySupport,
+                field_name,
+            )
+
         if not self.provider.strip():
             raise ValueError("Provider cannot be empty.")
 
@@ -188,11 +239,51 @@ class ProviderAttempt:
     locality: ProviderLocality
     sequence: int
     outcome: AttemptOutcome
+    privacy_action: PrivacyAction | None = None
+    is_retry: bool = False
+    is_fallback: bool = False
     metrics: UsageMetrics = field(default_factory=UsageMetrics)
+    cost: CostEstimate | None = None
+    safe_failure_reason: str | None = None # human readable ver of error_catagory
+    previous_provider: str | None = None
+    previous_model: str | None = None
+    next_provider: str | None = None
+    next_model: str | None = None
+    error_category: ProviderErrorCategory | None = None
     schema_version: int = TELEMETRY_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         """Validate the stable attempt contract."""
+        _require_enum(
+            self.purpose,
+            WorkloadPurpose,
+            "purpose",
+        )
+        _require_enum(
+            self.locality,
+            ProviderLocality,
+            "locality",
+        )
+        _require_enum(
+            self.outcome,
+            AttemptOutcome,
+            "outcome",
+        )
+
+        if self.privacy_action is not None:
+            _require_enum(
+                self.privacy_action,
+                PrivacyAction,
+                "privacy_action",
+            )
+
+        if self.error_category is not None:
+            _require_enum(
+                self.error_category,
+                ProviderErrorCategory,
+                "error_category",
+            )
+
         if self.schema_version != TELEMETRY_SCHEMA_VERSION:
             raise ValueError(
                 f"Unsupported telemetry schema version: {self.schema_version}."
@@ -213,6 +304,50 @@ class ProviderAttempt:
         if isinstance(self.sequence, bool) or self.sequence < 1:
             raise ValueError("Attempt sequence must be a positive integer.")
 
+        for field_name in ("is_retry", "is_fallback"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise ValueError(f"{field_name} must be a boolean.")
+
+        if (
+            self.safe_failure_reason is not None
+            and not self.safe_failure_reason.strip()
+        ):
+            raise ValueError(
+                "Safe failure reason cannot be blank when supplied."
+            )
+
+        for provider_field, model_field in (
+            ("previous_provider", "previous_model"),
+            ("next_provider", "next_model"),
+        ):
+            linked_provider = getattr(self, provider_field)
+            linked_model = getattr(self, model_field)
+
+            if linked_provider is None and linked_model is not None:
+                raise ValueError(
+                    f"{model_field} requires {provider_field}."
+                )
+
+            if (
+                linked_provider is not None
+                and not linked_provider.strip()
+            ):
+                raise ValueError(
+                    f"{provider_field} cannot be blank when supplied."
+                )
+
+            if linked_model is not None and not linked_model.strip():
+                raise ValueError(
+                    f"{model_field} cannot be blank when supplied."
+                )
+
+            if (
+                self.outcome is AttemptOutcome.COOLDOWN_SKIPPED
+                and self.cost is not None
+            ):
+                raise ValueError(
+                    "A cooldown-skipped provider cannot have a cost estimate."
+                )
 
 @dataclass(frozen=True)
 class ProviderRequest:
@@ -226,6 +361,12 @@ class ProviderRequest:
 
     def __post_init__(self) -> None:
         """Keep request and attempt identity and ordering consistent."""
+        _require_enum(
+            self.purpose,
+            WorkloadPurpose,
+            "purpose",
+        )
+
         if self.schema_version != TELEMETRY_SCHEMA_VERSION:
             raise ValueError(
                 f"Unsupported telemetry schema version: {self.schema_version}."

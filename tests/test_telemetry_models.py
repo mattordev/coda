@@ -2,14 +2,22 @@
 
 import math
 import unittest
+from dataclasses import asdict
 
 from ai.telemetry.models import (
+    TELEMETRY_SCHEMA_VERSION,
+    AttemptOutcome,
     CapabilitySupport,
     CostEstimate,
     PricingMetadata,
+    ProviderAttempt,
     ProviderCapabilities,
+    ProviderErrorCategory,
     ProviderLocality,
+    ProviderRequest,
+    PrivacyAction,
     UsageMetrics,
+    WorkloadPurpose,
 )
 
 
@@ -100,6 +108,23 @@ class ProviderCapabilitiesTests(unittest.TestCase):
                 context_window_tokens=0,
             )
 
+    def test_capability_fields_reject_untyped_enum_values(self):
+        """Capability metadata cannot accept equivalent-looking strings."""
+        with self.assertRaisesRegex(ValueError, "locality"):
+            ProviderCapabilities(
+                provider="openai",
+                model="gpt-example",
+                locality="cloud",
+            )
+
+        with self.assertRaisesRegex(ValueError, "streaming"):
+            ProviderCapabilities(
+                provider="openai",
+                model="gpt-example",
+                locality=ProviderLocality.CLOUD,
+                streaming="supported",
+            )
+
 
 class CostEstimateTests(unittest.TestCase):
     """Verify pricing provenance and cost estimate validation."""
@@ -145,6 +170,165 @@ class CostEstimateTests(unittest.TestCase):
                 total_cost=0.0,
                 pricing=pricing,
             )
+
+
+class ProviderAttemptTests(unittest.TestCase):
+    """Verify complete, privacy-safe attempt and request contracts."""
+
+    _TRACE_ID = "trace-123"
+
+    def _attempt(self, **overrides):
+        """Build a valid baseline attempt with optional field overrides."""
+        values = {
+            "trace_id": self._TRACE_ID,
+            "timestamp": 1_789_732_452.91,
+            "purpose": WorkloadPurpose.CONVERSATION,
+            "provider": "openai",
+            "model": "gpt-example",
+            "locality": ProviderLocality.CLOUD,
+            "sequence": 1,
+            "outcome": AttemptOutcome.FAILURE,
+        }
+        values.update(overrides)
+        return ProviderAttempt(**values)
+
+    def test_complete_fallback_request_is_correlated(self):
+        """A fallback chain records the trace, order, and linked providers."""
+        first = self._attempt(
+            error_category=ProviderErrorCategory.RATE_LIMIT,
+            safe_failure_reason="Provider rate limit reached.",
+            privacy_action=PrivacyAction.SANITIZE,
+            next_provider="ollama",
+            next_model="qwen3:8b",
+        )
+        second = self._attempt(
+            provider="ollama",
+            model="qwen3:8b",
+            locality=ProviderLocality.LOCAL,
+            sequence=2,
+            outcome=AttemptOutcome.SUCCESS,
+            is_fallback=True,
+            privacy_action=PrivacyAction.RAW,
+            previous_provider="openai",
+            previous_model="gpt-example",
+        )
+
+        request = ProviderRequest(
+            trace_id=self._TRACE_ID,
+            timestamp=1_789_732_452.91,
+            purpose=WorkloadPurpose.CONVERSATION,
+            attempts=(first, second),
+        )
+
+        self.assertEqual(request.attempts[0].next_provider, "ollama")
+        self.assertEqual(request.attempts[1].previous_model, "gpt-example")
+        self.assertTrue(request.attempts[1].is_fallback)
+        self.assertEqual(
+            request.attempts[0].privacy_action,
+            PrivacyAction.SANITIZE,
+        )
+        self.assertEqual(
+            request.attempts[1].privacy_action,
+            PrivacyAction.RAW,
+        )
+
+    def test_retry_flag_is_preserved(self):
+        """A repeated provider attempt can be marked explicitly."""
+        attempt = self._attempt(
+            is_retry=True,
+            previous_provider="openai",
+            previous_model="gpt-example",
+        )
+
+        self.assertTrue(attempt.is_retry)
+        self.assertFalse(attempt.is_fallback)
+
+    def test_retry_and_fallback_flags_must_be_booleans(self):
+        """String-like configuration values are not valid event flags."""
+        with self.assertRaisesRegex(ValueError, "is_fallback"):
+            self._attempt(is_fallback="yes")
+
+    def test_attempt_rejects_untyped_enum_values(self):
+        """Attempt metadata cannot accept equivalent-looking strings."""
+        for field_name, value in (
+            ("purpose", "conversation"),
+            ("locality", "cloud"),
+            ("outcome", "success"),
+            ("privacy_action", "sanitize"),
+            ("error_category", "timeout"),
+        ):
+            with self.subTest(field_name=field_name):
+                with self.assertRaisesRegex(ValueError, field_name):
+                    self._attempt(**{field_name: value})
+
+    def test_unsupported_schema_version_is_rejected(self):
+        """Records must declare the version this code understands."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "Unsupported telemetry schema version",
+        ):
+            self._attempt(
+                schema_version=TELEMETRY_SCHEMA_VERSION + 1,
+            )
+
+    def test_request_rejects_untyped_purpose(self):
+        """Request workload purposes must use the contract enum."""
+        with self.assertRaisesRegex(ValueError, "purpose"):
+            ProviderRequest(
+                trace_id=self._TRACE_ID,
+                timestamp=1_789_732_452.91,
+                purpose="conversation",
+            )
+
+    def test_linked_model_requires_its_provider(self):
+        """A model link cannot exist without a provider link."""
+        with self.assertRaisesRegex(ValueError, "next_provider"):
+            self._attempt(next_model="qwen3:8b")
+
+    def test_request_rejects_mismatched_attempt_trace(self):
+        """Every attempt in a request must have the request trace ID."""
+        attempt = self._attempt(trace_id="other-trace")
+
+        with self.assertRaisesRegex(ValueError, "trace ID"):
+            ProviderRequest(
+                trace_id=self._TRACE_ID,
+                timestamp=1_789_732_452.91,
+                purpose=WorkloadPurpose.CONVERSATION,
+                attempts=(attempt,),
+            )
+
+    def test_cooldown_skip_cannot_have_a_cost(self):
+        """A provider skipped before a call cannot incur request cost."""
+        pricing = PricingMetadata(
+            source="configured",
+            currency="USD",
+            effective_date="2026-09-12",
+        )
+        cost = CostEstimate(
+            input_cost=None,
+            output_cost=None,
+            total_cost=0.01,
+            pricing=pricing,
+        )
+
+        with self.assertRaisesRegex(ValueError, "cooldown-skipped"):
+            self._attempt(
+                outcome=AttemptOutcome.COOLDOWN_SKIPPED,
+                cost=cost,
+            )
+
+    def test_serialized_request_has_no_content_or_credentials(self):
+        """The contract has no fields for sensitive conversation data."""
+        serialized = asdict(ProviderRequest(
+            trace_id=self._TRACE_ID,
+            timestamp=1_789_732_452.91,
+            purpose=WorkloadPurpose.CONVERSATION,
+            attempts=(self._attempt(),),
+        ))
+
+        self.assertNotIn("prompt", serialized)
+        self.assertNotIn("response", serialized)
+        self.assertNotIn("credentials", serialized)
 
 
 if __name__ == "__main__":
