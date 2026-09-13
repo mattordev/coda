@@ -1,5 +1,5 @@
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 import unittest
 from threading import Event
 from unittest import mock
@@ -36,14 +36,13 @@ class LlamaCppProviderTests(BaseLlamaProviderTestCase[LlamacppProvider]):
     def _get_partial_response_with_cancel(
         cls,
         cancel_event: Event,
-    ) -> Generator[str, Any, None]:
-        yield cls._convert_message(
-            'data: {"choices": ' '[{"delta": {"content": "partial "}}]}'
-        )
-        cancel_event.set()
-        yield cls._convert_message(
-            'data: {"choices": ' '[{"delta": {"content": "response"}}]}'
-        )
+    ) -> Callable[[], Generator[str, Any, None]]:
+        def partial_response(**kwargs: Any) -> Generator[str, Any, None]:
+            yield 'data: {"choices": ' '[{"delta": {"content": "partial "}}]}'
+            cancel_event.set()
+            yield 'data: {"choices": ' '[{"delta": {"content": "response"}}]}'
+
+        return partial_response
 
     @staticmethod
     def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
@@ -79,46 +78,6 @@ class LlamaCppProviderTests(BaseLlamaProviderTestCase[LlamacppProvider]):
         provider.reload_config()
 
         self.assertIsNone(provider.cached_model)
-
-    @unittest.skip("Unsure how this works")
-    def test_generate_discards_partial_response_when_cancelled(self):
-        cancel_event = Event()
-
-        provider = self._create_provider()
-
-        def streamed_lines(**_kwargs):
-            yield ('data: {"choices": ' '[{"delta": {"content": "partial "}}]}')
-
-            cancel_event.set()
-
-            yield ('data: {"choices": ' '[{"delta": {"content": "response"}}]}')
-
-        response = mock.MagicMock()
-        response.__enter__.return_value = response
-        response.iter_lines.side_effect = streamed_lines
-
-        with mock.patch.object(
-            provider,
-            "get_model",
-            return_value=("test-model", None),
-        ), mock.patch.object(
-            provider.active_session,
-            "post",
-            return_value=response,
-        ):
-            result = provider.generate(
-                [
-                    {
-                        "role": LlamaType.Role.USER,
-                        "content": "hi",
-                    }
-                ],
-                cancel_event=cancel_event,
-            )
-
-            self.assertEqual(result, CANCELLATION_MESSAGE)
-
-        response.close.assert_called()
 
     def test_cancel_releases_blocked_request_creation(self):
         request_started = Event()

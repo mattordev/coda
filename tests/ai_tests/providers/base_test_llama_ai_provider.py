@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from abc import abstractmethod
 import json
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import DEFAULT, MagicMock, patch, ANY
 
 from threading import Event
 from requests import Response
-from typing import TypeVar, TYPE_CHECKING
+from typing import Callable, TypeVar, TYPE_CHECKING
 
 from ai.providers.cancellable import CANCELLATION_MESSAGE
 
@@ -84,6 +84,7 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
         return result
 
     @staticmethod
+    @abstractmethod
     def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
         raise NotImplementedError
 
@@ -122,16 +123,17 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
         self.assertEqual(second_model, provider.cached_model)
 
     @classmethod
+    @abstractmethod
     def _get_partial_response_with_cancel(
         cls,
         cancel_event: Event,
-    ) -> Generator[str, Any, None]:
-        raise NotImplementedError
+    ) -> Callable[[], Generator[str, Any, None]]:
+        pass
 
     def test_generate_discards_partial_response_when_cancelled(self) -> None:
         cancel_event = Event()
 
-        response = MagicMock()
+        response = MagicMock(spec=Response)
         response.__enter__.return_value = response
         response.iter_lines.side_effect = self._get_partial_response_with_cancel(
             cancel_event

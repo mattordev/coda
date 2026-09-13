@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 from threading import Event
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from typing import Any, Generator
@@ -45,10 +45,13 @@ class OllamaProviderTests(BaseLlamaProviderTestCase[OllamaProvider]):
     def _get_partial_response_with_cancel(
         cls,
         cancel_event: Event,
-    ) -> Generator[str, Any, None]:
-        yield cls._convert_message({"message": {"content": "partial "}})
-        cancel_event.set()
-        yield cls._convert_message({"message": {"content": "response"}})
+    ) -> Callable[[], Generator[str, Any, None]]:
+        def partial_response(**kwargs: Any) -> Generator[str, Any, None]:
+            yield json.dumps({"message": {"content": "partial "}})
+            cancel_event.set()
+            yield json.dumps({"message": {"content": "response"}})
+
+        return partial_response
 
     @unittest.skip("Performing rewrite")
     def test_generate_returns_stream_error(self):

@@ -101,8 +101,6 @@ class OllamaProvider(BaseLlamaProvider):
     ) -> list[str]:
         response_parts: list[str] = []
 
-        lines = response.iter_lines(decode_unicode=True)
-
         line: str
         for line in response.iter_lines(decode_unicode=True):
             if cancel_event is not None and cancel_event.is_set():

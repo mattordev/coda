@@ -113,17 +113,19 @@ class BaseLlamaProvider(Provider, ABC):
             "stream": True,
         }
 
-        response = self.active_session.post(
+        with self.active_session.post(
             chat_url, json=post_json, timeout=timeout_seconds, stream=True
-        )
+        ) as response:
+            close_response = scope.add(response.close)
+            response.raise_for_status()
+            response.encoding = "utf-8"
 
-        close_response = scope.add(response.close)
-        response.raise_for_status()
-        response_parts: list[str] = []
+            response_parts: list[str] = []
 
-        response_parts = self._process_response(response, cancel_event)
+            response_parts = self._process_response(response, cancel_event)
 
-        close_response()
+            close_response()
+
         return "".join(response_parts)
 
     def _generate_request(
