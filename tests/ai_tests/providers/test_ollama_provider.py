@@ -53,33 +53,17 @@ class OllamaProviderTests(BaseLlamaProviderTestCase[OllamaProvider]):
 
         return partial_response
 
-    @unittest.skip("Performing rewrite")
     def test_generate_returns_stream_error(self):
-        response = self._stream_response(
+        error_message = "model failed"
+        post_response = self._stream_response(
             [
-                {"error": "model failed", "done": True},
+                {"error": error_message, "done": True},
             ]
         )
-        session = mock.MagicMock()
-        session.post.return_value = response
 
-        with mock.patch.object(
-            ollama,
-            "get_model",
-            return_value=("test-model", None),
-        ), mock.patch.object(
-            ollama,
-            "is_model_loaded",
-            return_value=True,
-        ), mock.patch.object(
-            ollama.requests,
-            "Session",
-            return_value=session,
-        ):
-            result, error = ollama.generate([{"role": "user", "content": "hi"}])
+        result = self._generate_response(post_response)
 
-        self.assertIsNone(result)
-        self.assertEqual(error, "model failed")
+        self.assertEqual(result, error_message)
 
     @unittest.skip("Performing rewrite")
     def test_cancel_releases_blocked_request_creation(self):

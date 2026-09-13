@@ -30,6 +30,9 @@ class ProviderError:
     class InvalidModel(Generic):
         pass
 
+    class ModelFailure(Generic):
+        pass
+
 
 class Provider(ABC):
     class Type(StrEnum):

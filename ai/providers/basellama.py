@@ -122,7 +122,10 @@ class BaseLlamaProvider(Provider, ABC):
 
             response_parts: list[str] = []
 
-            response_parts = self._process_response(response, cancel_event)
+            try:
+                response_parts = self._process_response(response, cancel_event)
+            except ProviderError.ModelFailure as e:
+                response_parts = [str(e)]
 
             close_response()
 

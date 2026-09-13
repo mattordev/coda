@@ -112,7 +112,7 @@ class OllamaProvider(BaseLlamaProvider):
             response_json: LlamaType.ChatChunk = json.loads(line)
             provider_error = response_json.get("error")
             if provider_error:
-                raise ProviderError.Generic(provider_error)
+                raise ProviderError.ModelFailure(provider_error)
 
             message: LlamaType.Message | None = response_json.get("message")
             if message:
