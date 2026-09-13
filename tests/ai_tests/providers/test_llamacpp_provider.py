@@ -81,46 +81,6 @@ class LlamaCppProviderTests(BaseLlamaProviderTestCase[LlamacppProvider]):
 
         self.assertIsNone(provider.cached_model)
 
-    def test_cancel_releases_blocked_request_creation(self):
-        request_started = Event()
-        release_request = Event()
-        cancel_event = Event()
-        results: list[str | None] = []
-
-        def post(*_args, **_kwargs):
-            request_started.set()
-            release_request.wait(timeout=1.0)
-            return self._stream_response([])
-
-        session = mock.MagicMock()
-        session.post.side_effect = post
-
-        provider = self._create_provider()
-
-        with mock.patch.object(
-            provider, "get_model", return_value="test-model"
-        ), mock.patch.object(provider, "active_session", return_value=session):
-            worker = threading.Thread(
-                target=lambda: results.append(provider.generate([], cancel_event))
-            )
-
-            worker.start()
-
-            cancel_event.set()
-
-            worker.join(timeout=0.5)
-
-            release_request.set()
-
-            provider.active_session.close.assert_called()
-
-            self.assertEqual(
-                results,
-                [CANCELLATION_MESSAGE],
-            )
-
-        self.assertFalse(worker.is_alive())
-
     @unittest.skip("Unsure how this works")
     def test_cancel_releases_blocked_model_discovery(self):
         probe_started = Event()

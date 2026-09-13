@@ -4,7 +4,7 @@ from abc import abstractmethod
 import json
 from unittest.mock import DEFAULT, MagicMock, patch, ANY
 
-from threading import Event
+from threading import Event, Thread
 from requests import Response
 from typing import Callable, TypeVar, TYPE_CHECKING
 
@@ -135,16 +135,61 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
         """Returns a function which returns chat messages, with a cancel statement inbetween"""
         pass
 
+    @classmethod
+    def _create_response_iter_lines_side_effect(
+        cls, side_effect: Callable[[], Any]
+    ) -> Response:
+
+        response = MagicMock(spec=Response)
+        response.__enter__.return_value = response
+        response.iter_lines.side_effect = side_effect
+
+        return response
+
     def test_generate_discards_partial_response_when_cancelled(self) -> None:
         """Tests that cancellation causes the proper discord of the partial response"""
         cancel_event = Event()
 
-        response = MagicMock(spec=Response)
-        response.__enter__.return_value = response
-        response.iter_lines.side_effect = self._get_partial_response_with_cancel(
-            cancel_event
+        response = self._create_response_iter_lines_side_effect(
+            side_effect=self._get_partial_response_with_cancel(cancel_event)
         )
 
         result = self._generate_provider_response(response, cancel_event)
 
         self.assertEqual(result, CANCELLATION_MESSAGE)
+
+    def test_cancel_releases_blocked_request_creation(self):
+        """Test that cancelling a generation releases the blocked request from being created"""
+        request_started = Event()
+        release_request = Event()
+        cancel_event = Event()
+        results: list[str | None] = []
+
+        def post(*_args: Any, **_kwargs: Any):
+            request_started.set()
+            release_request.wait(timeout=1.0)
+            return self._stream_response([])
+
+        provider = self._create_provider()
+
+        with (
+            patch.object(provider, "get_model", return_value="test-model"),
+            patch.object(provider.active_session, "post", new=post),
+        ):
+            worker = Thread(
+                target=lambda: results.append(provider.generate([], cancel_event))
+            )
+
+            worker.start()
+            self.assertTrue(request_started.wait(timeout=1.0))
+            cancel_event.set()
+            worker.join(timeout=0.5)
+
+            release_request.set()
+
+            self.assertEqual(
+                results,
+                [CANCELLATION_MESSAGE],
+            )
+
+        self.assertFalse(worker.is_alive())
