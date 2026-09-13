@@ -1,6 +1,7 @@
 import os
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.telemetry import ProviderMetricsCollector
 
 try:
     import openai
@@ -30,11 +31,12 @@ def _get_timeout_seconds():
         return 45.0
 
 
-def _generate_stream(client, model, messages, cancel_event, scope):
+def _generate_stream(client, model, messages, cancel_event, scope, collector=None):
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
         stream=True,
+        stream_options={"include_usage": True},
     )
     close_stream = getattr(stream, "close", None)
     if callable(close_stream):
@@ -46,11 +48,16 @@ def _generate_stream(client, model, messages, cancel_event, scope):
             if cancel_event is not None and cancel_event.is_set():
                 raise InterruptedError("Request cancelled.")
 
+            if collector is not None:
+                collector.observe_openai_chunk(chunk)
+
             if not chunk.choices:
                 continue
 
             content = chunk.choices[0].delta.content
             if content:
+                if collector is not None:
+                    collector.observe_content(content)
                 response_parts.append(content)
     finally:
         if callable(close_stream):
@@ -58,15 +65,16 @@ def _generate_stream(client, model, messages, cancel_event, scope):
 
     return "".join(response_parts)
 
-def generate(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None):
     api_key = get_api_key()
     model = get_model()
+    collector = ProviderMetricsCollector(model)
     
     if openai is None:
-        return None, "openai package is not installed."
+        return collector.finish(error="openai package is not installed.")
     
     if not api_key:
-        return None, "OPENAI_API_KEY is not set in env."
+        return collector.finish(error="OPENAI_API_KEY is not set in env.")
     
     if hasattr(openai, "api_key"):
         openai.api_key = api_key
@@ -85,6 +93,7 @@ def generate(messages, cancel_event=None):
                     messages,
                     cancel_event,
                     scope,
+                    collector,
                 ),
                 cancel_event,
                 _get_timeout_seconds(),
@@ -95,8 +104,13 @@ def generate(messages, cancel_event=None):
             if callable(close_client):
                 close_client()
     except InterruptedError:
-        return None, "Request cancelled."
+        return collector.finish(error="Request cancelled.")
     except Exception as exc:
-        return None, str(exc)
+        return collector.finish(error=str(exc))
 
-    return (assistant_message or "").strip(), None
+    return collector.finish(response=(assistant_message or "").strip())
+
+
+def generate(messages, cancel_event=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event)
+    return result.response, result.error

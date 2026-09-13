@@ -137,6 +137,7 @@ class OpenRouterProviderTests(unittest.TestCase):
             model="openai/gpt-4.1-mini",
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         stream.close.assert_called_once_with()

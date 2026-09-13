@@ -5,6 +5,7 @@ import requests
 from requests.exceptions import Timeout
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
+from ai.providers.telemetry import ProviderMetricsCollector
 
 _model_cache = None
 
@@ -94,6 +95,7 @@ def _generate_stream(
     timeout_seconds,
     cancel_event,
     scope,
+    collector=None,
 ):
     with http_client.post(
         f"{base_url}/v1/chat/completions",
@@ -101,6 +103,7 @@ def _generate_stream(
             "model": model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         },
         timeout=timeout_seconds,
         stream=True,
@@ -111,40 +114,49 @@ def _generate_stream(
 
         response_parts = []
 
-        for line in response.iter_lines(decode_unicode=True):
-            if cancel_event is not None and cancel_event.is_set():
-                raise InterruptedError("Request cancelled.")
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Request cancelled.")
 
-            if not line:
-                continue
+                if not line:
+                    continue
 
-            if line.startswith("data: "):
-                line = line[6:]
+                if line.startswith("data: "):
+                    line = line[6:]
 
-            if line == "[DONE]":
-                break
+                if line == "[DONE]":
+                    break
 
-            response_json = json.loads(line)
+                response_json = json.loads(line)
+                if collector is not None:
+                    collector.observe_openai_chunk(response_json)
 
-            choices = response_json.get("choices", [])
-            if not choices:
-                continue
+                choices = response_json.get("choices", [])
+                if not choices:
+                    continue
 
-            delta = choices[0].get("delta", {})
-            content = delta.get("content")
+                delta = choices[0].get("delta", {})
+                content = delta.get("content")
 
-            if content:
-                response_parts.append(content)
+                if content:
+                    if collector is not None:
+                        collector.observe_content(content)
+                    response_parts.append(content)
 
-        close_response()
-        return "".join(response_parts), None
+            return "".join(response_parts), None
+        finally:
+            close_response()
 
 
-def _generate_request(messages, cancel_event, http_client, scope):
+def _generate_request(messages, cancel_event, http_client, scope, collector=None):
     model, error = get_model(http_client)
 
     if error:
         return None, error
+
+    if collector is not None:
+        collector.model = model
 
     timeout_seconds = get_timeout_seconds()
 
@@ -157,6 +169,7 @@ def _generate_request(messages, cancel_event, http_client, scope):
             timeout_seconds,
             cancel_event,
             scope,
+            collector,
         )
     except InterruptedError:
         return None, "Request cancelled."
@@ -175,29 +188,37 @@ def _generate_request(messages, cancel_event, http_client, scope):
     return (assistant_message or "").strip(), None
 
 
-def generate(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None):
     session = requests.Session()
     scope = CancellationScope()
+    collector = ProviderMetricsCollector()
     close_session = scope.add(session.close)
 
     timeout_seconds = get_timeout_seconds() + 10
 
     try:
-        return run_cancellable(
+        response, error = run_cancellable(
             lambda: _generate_request(
                 messages,
                 cancel_event,
                 session,
                 scope,
+                collector,
             ),
             cancel_event,
             timeout_seconds,
             "llama.cpp request timed out.",
             on_abandon=scope.cancel,
         )
+        return collector.finish(response=response, error=error)
     except InterruptedError:
-        return None, "Request cancelled."
+        return collector.finish(error="Request cancelled.")
     except Exception as exc:
-        return None, str(exc)
+        return collector.finish(error=str(exc))
     finally:
         close_session()
+
+
+def generate(messages, cancel_event=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event)
+    return result.response, result.error

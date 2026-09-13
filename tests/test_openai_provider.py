@@ -51,6 +51,7 @@ class OpenAIProviderTests(unittest.TestCase):
             model="test-model",
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
         )
         stream.close.assert_called_once_with()
 

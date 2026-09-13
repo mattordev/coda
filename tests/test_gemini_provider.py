@@ -91,6 +91,7 @@ class GeminiProviderTests(unittest.TestCase):
             model="test-model",
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
             reasoning_effort="none",
         )
 
