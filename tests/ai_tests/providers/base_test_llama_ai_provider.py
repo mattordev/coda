@@ -1,9 +1,17 @@
+from __future__ import annotations
+
 from abc import abstractmethod
-from unittest import mock
+import json
+from unittest.mock import MagicMock, patch, ANY
 
-from typing import TypeVar
+from threading import Event
+from requests import Response
+from typing import TypeVar, TYPE_CHECKING
 
-import requests
+from ai.providers.cancellable import CANCELLATION_MESSAGE
+
+if TYPE_CHECKING:
+    from typing import Any, Generator
 
 from ai.providers.basellama import BaseLlamaProvider, LlamaType
 from tests.ai_tests.providers.base_test_ai_provider import BaseAIProviderTestCase
@@ -14,16 +22,36 @@ T = TypeVar("T", bound=BaseLlamaProvider)
 class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
     @staticmethod
     @abstractmethod
-    def _create_response(lines: list[str]) -> mock.MagicMock:
+    def _create_response(lines: list[str]) -> MagicMock:
         pass
 
-    @abstractmethod
-    def test_generate_streamed_response(self) -> None:
-        pass
+    @staticmethod
+    def _convert_message(message: str | LlamaType.ChatChunk) -> str:
+        line = ""
 
-    def _generate_streamed_response(
-        self, response: mock.MagicMock, response_result: str
-    ) -> None:
+        if isinstance(message, dict):
+            line = json.dumps(message)
+        else:
+            line = str(message)
+
+        return line
+
+    @classmethod
+    def _convert_messages(cls, messages: list[str | LlamaType.ChatChunk]) -> list[str]:
+        return [cls._convert_message(message) for message in messages]
+
+    @classmethod
+    def _stream_response(cls, messages: list[str | LlamaType.ChatChunk]) -> Response:
+        lines = cls._convert_messages(messages)
+
+        response = MagicMock(spec=Response)
+        response.__enter__.return_value = response
+        response.iter_lines.return_value = lines
+        return response
+
+    def _generate_response(
+        self, post_response: Response, cancel_event: Event | None = None
+    ) -> str | None:
         messages: list[LlamaType.Message] = [
             {
                 "role": LlamaType.Role.USER,
@@ -31,30 +59,42 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
             }
         ]
 
-        provider = self.provider_instance
+        provider = self._create_provider()
 
         model_name = "test-model"
 
-        provider.get_model = mock.MagicMock(return_value=model_name)
-        provider._is_model_loaded = mock.MagicMock(return_value=True)
-        provider.active_session.post = mock.MagicMock(return_value=response)
+        result: str | None = None
 
-        result = provider.generate(messages)
+        with (
+            patch.object(provider, "get_model", return_value=model_name),
+            patch.object(provider, "_is_model_loaded", return_value=True),
+            patch.object(
+                provider.active_session, "post", return_value=post_response
+            ) as mock_post,
+        ):
+            result = provider.generate(messages, cancel_event)
 
-        self.assertEqual(result, response_result)
+            mock_post.assert_called_once_with(
+                provider._get_chat_url(),
+                json={"model": model_name, "messages": messages, "stream": True},
+                timeout=ANY,
+                stream=ANY,
+            )
 
-        provider.active_session.post.assert_called_once_with(
-            provider._get_chat_url(),
-            json={"model": model_name, "messages": messages, "stream": True},
-            timeout=mock.ANY,
-            stream=mock.ANY,
-        )
+        return result
 
-        response.close.assert_called()
+    @staticmethod
+    def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
+        raise NotImplementedError
 
-    @abstractmethod
-    def test_get_model_caches_first_model(self) -> None:
-        pass
+    def test_generate_streamed_response(self) -> None:
+        expected_result, messages = self._streamed_response()
+
+        post_response = self._stream_response(messages)
+
+        result = self._generate_response(post_response)
+
+        self.assertEqual(result, expected_result)
 
     def test_get_model_caches_first_model(self) -> None:
         models: list[LlamaType.Model] = [
@@ -62,18 +102,41 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
             {"name": "second-model"},
         ]
 
-        self.provider_instance._get_models = mock.MagicMock(return_value=models)
+        provider = self._create_provider()
 
-        with mock.patch.dict(
-            "os.environ",
-            {
-                self.provider_data.get("model_env"): "",
-                self.provider_data.get("base_url_env"): "http://localhost:8080",
-            },
-            clear=True,
+        with (
+            patch.object(provider, "_get_models", return_value=models),
+            patch.dict(
+                "os.environ",
+                {
+                    self.provider_data.get("model_env"): "",
+                    self.provider_data.get("base_url_env"): "http://localhost:8080",
+                },
+                clear=True,
+            ),
         ):
-            first_model = self.provider_instance.get_model()
-            second_model = self.provider_instance.get_model()
+            first_model = provider.get_model()
+            second_model = provider.get_model()
 
-        self.assertEqual(first_model, self.provider_instance.cached_model)
-        self.assertEqual(second_model, self.provider_instance.cached_model)
+        self.assertEqual(first_model, provider.cached_model)
+        self.assertEqual(second_model, provider.cached_model)
+
+    @classmethod
+    def _get_partial_response_with_cancel(
+        cls,
+        cancel_event: Event,
+    ) -> Generator[str, Any, None]:
+        raise NotImplementedError
+
+    def test_generate_discards_partial_response_when_cancelled(self) -> None:
+        cancel_event = Event()
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_lines.side_effect = self._get_partial_response_with_cancel(
+            cancel_event
+        )
+
+        result = self._generate_response(response, cancel_event)
+
+        self.assertEqual(result, CANCELLATION_MESSAGE)

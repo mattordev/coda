@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import json
 import threading
 import unittest
-from threading import Event
 from unittest import mock
+from threading import Event
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Any, Generator
 
 from ai.providers.basellama import LlamaType
 from tests.ai_tests.providers.base_test_llama_ai_provider import (
@@ -27,57 +34,21 @@ class OllamaProviderTests(BaseLlamaProviderTestCase[OllamaProvider]):
 
         self.assertEqual(expected_provider_details, self.provider_data)
 
-    def _stream_response(self, chunks: list[LlamaType.ChatChunk]):
-        response = mock.MagicMock()
-        response.__enter__.return_value = response
-        response.iter_lines.return_value = [json.dumps(chunk) for chunk in chunks]
-        return response
+    @staticmethod
+    def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
+        return "hello world", [
+            {"message": {"content": "hello "}, "done": False},
+            {"message": {"content": "world"}, "done": True},
+        ]
 
-    def test_generate_streamed_response(self) -> None:
-        response = self._stream_response(
-            [
-                {"message": {"content": "hello "}, "done": False},
-                {"message": {"content": "world"}, "done": True},
-            ]
-        )
-
-        self._generate_streamed_response(response, "hello world")
-
-    @unittest.skip("Performing rewrite")
-    def test_generate_discards_partial_response_when_cancelled(self):
-        cancel_event = Event()
-
-        def streamed_lines(**_kwargs):
-            yield json.dumps({"message": {"content": "partial "}})
-            cancel_event.set()
-            yield json.dumps({"message": {"content": "response"}})
-
-        response = mock.MagicMock()
-        response.__enter__.return_value = response
-        response.iter_lines.side_effect = streamed_lines
-        session = mock.MagicMock()
-        session.post.return_value = response
-
-        with mock.patch.object(
-            ollama,
-            "get_model",
-            return_value=("test-model", None),
-        ), mock.patch.object(
-            ollama,
-            "is_model_loaded",
-            return_value=True,
-        ), mock.patch.object(
-            ollama.requests,
-            "Session",
-            return_value=session,
-        ):
-            result, error = ollama.generate(
-                [{"role": "user", "content": "hi"}],
-                cancel_event=cancel_event,
-            )
-
-        self.assertIsNone(result)
-        self.assertEqual(error, "Request cancelled.")
+    @classmethod
+    def _get_partial_response_with_cancel(
+        cls,
+        cancel_event: Event,
+    ) -> Generator[str, Any, None]:
+        yield cls._convert_message({"message": {"content": "partial "}})
+        cancel_event.set()
+        yield cls._convert_message({"message": {"content": "response"}})
 
     @unittest.skip("Performing rewrite")
     def test_generate_returns_stream_error(self):

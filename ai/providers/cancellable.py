@@ -95,6 +95,6 @@ class CancellationScope:
                 continue
 
             if error is not None:
-                raise error
 
+                raise error
             return result
