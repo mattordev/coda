@@ -21,12 +21,8 @@ T = TypeVar("T", bound=BaseLlamaProvider)
 
 class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
     @staticmethod
-    @abstractmethod
-    def _create_response(lines: list[str]) -> MagicMock:
-        pass
-
-    @staticmethod
     def _convert_message(message: str | LlamaType.ChatChunk) -> str:
+        """Converts a message into a usable string"""
         line = ""
 
         if isinstance(message, dict):
@@ -38,10 +34,12 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
 
     @classmethod
     def _convert_messages(cls, messages: list[str | LlamaType.ChatChunk]) -> list[str]:
+        """Converts a list of messages into usable strings"""
         return [cls._convert_message(message) for message in messages]
 
     @classmethod
     def _stream_response(cls, messages: list[str | LlamaType.ChatChunk]) -> Response:
+        """Creates a Response via mocking which will return a list of valid messages"""
         lines = cls._convert_messages(messages)
 
         response = MagicMock(spec=Response)
@@ -49,9 +47,10 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
         response.iter_lines.return_value = lines
         return response
 
-    def _generate_response(
+    def _generate_provider_response(
         self, post_response: Response, cancel_event: Event | None = None
     ) -> str | None:
+        """Generates a response on the provider, allowing the post value to be overridden with a Response"""
         messages: list[LlamaType.Message] = [
             {
                 "role": LlamaType.Role.USER,
@@ -85,19 +84,24 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
 
     @staticmethod
     @abstractmethod
-    def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
+    def _get_expected_results_and_messages() -> (
+        tuple[str, list[str | LlamaType.ChatChunk]]
+    ):
+        """Returns a list of messages and the expected result after those are returned from the provider"""
         raise NotImplementedError
 
     def test_generate_streamed_response(self) -> None:
-        expected_result, messages = self._streamed_response()
+        """Test that our response is the expected result"""
+        expected_result, messages = self._get_expected_results_and_messages()
 
         post_response = self._stream_response(messages)
 
-        result = self._generate_response(post_response)
+        result = self._generate_provider_response(post_response)
 
         self.assertEqual(result, expected_result)
 
     def test_get_model_caches_first_model(self) -> None:
+        """Test that the model the provider uses is cached based on what was chosen first"""
         models: list[LlamaType.Model] = [
             {"name": "first-model"},
             {"name": "second-model"},
@@ -128,9 +132,11 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
         cls,
         cancel_event: Event,
     ) -> Callable[[], Generator[str, Any, None]]:
+        """Returns a function which returns chat messages, with a cancel statement inbetween"""
         pass
 
     def test_generate_discards_partial_response_when_cancelled(self) -> None:
+        """Tests that cancellation causes the proper discord of the partial response"""
         cancel_event = Event()
 
         response = MagicMock(spec=Response)
@@ -139,6 +145,6 @@ class BaseLlamaProviderTestCase(BaseAIProviderTestCase[T]):
             cancel_event
         )
 
-        result = self._generate_response(response, cancel_event)
+        result = self._generate_provider_response(response, cancel_event)
 
         self.assertEqual(result, CANCELLATION_MESSAGE)

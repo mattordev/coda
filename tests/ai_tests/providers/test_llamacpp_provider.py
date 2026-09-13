@@ -45,7 +45,9 @@ class LlamaCppProviderTests(BaseLlamaProviderTestCase[LlamacppProvider]):
         return partial_response
 
     @staticmethod
-    def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
+    def _get_expected_results_and_messages() -> (
+        tuple[str, list[str | LlamaType.ChatChunk]]
+    ):
         return "hello world", [
             'data: {"choices": [{"delta": {"content": "hello "}}]}',
             "",

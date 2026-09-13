@@ -35,7 +35,9 @@ class OllamaProviderTests(BaseLlamaProviderTestCase[OllamaProvider]):
         self.assertEqual(expected_provider_details, self.provider_data)
 
     @staticmethod
-    def _streamed_response() -> tuple[str, list[str | LlamaType.ChatChunk]]:
+    def _get_expected_results_and_messages() -> (
+        tuple[str, list[str | LlamaType.ChatChunk]]
+    ):
         return "hello world", [
             {"message": {"content": "hello "}, "done": False},
             {"message": {"content": "world"}, "done": True},
@@ -61,7 +63,7 @@ class OllamaProviderTests(BaseLlamaProviderTestCase[OllamaProvider]):
             ]
         )
 
-        result = self._generate_response(post_response)
+        result = self._generate_provider_response(post_response)
 
         self.assertEqual(result, error_message)
 
