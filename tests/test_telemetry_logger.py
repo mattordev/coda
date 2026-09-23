@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from pathlib import Path
 from unittest import mock
 
@@ -11,6 +12,7 @@ from ai.telemetry.models import (
     PrivacyAction,
     ProviderAttempt,
     ProviderLocality,
+    UsageMetrics,
     WorkloadPurpose,
 )
 
@@ -62,23 +64,36 @@ class TelemetryLoggerTests(unittest.TestCase):
 
         logger._provider_state = {}
         logger._attempts = []
+        logger._historical_attempts = []
+        logger._attempts_pending_state_migration = False
+        logger._state_loaded = False
+        logger._session_ready = False
+        self.addCleanup(self._reset_logger_state)
+
+    @staticmethod
+    def _reset_logger_state():
+        logger._provider_state = {}
+        logger._attempts = []
+        logger._historical_attempts = []
         logger._attempts_pending_state_migration = False
         logger._state_loaded = False
         logger._session_ready = False
 
     @staticmethod
-    def _attempt(trace_id="trace-1"):
-        return ProviderAttempt(
-            trace_id=trace_id,
-            timestamp=1000.0,
-            purpose=WorkloadPurpose.CONVERSATION,
-            provider="openai",
-            model="test-model",
-            locality=ProviderLocality.CLOUD,
-            sequence=1,
-            outcome=AttemptOutcome.SUCCESS,
-            privacy_action=PrivacyAction.SANITIZE,
-        )
+    def _attempt(trace_id="trace-1", **overrides):
+        values = {
+            "trace_id": trace_id,
+            "timestamp": 1000.0,
+            "purpose": WorkloadPurpose.CONVERSATION,
+            "provider": "openai",
+            "model": "test-model",
+            "locality": ProviderLocality.CLOUD,
+            "sequence": 1,
+            "outcome": AttemptOutcome.SUCCESS,
+            "privacy_action": PrivacyAction.SANITIZE,
+        }
+        values.update(overrides)
+        return ProviderAttempt(**values)
 
     def test_legacy_state_migrates_without_changing_cooldown(self):
         """Legacy cooldown data survives migration unchanged."""
@@ -234,6 +249,9 @@ class TelemetryLoggerTests(unittest.TestCase):
             [record["trace_id"] for record in records],
             ["trace-2", "trace-3"],
         )
+        snapshot = logger.get_snapshot()
+        self.assertEqual(snapshot.retained_attempt_count, 2)
+        self.assertEqual(snapshot.aggregates[0].attempt_count, 2)
 
     def test_finalize_session_archives_active_file(self):
         """Graceful shutdown gives the completed session a dated filename."""
@@ -248,6 +266,28 @@ class TelemetryLoggerTests(unittest.TestCase):
             archived_file.name,
             r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d+)?\.jsonl$",
         )
+        self.assertEqual(logger.get_snapshot().retained_attempt_count, 1)
+
+    def test_snapshot_loads_bounded_attempts_from_prior_sessions(self):
+        self.log_dir.mkdir(parents=True)
+        records = [
+            {
+                **asdict(self._attempt(f"trace-{index}")),
+                "timestamp": float(index),
+            }
+            for index in range(1, 4)
+        ]
+        self.active_session_file.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(logger, "_MAX_SESSION_ATTEMPTS", 2):
+            snapshot = logger.get_snapshot()
+
+        self.assertEqual(snapshot.retained_attempt_count, 2)
+        self.assertEqual(snapshot.aggregates[0].attempt_count, 2)
+        self.assertFalse(self.active_session_file.exists())
 
     def test_record_attempt_survives_session_storage_error(self):
         """Session storage failure cannot escape into a provider request."""
@@ -295,3 +335,47 @@ class TelemetryLoggerTests(unittest.TestCase):
             {record["trace_id"] for record in records},
             set(trace_ids),
         )
+
+    def test_snapshot_preserves_costs_across_pricing_changes(self):
+        first_pricing = json.dumps([{
+            "provider": "openai",
+            "model": "test-model",
+            "input_per_million": 1.0,
+            "output_per_million": 2.0,
+            "currency": "USD",
+            "effective_date": "2026-01-01",
+        }])
+        second_pricing = json.dumps([{
+            "provider": "openai",
+            "model": "test-model",
+            "input_per_million": 3.0,
+            "output_per_million": 4.0,
+            "currency": "USD",
+            "effective_date": "2026-06-01",
+        }])
+        attempt = self._attempt(metrics=UsageMetrics(
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            total_tokens=2_000_000,
+        ))
+
+        with mock.patch.dict(
+            "os.environ",
+            {"CODA_LLM_PRICING_JSON": first_pricing},
+        ):
+            logger.record_attempt(attempt)
+        with mock.patch.dict(
+            "os.environ",
+            {"CODA_LLM_PRICING_JSON": second_pricing},
+        ):
+            logger.record_attempt(attempt)
+
+        snapshot = logger.get_snapshot()
+        costs = snapshot.aggregates[0].costs
+
+        self.assertEqual(len(costs), 2)
+        self.assertEqual(
+            [cost.pricing.effective_date for cost in costs],
+            ["2026-01-01", "2026-06-01"],
+        )
+        self.assertEqual([cost.total_cost for cost in costs], [3.0, 7.0])
