@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from ai.providers import gemini, grok, llamacpp, ollama, openai, openrouter
-from ai.providers.telemetry import ProviderMetricsCollector
+from ai.providers.telemetry import ProviderCallResult, ProviderMetricsCollector
+from ai.telemetry.models import UsageMetrics
 
 
 def _clock(*values):
@@ -28,6 +29,20 @@ def _openai_chunk(content=None, *, model=None, usage=None, choices=True):
 
 
 class ProviderMetricsCollectorTests(unittest.TestCase):
+    def test_result_preserves_response_error_unpacking(self):
+        """Structured results remain compatible with existing callers."""
+        result = ProviderCallResult(
+            response="hello",
+            error=None,
+            model="test-model",
+            metrics=UsageMetrics(),
+        )
+
+        response, error = result
+
+        self.assertEqual(response, "hello")
+        self.assertIsNone(error)
+
     def test_openai_usage_and_measured_timing_are_normalized(self):
         collector = ProviderMetricsCollector(
             "requested-model",

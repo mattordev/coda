@@ -15,6 +15,12 @@ class ProviderCallResult:
     model: str | None
     metrics: UsageMetrics
 
+    # iterates through and returns self.response and self.error for use later
+    def __iter__(self):
+        """Preserve response/error unpacking for existing callers."""
+        yield self.response
+        yield self.error
+
 
 def _field(value, name):
     if isinstance(value, dict):
