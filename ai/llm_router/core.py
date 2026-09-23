@@ -1,5 +1,6 @@
 import os
 from threading import Event
+from uuid import uuid4
 
 from ai.providers import registry
 from ai.privacy.detector import analyze_privacy
@@ -32,7 +33,9 @@ def _try_providers(
     """
     last_error = None
 
-    for provider in providers:
+    trace_id = str(uuid4())
+
+    for sequence, provider in enumerate(providers, start=1):
         if _is_cancelled(cancel_event):
             _debug_print(
                 "[ROUTER] Request cancelled before next provider."
@@ -47,6 +50,8 @@ def _try_providers(
             risk,
             privacy_result,
             cancel_event=cancel_event,
+            trace_id=trace_id,
+            sequence=sequence,
         )
 
         if _is_cancelled(cancel_event):
@@ -77,6 +82,9 @@ def _call_provider_with_health(
     risk: float,
     privacy_result=None,
     cancel_event: Event | None = None,
+    *,
+    trace_id: str | None = None,
+    sequence: int = 1,
 ):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.

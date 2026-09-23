@@ -3,6 +3,14 @@ from threading import Event
 from unittest import mock
 
 from ai.llm_router import core
+from ai.providers.telemetry import ProviderCallResult
+from ai.telemetry.models import (
+    AttemptOutcome,
+    PrivacyAction,
+    ProviderLocality,
+    UsageMetrics,
+    WorkloadPurpose,
+)
 import utils.llm_service as llm_service
 
 
@@ -62,6 +70,57 @@ class CrossProviderRoutingTests(unittest.TestCase):
                 "gemini",
             ],
         )
+
+    def test_successful_conversation_attempt_is_recorded(self):
+        """A conversation call emits one privacy-safe attempt record."""
+        metrics = UsageMetrics(
+            total_duration_seconds=1.25,
+            input_tokens=3,
+            output_tokens=2,
+            total_tokens=5,
+        )
+        provider_result = ProviderCallResult(
+            response="hello",
+            error=None,
+            model="resolved-model",
+            metrics=metrics,
+        )
+
+        with mock.patch.object(
+            core,
+            "get_provider_order",
+            return_value=["openrouter"],
+        ), mock.patch.object(
+            core.logger,
+            "should_skip_provider",
+            return_value=False,
+        ), mock.patch.object(
+            core.logger,
+            "log_attempt",
+        ), mock.patch.object(
+            core.logger,
+            "record_attempt",
+        ) as record_attempt, mock.patch.object(
+            core.llm_service,
+            "call_provider",
+            return_value=provider_result,
+        ):
+            response, error = core.route_request("hello")
+
+        self.assertEqual((response, error), ("hello", None))
+        record_attempt.assert_called_once()
+        attempt = record_attempt.call_args.args[0]
+        self.assertTrue(attempt.trace_id)
+        self.assertEqual(attempt.sequence, 1)
+        self.assertEqual(attempt.purpose, WorkloadPurpose.CONVERSATION)
+        self.assertEqual(attempt.provider, "openrouter")
+        self.assertEqual(attempt.model, "resolved-model")
+        self.assertEqual(attempt.locality, ProviderLocality.CLOUD)
+        self.assertEqual(attempt.outcome, AttemptOutcome.SUCCESS)
+        self.assertEqual(attempt.privacy_action, PrivacyAction.RAW)
+        self.assertFalse(attempt.is_retry)
+        self.assertFalse(attempt.is_fallback)
+        self.assertEqual(attempt.metrics, metrics)
 
     def test_ordered_fallback_across_multiple_local_providers(self):
         attempted = []
@@ -341,6 +400,127 @@ class CrossProviderRoutingTests(unittest.TestCase):
             llm_service.conversation_log,
             original_history,
         )
+
+    def test_conversation_failure_preserves_provider_metadata(self):
+        """A failed call retains telemetry while rolling history back."""
+        original_history = list(llm_service.conversation_log)
+        metrics = UsageMetrics(total_duration_seconds=1.25)
+        provider = mock.MagicMock()
+        provider.generate.return_value = ProviderCallResult(
+            response=None,
+            error="provider failed",
+            model="resolved-model",
+            metrics=metrics,
+        )
+
+        with mock.patch.object(
+            llm_service.registry,
+            "get_provider_module",
+            return_value=provider,
+        ), mock.patch.object(
+            llm_service.registry,
+            "normalize_provider_name",
+            return_value="openrouter",
+        ), mock.patch.object(
+            llm_service.registry,
+            "get_provider_type",
+            return_value="cloud",
+        ):
+            result = llm_service.call_provider(
+                "openrouter",
+                "hello",
+            )
+
+        self.assertIsInstance(result, ProviderCallResult)
+        self.assertIsNone(result.response)
+        self.assertEqual(result.error, "provider failed")
+        self.assertEqual(result.model, "resolved-model")
+        self.assertEqual(result.metrics, metrics)
+        self.assertEqual(llm_service.conversation_log, original_history)
+
+    def test_conversation_cancellation_preserves_provider_metadata(self):
+        """Cancellation retains telemetry while rolling history back."""
+        original_history = list(llm_service.conversation_log)
+        cancel_event = Event()
+        metrics = UsageMetrics(total_duration_seconds=0.5)
+        provider = mock.MagicMock()
+
+        def cancel_during_generation(*_args, **_kwargs):
+            cancel_event.set()
+            return ProviderCallResult(
+                response=None,
+                error="Request cancelled.",
+                model="resolved-model",
+                metrics=metrics,
+            )
+
+        provider.generate.side_effect = cancel_during_generation
+
+        with mock.patch.object(
+            llm_service.registry,
+            "get_provider_module",
+            return_value=provider,
+        ), mock.patch.object(
+            llm_service.registry,
+            "normalize_provider_name",
+            return_value="openrouter",
+        ), mock.patch.object(
+            llm_service.registry,
+            "get_provider_type",
+            return_value="cloud",
+        ):
+            result = llm_service.call_provider(
+                "openrouter",
+                "hello",
+                cancel_event=cancel_event,
+            )
+
+        self.assertIsInstance(result, ProviderCallResult)
+        self.assertIsNone(result.response)
+        self.assertEqual(result.error, "Request cancelled.")
+        self.assertEqual(result.model, "resolved-model")
+        self.assertEqual(result.metrics, metrics)
+        self.assertEqual(llm_service.conversation_log, original_history)
+
+    def test_conversation_call_preserves_provider_metadata(self):
+        """Conversation handling does not discard adapter telemetry."""
+        metrics = UsageMetrics(
+            total_duration_seconds=1.25,
+            input_tokens=3,
+            output_tokens=2,
+            total_tokens=5,
+        )
+        provider = mock.MagicMock()
+        provider.generate.return_value = ProviderCallResult(
+            response="hello",
+            error=None,
+            model="resolved-model",
+            metrics=metrics,
+        )
+
+        with mock.patch.object(
+            llm_service.registry,
+            "get_provider_module",
+            return_value=provider,
+        ), mock.patch.object(
+            llm_service.registry,
+            "normalize_provider_name",
+            return_value="openrouter",
+        ), mock.patch.object(
+            llm_service.registry,
+            "get_provider_type",
+            return_value="cloud",
+        ):
+            result = llm_service.call_provider(
+                "openrouter",
+                "hello",
+            )
+
+        self.assertIsInstance(result, ProviderCallResult)
+        self.assertEqual(result.response, "hello")
+        self.assertIsNone(result.error)
+        self.assertEqual(result.model, "resolved-model")
+        self.assertEqual(result.metrics, metrics)
 
     def test_unconfigured_provider_is_skipped_cleanly(self):
         with mock.patch.dict(

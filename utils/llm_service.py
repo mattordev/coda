@@ -1,7 +1,9 @@
 import os
+from dataclasses import replace
 from threading import Event
 
 from ai.providers import registry
+from ai.providers.telemetry import ProviderCallResult
 from ai.privacy.sanitizer import sanitize_text
 from ai.privacy import policy
 from ai.privacy.detector import analyze_privacy
@@ -65,7 +67,7 @@ def _get_cloud_safe_content(role, content, risk, privacy_result=None):
 
     if action == policy.ACTION_RAW:
         return content
-    
+
     if action == policy.ACTION_SUMMARIZE:
         return _summarize_sensitive_content(role, privacy_result)
 
@@ -92,7 +94,7 @@ def _summarize_sensitive_content(role, privacy_result):
         return f"[Sensitive assistant response withheld for cloud provider. Categories: {categories}.]"
 
     return f"[Sensitive user request withheld for cloud provider. Categories: {categories}.]"
-        
+
 
 def _new_message(role, content, risk=0.0, cloud_content=None, privacy_result=None):
     """
@@ -110,7 +112,7 @@ def _new_message(role, content, risk=0.0, cloud_content=None, privacy_result=Non
         "risk": risk,
         "cloud_content": cloud_content,
     }
-    
+
 def _new_system_message():
     return _new_message(
         "system",
@@ -158,7 +160,7 @@ def _trim_conversation():
             non_system.append(m)
     if len(non_system) > max_messages:
         conversation_log[:] = system_messages + non_system[-max_messages:]
-        
+
 
 def _build_messages_for_provider(provider_name):
     provider_type = registry.get_provider_type(provider_name)
@@ -240,13 +242,31 @@ def _generate_provider_response(
     )
 
     messages = _build_messages_for_provider(provider_name)
-    response, error = provider_module.generate(messages, cancel_event=cancel_event)
+    provider_result = provider_module.generate(
+        messages,
+        cancel_event=cancel_event,
+    )
+    response, error = provider_result
+
+    def cancelled_result():
+        if isinstance(provider_result, ProviderCallResult):
+            return replace(
+                provider_result,
+                response=None,
+                error="Request cancelled.",
+            )
+
+        return None, "Request cancelled."
 
     if cancel_and_restore():
-        return None, "Request cancelled."
+        return cancelled_result()
 
     if error:
         conversation_log[:] = original_history
+
+        if isinstance(provider_result, ProviderCallResult):
+            return provider_result
+
         return None, error
 
     response = (response or "").strip()
@@ -255,7 +275,7 @@ def _generate_provider_response(
         assistant_risk = max(risk, assistant_privacy_result["risk"])
 
         if cancel_and_restore():
-            return None, "Request cancelled."
+            return cancelled_result()
 
         if assistant_risk > assistant_privacy_result["risk"]:
             assistant_privacy_result = {
@@ -278,12 +298,15 @@ def _generate_provider_response(
         )
 
         if cancel_and_restore():
-            return None, "Request cancelled."
+            return cancelled_result()
 
         _trim_conversation()
 
     if cancel_and_restore():
-        return None, "Request cancelled."
+        return cancelled_result()
+
+    if isinstance(provider_result, ProviderCallResult):
+        return replace(provider_result, response=response)
 
     return response, None
 
