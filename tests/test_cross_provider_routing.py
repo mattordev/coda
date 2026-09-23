@@ -122,6 +122,152 @@ class CrossProviderRoutingTests(unittest.TestCase):
         self.assertFalse(attempt.is_fallback)
         self.assertEqual(attempt.metrics, metrics)
 
+    def test_failure_empty_and_cooldown_outcomes_are_distinct(self):
+        cases = (
+            (
+                "failure",
+                False,
+                ProviderCallResult(
+                    None,
+                    "provider failed",
+                    "model-a",
+                    UsageMetrics(total_duration_seconds=0.5),
+                ),
+                AttemptOutcome.FAILURE,
+            ),
+            (
+                "empty",
+                False,
+                ProviderCallResult(
+                    "",
+                    None,
+                    "model-a",
+                    UsageMetrics(total_duration_seconds=0.5),
+                ),
+                AttemptOutcome.EMPTY_RESPONSE,
+            ),
+            (
+                "cooldown",
+                True,
+                None,
+                AttemptOutcome.COOLDOWN_SKIPPED,
+            ),
+        )
+
+        for name, should_skip, result, expected_outcome in cases:
+            with self.subTest(name=name), mock.patch.object(
+                core.logger,
+                "should_skip_provider",
+                return_value=should_skip,
+            ), mock.patch.object(
+                core.logger,
+                "log_attempt",
+            ), mock.patch.object(
+                core.logger,
+                "record_attempt",
+            ) as record_attempt, mock.patch.object(
+                core.llm_service,
+                "call_provider",
+                return_value=result,
+            ) as call_provider:
+                core._call_provider_with_health(
+                    "openrouter",
+                    "hello",
+                    0.0,
+                    trace_id="trace-1",
+                )
+
+            attempt = record_attempt.call_args.args[0]
+            self.assertEqual(attempt.outcome, expected_outcome)
+            if should_skip:
+                call_provider.assert_not_called()
+                self.assertEqual(attempt.metrics, UsageMetrics())
+            else:
+                self.assertEqual(attempt.model, "model-a")
+
+    def test_cancellation_is_recorded_without_reliability_penalty(self):
+        cancel_event = Event()
+
+        def cancel_provider(*_args, **_kwargs):
+            cancel_event.set()
+            return ProviderCallResult(
+                None,
+                "Request cancelled.",
+                "model-a",
+                UsageMetrics(total_duration_seconds=0.25),
+            )
+
+        with mock.patch.object(
+            core.logger,
+            "should_skip_provider",
+            return_value=False,
+        ), mock.patch.object(
+            core.logger,
+            "log_attempt",
+        ), mock.patch.object(
+            core.logger,
+            "log_failure",
+        ) as log_failure, mock.patch.object(
+            core.logger,
+            "record_attempt",
+        ) as record_attempt, mock.patch.object(
+            core.llm_service,
+            "call_provider",
+            side_effect=cancel_provider,
+        ):
+            response, error = core._try_providers(
+                ["openrouter", "ollama"],
+                "hello",
+                0.0,
+                cancel_event=cancel_event,
+            )
+
+        self.assertEqual((response, error), (None, "Request cancelled."))
+        log_failure.assert_not_called()
+        attempt = record_attempt.call_args.args[0]
+        self.assertEqual(attempt.outcome, AttemptOutcome.CANCELLED)
+        self.assertEqual(attempt.sequence, 1)
+
+    def test_trace_correlates_fallback_and_retry_attempts(self):
+        results = (
+            (None, "first failure"),
+            (None, "fallback failure"),
+            ("retry success", None),
+        )
+
+        with mock.patch.object(
+            core.logger,
+            "should_skip_provider",
+            return_value=False,
+        ), mock.patch.object(
+            core.logger,
+            "log_attempt",
+        ), mock.patch.object(
+            core.logger,
+            "log_failure",
+        ), mock.patch.object(
+            core.logger,
+            "record_attempt",
+        ) as record_attempt, mock.patch.object(
+            core.llm_service,
+            "call_provider",
+            side_effect=results,
+        ):
+            response, error = core._try_providers(
+                ["openrouter", "ollama", "openrouter"],
+                "hello",
+                0.0,
+            )
+
+        self.assertEqual((response, error), ("retry success", None))
+        attempts = [call.args[0] for call in record_attempt.call_args_list]
+        self.assertEqual([attempt.sequence for attempt in attempts], [1, 2, 3])
+        self.assertEqual(len({attempt.trace_id for attempt in attempts}), 1)
+        self.assertFalse(attempts[0].is_fallback)
+        self.assertTrue(attempts[1].is_fallback)
+        self.assertTrue(attempts[2].is_retry)
+        self.assertFalse(attempts[2].is_fallback)
+
     def test_ordered_fallback_across_multiple_local_providers(self):
         attempted = []
 
