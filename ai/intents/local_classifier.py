@@ -1,5 +1,19 @@
 import json
+import time
 from collections.abc import Callable
+from uuid import uuid4
+
+from ai.providers.telemetry import ProviderCallResult
+from ai.telemetry import logger
+from ai.telemetry.models import (
+    AttemptOutcome,
+    PrivacyAction,
+    ProviderAttempt,
+    ProviderErrorCategory,
+    ProviderLocality,
+    UsageMetrics,
+    WorkloadPurpose,
+)
 
 from .models import IntentResult
 from .registry import IntentRegistry
@@ -158,9 +172,58 @@ def _parse_classifier_response(
 class LocalClassifierStrategy:
     name = _LOCAL_CLASSIFIER_STRATEGY_NAME
 
-    def __init__(self, generate: GenerateFunction) -> None:
+    def __init__(
+        self,
+        generate: GenerateFunction,
+        provider: str = "unknown",
+    ) -> None:
         """Initialize the strategy with a local generation function."""
         self._generate = generate
+        self._provider = provider
+
+    def _record_attempt(
+        self,
+        outcome: AttemptOutcome,
+        result,
+        *,
+        invalid_response: bool = False,
+    ) -> None:
+        structured_result = (
+            result
+            if isinstance(result, ProviderCallResult)
+            else None
+        )
+        is_failure = outcome is AttemptOutcome.FAILURE
+        logger.record_attempt(ProviderAttempt(
+            trace_id=str(uuid4()),
+            timestamp=time.time(),
+            purpose=WorkloadPurpose.INTENT_CLASSIFICATION,
+            provider=self._provider,
+            model=(structured_result.model if structured_result else None),
+            locality=ProviderLocality.LOCAL,
+            sequence=1,
+            outcome=outcome,
+            privacy_action=PrivacyAction.RAW,
+            metrics=(
+                structured_result.metrics
+                if structured_result
+                else UsageMetrics()
+            ),
+            safe_failure_reason=(
+                "Classifier returned an invalid response."
+                if invalid_response
+                else "Provider request failed."
+                if is_failure
+                else None
+            ),
+            error_category=(
+                ProviderErrorCategory.INVALID_RESPONSE
+                if invalid_response
+                else ProviderErrorCategory.PROVIDER_ERROR
+                if is_failure
+                else None
+            ),
+        ))
 
     def detect(
         self,
@@ -169,14 +232,32 @@ class LocalClassifierStrategy:
     ) -> IntentResult:
         """Classify a message against the registered intents."""
         messages = _build_classifier_messages(message, registry)
-        response, error = self._generate(messages)
+        result = self._generate(messages)
+        response, error = result
 
         if error:
+            self._record_attempt(AttemptOutcome.FAILURE, result)
             raise RuntimeError(
                 f"Local classifier provider failed: {error}"
             )
 
-        return _parse_classifier_response(
-            response or "",
-            registry,
-        )
+        if not response:
+            self._record_attempt(AttemptOutcome.EMPTY_RESPONSE, result)
+        else:
+            try:
+                parsed_result = _parse_classifier_response(
+                    response,
+                    registry,
+                )
+            except ValueError:
+                self._record_attempt(
+                    AttemptOutcome.FAILURE,
+                    result,
+                    invalid_response=True,
+                )
+                raise
+
+            self._record_attempt(AttemptOutcome.SUCCESS, result)
+            return parsed_result
+
+        return _parse_classifier_response("", registry)

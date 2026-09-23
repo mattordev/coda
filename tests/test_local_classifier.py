@@ -1,8 +1,18 @@
 import json
 import unittest
+from unittest import mock
 
 from ai.intents.local_classifier import LocalClassifierStrategy
 from ai.intents.router import ExactMatchStrategy, IntentRouter
+from ai.providers.telemetry import ProviderCallResult
+from ai.telemetry.models import (
+    AttemptOutcome,
+    PrivacyAction,
+    ProviderErrorCategory,
+    ProviderLocality,
+    UsageMetrics,
+    WorkloadPurpose,
+)
 from tests.intent_fixtures import create_test_registry
 
 
@@ -22,6 +32,44 @@ class FakeGenerator:
 class LocalClassifierStrategyTests(unittest.TestCase):
     def setUp(self):
         self.registry = create_test_registry()
+        record_attempt = mock.patch(
+            "ai.intents.local_classifier.logger.record_attempt"
+        )
+        self.record_attempt = record_attempt.start()
+        self.addCleanup(record_attempt.stop)
+
+    def test_records_successful_provider_attempt_with_metadata(self):
+        metrics = UsageMetrics(
+            total_duration_seconds=0.2,
+            input_tokens=10,
+            output_tokens=4,
+            total_tokens=14,
+        )
+        generator = mock.Mock(return_value=ProviderCallResult(
+            response=json.dumps({"intent": "maps", "confidence": 0.9}),
+            error=None,
+            model="classifier-model",
+            metrics=metrics,
+        ))
+        strategy = LocalClassifierStrategy(generator, provider="ollama")
+
+        result = strategy.detect("find the station", self.registry)
+
+        self.assertEqual(result.intent.name, "maps")
+        self.record_attempt.assert_called_once()
+        attempt = self.record_attempt.call_args.args[0]
+        self.assertTrue(attempt.trace_id)
+        self.assertEqual(attempt.sequence, 1)
+        self.assertEqual(
+            attempt.purpose,
+            WorkloadPurpose.INTENT_CLASSIFICATION,
+        )
+        self.assertEqual(attempt.provider, "ollama")
+        self.assertEqual(attempt.model, "classifier-model")
+        self.assertEqual(attempt.locality, ProviderLocality.LOCAL)
+        self.assertEqual(attempt.outcome, AttemptOutcome.SUCCESS)
+        self.assertEqual(attempt.privacy_action, PrivacyAction.RAW)
+        self.assertEqual(attempt.metrics, metrics)
 
     def test_builds_prompt_with_message_and_registered_intents(self):
         generator = FakeGenerator(
@@ -107,6 +155,38 @@ class LocalClassifierStrategyTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "ollama unavailable"):
             strategy.detect("find somewhere", self.registry)
+
+        attempt = self.record_attempt.call_args.args[0]
+        self.assertEqual(attempt.outcome, AttemptOutcome.FAILURE)
+        self.assertEqual(
+            attempt.error_category,
+            ProviderErrorCategory.PROVIDER_ERROR,
+        )
+
+    def test_records_empty_and_invalid_classifier_responses(self):
+        cases = (
+            ("", AttemptOutcome.EMPTY_RESPONSE, None),
+            (
+                "not json",
+                AttemptOutcome.FAILURE,
+                ProviderErrorCategory.INVALID_RESPONSE,
+            ),
+        )
+
+        for response, outcome, category in cases:
+            with self.subTest(response=response):
+                self.record_attempt.reset_mock()
+                strategy = LocalClassifierStrategy(
+                    FakeGenerator(response),
+                    provider="ollama",
+                )
+
+                with self.assertRaises(ValueError):
+                    strategy.detect("find somewhere", self.registry)
+
+                attempt = self.record_attempt.call_args.args[0]
+                self.assertEqual(attempt.outcome, outcome)
+                self.assertEqual(attempt.error_category, category)
 
     def test_rejects_invalid_classifier_output(self):
         invalid_outputs = (

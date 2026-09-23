@@ -1,11 +1,21 @@
 import os
+import time
 from threading import Event
 from uuid import uuid4
 
 from ai.providers import registry
+from ai.providers.telemetry import ProviderCallResult
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
 from ai.telemetry import logger
+from ai.telemetry.models import (
+    AttemptOutcome,
+    PrivacyAction,
+    ProviderAttempt,
+    ProviderLocality,
+    UsageMetrics,
+    WorkloadPurpose,
+)
 import utils.llm_service as llm_service
 import utils.runtime_state as runtime_state
 
@@ -16,6 +26,67 @@ def _debug_print(*args, **kwargs):
 
 def _is_cancelled(cancel_event: Event | None) -> bool:
     return cancel_event is not None and cancel_event.is_set()
+
+
+def _provider_locality(provider: str) -> ProviderLocality:
+    provider_type = registry.get_provider_type(provider)
+    if provider_type == "local":
+        return ProviderLocality.LOCAL
+    if provider_type == "cloud":
+        return ProviderLocality.CLOUD
+    return ProviderLocality.UNKNOWN
+
+
+def _privacy_action(provider: str, risk: float, privacy_result) -> PrivacyAction:
+    if registry.get_provider_type(provider) != "cloud":
+        return PrivacyAction.RAW
+
+    if privacy_result is None:
+        privacy_result = {
+            "risk": risk,
+            "level": policy.get_risk_level(risk),
+            "categories": [],
+            "matches": [],
+        }
+
+    return PrivacyAction(policy.get_cloud_action(privacy_result))
+
+
+def _record_conversation_attempt(
+    *,
+    provider: str,
+    risk: float,
+    privacy_result,
+    trace_id: str | None,
+    sequence: int,
+    outcome: AttemptOutcome,
+    result=None,
+    is_retry: bool = False,
+    is_fallback: bool = False,
+) -> None:
+    structured_result = (
+        result
+        if isinstance(result, ProviderCallResult)
+        else None
+    )
+    logger.record_attempt(ProviderAttempt(
+        trace_id=trace_id or str(uuid4()),
+        timestamp=time.time(),
+        purpose=WorkloadPurpose.CONVERSATION,
+        provider=provider,
+        model=(structured_result.model if structured_result else None),
+        locality=_provider_locality(provider),
+        sequence=sequence,
+        outcome=outcome,
+        privacy_action=_privacy_action(provider, risk, privacy_result),
+        is_retry=is_retry,
+        is_fallback=is_fallback,
+        metrics=(
+            structured_result.metrics
+            if structured_result
+            else UsageMetrics()
+        ),
+    ))
 
 
 def _try_providers(
@@ -34,6 +105,7 @@ def _try_providers(
     last_error = None
 
     trace_id = str(uuid4())
+    attempted_providers = set()
 
     for sequence, provider in enumerate(providers, start=1):
         if _is_cancelled(cancel_event):
@@ -52,7 +124,13 @@ def _try_providers(
             cancel_event=cancel_event,
             trace_id=trace_id,
             sequence=sequence,
+            is_retry=provider in attempted_providers,
+            is_fallback=(
+                bool(attempted_providers)
+                and provider not in attempted_providers
+            ),
         )
+        attempted_providers.add(provider)
 
         if _is_cancelled(cancel_event):
             _debug_print(
@@ -63,6 +141,9 @@ def _try_providers(
         if skipped:
             _debug_print(f"[ROUTER] {provider} skipped due to recent failure.")
             continue
+
+        if error == "Request cancelled.":
+            return None, error
 
         if error or not response:
             logger.log_failure(provider)
@@ -85,6 +166,8 @@ def _call_provider_with_health(
     *,
     trace_id: str | None = None,
     sequence: int = 1,
+    is_retry: bool = False,
+    is_fallback: bool = False,
 ):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.
@@ -93,19 +176,52 @@ def _call_provider_with_health(
     conversation history and provider-specific rendering.
     """
     if logger.should_skip_provider(provider):
+        _record_conversation_attempt(
+            provider=provider,
+            risk=risk,
+            privacy_result=privacy_result,
+            trace_id=trace_id,
+            sequence=sequence,
+            outcome=AttemptOutcome.COOLDOWN_SKIPPED,
+            is_retry=is_retry,
+            is_fallback=is_fallback,
+        )
         _debug_print(
             f"[ROUTER] Skipping {provider} due to recent failure; using fallback."
         )
         return None, f"{provider} is temporarily unavailable after a recent failure.", True
 
     logger.log_attempt(provider)
-    response, error = llm_service.call_provider(
+    result = llm_service.call_provider(
         provider,
         prompt,
         risk=risk,
         privacy_result=privacy_result,
         cancel_event=cancel_event,
     )
+    response, error = result
+
+    if _is_cancelled(cancel_event) or error == "Request cancelled.":
+        outcome = AttemptOutcome.CANCELLED
+    elif error:
+        outcome = AttemptOutcome.FAILURE
+    elif not response:
+        outcome = AttemptOutcome.EMPTY_RESPONSE
+    else:
+        outcome = AttemptOutcome.SUCCESS
+
+    _record_conversation_attempt(
+        provider=provider,
+        risk=risk,
+        privacy_result=privacy_result,
+        trace_id=trace_id,
+        sequence=sequence,
+        outcome=outcome,
+        result=result,
+        is_retry=is_retry,
+        is_fallback=is_fallback,
+    )
+
     return response, error, False
 
 

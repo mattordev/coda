@@ -30,7 +30,8 @@ def _get_local_classifier_provider():
         return None
 
     provider_name = providers[0]
-    return provider_registry.get_provider_module(provider_name)
+    provider = provider_registry.get_provider_module(provider_name)
+    return provider_name, provider
 
 
 def create_router(registry: IntentRegistry) -> IntentRouter:
@@ -41,11 +42,15 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
     ]
 
     if _local_classifier_enabled():
-        provider = _get_local_classifier_provider()
+        provider_selection = _get_local_classifier_provider()
 
-        if provider is not None:
+        if provider_selection is not None:
+            provider_name, provider = provider_selection
             strategies.append(
-                LocalClassifierStrategy(provider.generate)
+                LocalClassifierStrategy(
+                    provider.generate_with_metadata,
+                    provider=provider_name,
+                )
             )
 
     return IntentRouter(
