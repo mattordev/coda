@@ -130,7 +130,10 @@ class PrivacyRoutingTests(unittest.TestCase):
         provider = registry.get_provider_module("ollama")
         original_history = list(llm_service.conversation_log)
 
-        with mock.patch.object(provider, "generate") as generate:
+        with mock.patch.object(
+            provider,
+            "generate_with_metadata",
+        ) as generate:
             response, error = llm_service.call_provider(
                 "ollama",
                 "cancelled before provider",
@@ -153,7 +156,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
         with mock.patch.object(
             provider,
-            "generate",
+            "generate_with_metadata",
             side_effect=cancel_during_generation,
         ):
             response, error = llm_service.call_provider(
@@ -178,7 +181,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
         with mock.patch.object(
             provider,
-            "generate",
+            "generate_with_metadata",
             return_value=("late response", None),
         ), mock.patch.object(
             llm_service,
@@ -205,7 +208,7 @@ class PrivacyRoutingTests(unittest.TestCase):
 
         with mock.patch.object(
             provider,
-            "generate",
+            "generate_with_metadata",
             return_value=("late response", None),
         ), mock.patch.object(
             llm_service,
@@ -227,12 +230,16 @@ class PrivacyRoutingTests(unittest.TestCase):
         cloud_provider = registry.get_provider_module("openai")
         captured = []
 
-        with mock.patch.object(local_provider, "generate", return_value=("local ok", None)):
+        with mock.patch.object(
+            local_provider,
+            "generate_with_metadata",
+            return_value=("local ok", None),
+        ):
             llm_service.call_provider("ollama", "my password is swordfish", risk=1.0)
 
         with mock.patch.object(
             cloud_provider,
-            "generate",
+            "generate_with_metadata",
             side_effect=lambda messages, **_kwargs: (
                 captured.extend(messages) or ("cloud ok", None)
             ),
@@ -353,10 +360,10 @@ class PrivacyRoutingTests(unittest.TestCase):
         cloud_provider = registry.get_provider_module("openai")
         captured = []
 
-        with mock.patch.object(local_provider, "generate", return_value=(None, "local failed")), \
+        with mock.patch.object(local_provider, "generate_with_metadata", return_value=(None, "local failed")), \
              mock.patch.object(
                  cloud_provider,
-                 "generate",
+                 "generate_with_metadata",
                  side_effect=lambda messages, **_kwargs: (
                      captured.extend(messages) or ("ok", None)
                  ),
@@ -450,14 +457,14 @@ class PrivacyRoutingTests(unittest.TestCase):
 
         with mock.patch.object(
             cloud_provider,
-            "generate",
+            "generate_with_metadata",
             return_value=("contact me at private@example.com", None),
         ):
             llm_service.call_provider("openai", "say contact details", risk=0.0)
 
         with mock.patch.object(
             cloud_provider,
-            "generate",
+            "generate_with_metadata",
             side_effect=lambda messages, **_kwargs: (
                 captured.extend(messages) or ("ok", None)
             ),

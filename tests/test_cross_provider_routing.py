@@ -1,5 +1,6 @@
 import unittest
 from threading import Event
+from types import SimpleNamespace
 from unittest import mock
 
 from ai.llm_router import core
@@ -512,10 +513,11 @@ class CrossProviderRoutingTests(unittest.TestCase):
             llm_service.conversation_log
         )
 
-        provider = mock.MagicMock()
-        provider.generate.return_value = (
-            None,
-            "provider failed",
+        provider = SimpleNamespace(
+            generate=mock.Mock(return_value=(
+                None,
+                "provider failed",
+            )),
         )
 
         with mock.patch.object(
@@ -546,17 +548,19 @@ class CrossProviderRoutingTests(unittest.TestCase):
             llm_service.conversation_log,
             original_history,
         )
+        provider.generate.assert_called_once()
 
     def test_conversation_failure_preserves_provider_metadata(self):
         """A failed call retains telemetry while rolling history back."""
         original_history = list(llm_service.conversation_log)
         metrics = UsageMetrics(total_duration_seconds=1.25)
-        provider = mock.MagicMock()
-        provider.generate.return_value = ProviderCallResult(
-            response=None,
-            error="provider failed",
-            model="resolved-model",
-            metrics=metrics,
+        provider = SimpleNamespace(
+            generate_with_metadata=mock.Mock(return_value=ProviderCallResult(
+                response=None,
+                error="provider failed",
+                model="resolved-model",
+                metrics=metrics,
+            )),
         )
 
         with mock.patch.object(
@@ -589,8 +593,6 @@ class CrossProviderRoutingTests(unittest.TestCase):
         original_history = list(llm_service.conversation_log)
         cancel_event = Event()
         metrics = UsageMetrics(total_duration_seconds=0.5)
-        provider = mock.MagicMock()
-
         def cancel_during_generation(*_args, **_kwargs):
             cancel_event.set()
             return ProviderCallResult(
@@ -600,7 +602,11 @@ class CrossProviderRoutingTests(unittest.TestCase):
                 metrics=metrics,
             )
 
-        provider.generate.side_effect = cancel_during_generation
+        provider = SimpleNamespace(
+            generate_with_metadata=mock.Mock(
+                side_effect=cancel_during_generation
+            ),
+        )
 
         with mock.patch.object(
             llm_service.registry,
@@ -636,12 +642,15 @@ class CrossProviderRoutingTests(unittest.TestCase):
             output_tokens=2,
             total_tokens=5,
         )
-        provider = mock.MagicMock()
-        provider.generate.return_value = ProviderCallResult(
+        provider_result = ProviderCallResult(
             response="hello",
             error=None,
             model="resolved-model",
             metrics=metrics,
+        )
+        provider = SimpleNamespace(
+            generate=mock.Mock(return_value=("legacy response", None)),
+            generate_with_metadata=mock.Mock(return_value=provider_result),
         )
 
         with mock.patch.object(
@@ -667,6 +676,8 @@ class CrossProviderRoutingTests(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertEqual(result.model, "resolved-model")
         self.assertEqual(result.metrics, metrics)
+        provider.generate_with_metadata.assert_called_once()
+        provider.generate.assert_not_called()
 
     def test_unconfigured_provider_is_skipped_cleanly(self):
         with mock.patch.dict(

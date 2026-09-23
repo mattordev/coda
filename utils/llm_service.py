@@ -242,7 +242,11 @@ def _generate_provider_response(
     )
 
     messages = _build_messages_for_provider(provider_name)
-    provider_result = provider_module.generate(
+    generate = getattr(provider_module, "generate_with_metadata", None)
+    if not callable(generate):
+        generate = provider_module.generate
+
+    provider_result = generate(
         messages,
         cancel_event=cancel_event,
     )
