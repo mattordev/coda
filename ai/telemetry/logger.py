@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import utils.runtime_state as runtime_state
+from ai.telemetry.aggregates import build_snapshot
 from ai.telemetry.models import ProviderAttempt
+from ai.telemetry.pricing import with_estimated_cost
 
 """
 Telemetry module for tracking provider health and performance.
@@ -27,12 +29,15 @@ _ACTIVE_SESSION_FILE = _TELEMETRY_LOG_DIR / "active-session.jsonl"
 _STATE_LOCK = threading.Lock()
 _STATE_SCHEMA_VERSION = 1
 _MAX_SESSION_ATTEMPTS = 1000
+_MAX_HISTORY_FILES = 20
 
 # In-memory provider cooldown state, preserved from the legacy format.
 _provider_state = {}
 
 # Serialized attempt records for the active session only.
 _attempts = []
+# Newest records loaded from completed or interrupted prior sessions.
+_historical_attempts = []
 _attempts_pending_state_migration = False
 
 _state_loaded = False
@@ -141,6 +146,42 @@ def _save_session_safely():
         return False
 
 
+def _load_recent_history():
+    """Load the newest valid records from bounded archived session files."""
+    _prepare_session()
+    records = []
+    archive_paths = sorted(
+        (
+            path
+            for path in _TELEMETRY_LOG_DIR.glob("*.jsonl")
+            if path != _ACTIVE_SESSION_FILE
+        ),
+        reverse=True,
+    )[:_MAX_HISTORY_FILES]
+
+    for path in archive_paths:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in reversed(lines):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+            if len(records) >= _MAX_SESSION_ATTEMPTS:
+                return list(reversed(records))
+
+    return list(reversed(records))
+
+
+def _load_recent_history_safely():
+    try:
+        return _load_recent_history()
+    except (OSError, UnicodeError) as error:
+        _debug_print(f"[DEBUG] Could not load telemetry history: {error}")
+        return []
+
+
 def _save_state_safely():
     try:
         _save_state_to_disk()
@@ -211,13 +252,14 @@ def _save_state_to_disk():
 
 
 def _load_state_once():
-    global _state_loaded, _provider_state, _attempts
+    global _state_loaded, _provider_state, _attempts, _historical_attempts
     global _attempts_pending_state_migration
 
     if _state_loaded:
         return
 
     _provider_state, _attempts = _load_state_from_disk()
+    _historical_attempts = _load_recent_history_safely()
     _state_loaded = True
 
     if _attempts:
@@ -283,7 +325,8 @@ def record_attempt(attempt: ProviderAttempt):
         raise TypeError("attempt must be a ProviderAttempt.")
 
     with _STATE_LOCK:
-        _attempts.append(asdict(attempt))
+        _load_state_once()
+        _attempts.append(asdict(with_estimated_cost(attempt)))
         del _attempts[:-_MAX_SESSION_ATTEMPTS]
 
         if _save_session_safely() and _attempts_pending_state_migration:
@@ -291,9 +334,19 @@ def record_attempt(attempt: ProviderAttempt):
             _save_state_safely()
 
 
+def get_snapshot():
+    """Return an immutable aggregate view over retained attempts."""
+    with _STATE_LOCK:
+        _load_state_once()
+        rolling_attempts = (
+            _historical_attempts + _attempts
+        )[-_MAX_SESSION_ATTEMPTS:]
+        return build_snapshot(tuple(rolling_attempts))
+
+
 def finalize_session():
     """Archive the active telemetry file at graceful shutdown."""
-    global _session_ready
+    global _session_ready, _historical_attempts
 
     with _STATE_LOCK:
         try:
@@ -305,6 +358,8 @@ def finalize_session():
 
             destination = _archive_path()
             _ACTIVE_SESSION_FILE.replace(destination)
+            _historical_attempts.extend(_attempts)
+            del _historical_attempts[:-_MAX_SESSION_ATTEMPTS]
             _attempts.clear()
             _session_ready = False
             return destination

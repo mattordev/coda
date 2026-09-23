@@ -390,3 +390,201 @@ class ProviderRequest:
 
             if attempt.purpose is not self.purpose:
                 raise ValueError("Attempt purpose must match its request.")
+
+
+@dataclass(frozen=True)
+class MetricAggregate:
+    """A sample count, total and average for one optional measurement."""
+
+    sample_count: int
+    total: float | int | None
+    average: float | None
+
+    def __post_init__(self) -> None:
+        """Keep unknown metrics explicit and populated metrics consistent."""
+        if (
+            isinstance(self.sample_count, bool)
+            or not isinstance(self.sample_count, int)
+            or self.sample_count < 0
+        ):
+            raise ValueError("Metric sample count must be non-negative.")
+
+        if self.sample_count == 0:
+            if self.total is not None or self.average is not None:
+                raise ValueError(
+                    "Metrics without samples must have unknown totals and averages."
+                )
+            return
+
+        for field_name in ("total", "average"):
+            value = getattr(self, field_name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"Metric {field_name} must be a finite non-negative number."
+                )
+
+
+@dataclass(frozen=True)
+class CostAggregate:
+    """Historical costs sharing one currency and pricing provenance."""
+
+    pricing: PricingMetadata
+    priced_attempt_count: int
+    input_cost: float | None
+    output_cost: float | None
+    total_cost: float
+
+    def __post_init__(self) -> None:
+        """Reject incomplete counts and invalid accumulated costs."""
+        if not isinstance(self.pricing, PricingMetadata):
+            raise ValueError("Cost aggregate pricing must be PricingMetadata.")
+        if (
+            isinstance(self.priced_attempt_count, bool)
+            or not isinstance(self.priced_attempt_count, int)
+            or self.priced_attempt_count < 1
+        ):
+            raise ValueError("Priced attempt count must be positive.")
+
+        for field_name in ("input_cost", "output_cost", "total_cost"):
+            value = getattr(self, field_name)
+            if value is None and field_name != "total_cost":
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"Cost aggregate {field_name} must be non-negative."
+                )
+
+
+@dataclass(frozen=True)
+class ProviderTelemetryAggregate:
+    """Rolling measurements for one provider/model/workload combination."""
+
+    provider: str
+    model: str | None
+    purpose: WorkloadPurpose
+    event_count: int
+    attempt_count: int
+    success_count: int
+    failure_count: int
+    empty_response_count: int
+    cancelled_count: int
+    cooldown_skipped_count: int
+    reliability_sample_count: int
+    success_rate: float | None
+    consecutive_failures: int
+    last_attempt_timestamp: float | None
+    last_failure_timestamp: float | None
+    total_duration_seconds: MetricAggregate
+    time_to_first_token_seconds: MetricAggregate
+    input_tokens: MetricAggregate
+    output_tokens: MetricAggregate
+    total_tokens: MetricAggregate
+    throughput_tokens_per_second: MetricAggregate
+    costs: tuple[CostAggregate, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Validate aggregate identity, counters and reliability rate."""
+        _require_enum(self.purpose, WorkloadPurpose, "purpose")
+        if not self.provider.strip():
+            raise ValueError("Provider cannot be empty.")
+        if self.model is not None and not self.model.strip():
+            raise ValueError("Model cannot be blank when supplied.")
+
+        count_fields = (
+            "event_count",
+            "attempt_count",
+            "success_count",
+            "failure_count",
+            "empty_response_count",
+            "cancelled_count",
+            "cooldown_skipped_count",
+            "reliability_sample_count",
+            "consecutive_failures",
+        )
+        for field_name in count_fields:
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be non-negative.")
+
+        outcome_count = (
+            self.success_count
+            + self.failure_count
+            + self.empty_response_count
+            + self.cancelled_count
+            + self.cooldown_skipped_count
+        )
+        if self.event_count != outcome_count:
+            raise ValueError("Event count must equal the outcome counts.")
+        if self.attempt_count != self.event_count - self.cooldown_skipped_count:
+            raise ValueError("Attempt count must exclude cooldown skips.")
+        expected_reliability_samples = (
+            self.success_count
+            + self.failure_count
+            + self.empty_response_count
+        )
+        if self.reliability_sample_count != expected_reliability_samples:
+            raise ValueError(
+                "Reliability samples must exclude cancellation and cooldown skips."
+            )
+        if self.consecutive_failures > (
+            self.failure_count + self.empty_response_count
+        ):
+            raise ValueError("Consecutive failures exceed recorded failures.")
+
+        for field_name in (
+            "last_attempt_timestamp",
+            "last_failure_timestamp",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"{field_name} must be non-negative or None.")
+
+        if self.success_rate is not None and (
+            isinstance(self.success_rate, bool)
+            or not isinstance(self.success_rate, (int, float))
+            or not isfinite(self.success_rate)
+            or not 0 <= self.success_rate <= 1
+        ):
+            raise ValueError("Success rate must be between zero and one.")
+        if (self.reliability_sample_count == 0) != (self.success_rate is None):
+            raise ValueError("Success rate must match its reliability samples.")
+
+
+@dataclass(frozen=True)
+class TelemetrySnapshot:
+    """An immutable read-only view over the retained telemetry window."""
+
+    generated_at: float
+    retained_attempt_count: int
+    aggregates: tuple[ProviderTelemetryAggregate, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Validate snapshot time and retained record count."""
+        if (
+            isinstance(self.generated_at, bool)
+            or not isinstance(self.generated_at, (int, float))
+            or not isfinite(self.generated_at)
+            or self.generated_at < 0
+        ):
+            raise ValueError("Snapshot timestamp must be non-negative.")
+        if (
+            isinstance(self.retained_attempt_count, bool)
+            or not isinstance(self.retained_attempt_count, int)
+            or self.retained_attempt_count < 0
+        ):
+            raise ValueError("Retained attempt count must be non-negative.")

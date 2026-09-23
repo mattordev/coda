@@ -4,6 +4,7 @@ commands.json
 .env
 dashboard_state.json
 telemetry_state.json
+logs/telemetry/
 .venv
 .coda-update-*/
 .coda-update-active.json
