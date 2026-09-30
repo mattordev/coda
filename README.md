@@ -49,10 +49,10 @@ The active roadmap is maintained in the
 - [v1.4.1 - Expanded Provider Support](https://github.com/mattordev/coda/milestone/8)
 - [v1.4.2 - Local-First TTS Providers](https://github.com/mattordev/coda/milestone/9)
 - [v1.4.4 - Reliable Updates and Recovery](https://github.com/mattordev/coda/milestone/10)
+- [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 
 ### Future Milestones
 
-- [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 - [v1.6.0 - Semantic Intent Matching](https://github.com/mattordev/coda/milestone/5)
 
