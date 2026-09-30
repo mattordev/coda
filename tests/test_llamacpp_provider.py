@@ -148,6 +148,7 @@ class LlamaCppProviderTests(unittest.TestCase):
                 "model": "test-model",
                 "messages": messages,
                 "stream": True,
+                "stream_options": {"include_usage": True},
             },
             timeout=llamacpp.get_timeout_seconds(),
             stream=True,

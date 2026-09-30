@@ -9,7 +9,7 @@ from tests.intent_fixtures import create_test_registry
 
 
 class IntentFactoryTests(unittest.TestCase):
-    @patch("ai.providers.ollama.generate")
+    @patch("ai.providers.ollama.generate_with_metadata")
     def test_enabled_classifier_uses_selected_local_provider(self, generate):
         generate.return_value = (
             json.dumps({"intent": "maps", "confidence": 0.9}),
@@ -31,7 +31,7 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         generate.assert_called_once()
 
-    @patch("ai.providers.ollama.generate")
+    @patch("ai.providers.ollama.generate_with_metadata")
     def test_disabled_classifier_uses_rules_only(self, generate):
         with patch.dict(
             os.environ,
@@ -46,7 +46,7 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertFalse(result.matched)
         generate.assert_not_called()
 
-    @patch("ai.providers.ollama.generate")
+    @patch("ai.providers.ollama.generate_with_metadata")
     def test_exact_match_skips_enabled_classifier(self, generate):
         with patch.dict(
             os.environ,
@@ -62,7 +62,7 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertEqual(result.strategy, "exact_match")
         generate.assert_not_called()
 
-    @patch("ai.providers.ollama.generate")
+    @patch("ai.providers.ollama.generate_with_metadata")
     def test_command_prefix_skips_enabled_classifier(self, generate):
         with patch.dict(
             os.environ,
@@ -79,7 +79,7 @@ class IntentFactoryTests(unittest.TestCase):
         self.assertTrue(result.accepted)
         generate.assert_not_called()
 
-    @patch("ai.providers.ollama.generate")
+    @patch("ai.providers.ollama.generate_with_metadata")
     def test_example_match_skips_enabled_classifier(self, generate):
         registry = create_test_registry()
         registry.register(
