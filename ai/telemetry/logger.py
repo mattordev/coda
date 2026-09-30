@@ -107,6 +107,33 @@ def _archive_path(interrupted=False):
     return candidate
 
 
+def _history_archive_paths():
+    """Return archived session files newest first, excluding the active file."""
+    return sorted(
+        (
+            path
+            for path in _TELEMETRY_LOG_DIR.glob("*.jsonl")
+            if path != _ACTIVE_SESSION_FILE
+        ),
+        reverse=True,
+    )
+
+
+def _prune_history_archives():
+    """Delete archived sessions outside the retained history window."""
+    try:
+        expired_paths = _history_archive_paths()[_MAX_HISTORY_FILES:]
+    except OSError as error:
+        _debug_print(f"[DEBUG] Could not list telemetry history for pruning: {error}")
+        return
+
+    for path in expired_paths:
+        try:
+            path.unlink()
+        except OSError as error:
+            _debug_print(f"[DEBUG] Could not prune telemetry archive {path}: {error}")
+
+
 def _prepare_session():
     """Recover a previous process's unfinished active session once."""
     global _session_ready
@@ -119,6 +146,7 @@ def _prepare_session():
     if _ACTIVE_SESSION_FILE.exists() and _ACTIVE_SESSION_FILE.stat().st_size:
         _ACTIVE_SESSION_FILE.replace(_archive_path(interrupted=True))
 
+    _prune_history_archives()
     _session_ready = True
 
 
@@ -150,14 +178,7 @@ def _load_recent_history():
     """Load the newest valid records from bounded archived session files."""
     _prepare_session()
     records = []
-    archive_paths = sorted(
-        (
-            path
-            for path in _TELEMETRY_LOG_DIR.glob("*.jsonl")
-            if path != _ACTIVE_SESSION_FILE
-        ),
-        reverse=True,
-    )[:_MAX_HISTORY_FILES]
+    archive_paths = _history_archive_paths()[:_MAX_HISTORY_FILES]
 
     for path in archive_paths:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -358,6 +379,7 @@ def finalize_session():
 
             destination = _archive_path()
             _ACTIVE_SESSION_FILE.replace(destination)
+            _prune_history_archives()
             _historical_attempts.extend(_attempts)
             del _historical_attempts[:-_MAX_SESSION_ATTEMPTS]
             _attempts.clear()
