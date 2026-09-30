@@ -268,6 +268,54 @@ class TelemetryLoggerTests(unittest.TestCase):
         )
         self.assertEqual(logger.get_snapshot().retained_attempt_count, 1)
 
+    def test_finalize_session_prunes_archives_outside_history_limit(self):
+        """Graceful shutdown keeps only the newest configured archives."""
+        self.log_dir.mkdir(parents=True)
+        old_archive = self.log_dir / "2025-01-01_00-00-00.jsonl"
+        recent_archive = self.log_dir / "2025-01-02_00-00-00.jsonl"
+        newest_archive = self.log_dir / "2025-01-03_00-00-00.jsonl"
+        for archive in (old_archive, recent_archive, newest_archive):
+            archive.write_text("{}\n", encoding="utf-8")
+
+        completed_archive = self.log_dir / "2025-01-04_00-00-00.jsonl"
+        with mock.patch.object(logger, "_MAX_HISTORY_FILES", 2), mock.patch.object(
+            logger, "_archive_path", return_value=completed_archive
+        ):
+            logger.record_attempt(self._attempt("current-session"))
+            archived_file = logger.finalize_session()
+
+        self.assertEqual(archived_file, completed_archive)
+        self.assertFalse(old_archive.exists())
+        self.assertFalse(recent_archive.exists())
+        self.assertTrue(newest_archive.exists())
+        self.assertTrue(completed_archive.exists())
+        self.assertEqual(len(list(self.log_dir.glob("*.jsonl"))), 2)
+
+    def test_interrupted_session_recovery_prunes_old_archives(self):
+        """Startup recovery also applies the archived-file retention limit."""
+        self.log_dir.mkdir(parents=True)
+        old_archive = self.log_dir / "2025-01-01_00-00-00.jsonl"
+        recent_archive = self.log_dir / "2025-01-02_00-00-00.jsonl"
+        newest_archive = self.log_dir / "2025-01-03_00-00-00.jsonl"
+        for archive in (old_archive, recent_archive, newest_archive):
+            archive.write_text("{}\n", encoding="utf-8")
+        self.active_session_file.write_text("{}\n", encoding="utf-8")
+
+        interrupted_archive = self.log_dir / (
+            "2025-01-04_00-00-00-interrupted.jsonl"
+        )
+        with mock.patch.object(logger, "_MAX_HISTORY_FILES", 2), mock.patch.object(
+            logger, "_archive_path", return_value=interrupted_archive
+        ):
+            logger._prepare_session()
+
+        self.assertFalse(self.active_session_file.exists())
+        self.assertFalse(old_archive.exists())
+        self.assertFalse(recent_archive.exists())
+        self.assertTrue(newest_archive.exists())
+        self.assertTrue(interrupted_archive.exists())
+        self.assertEqual(len(list(self.log_dir.glob("*.jsonl"))), 2)
+
     def test_snapshot_loads_bounded_attempts_from_prior_sessions(self):
         self.log_dir.mkdir(parents=True)
         records = [
