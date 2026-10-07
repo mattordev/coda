@@ -12,15 +12,13 @@ class ToolError:
 
     def __post_init__(self) -> None:
         """Reject empty code or message to avoid errors that cannot be explained."""
-        if self.code is None or self.message is None:
-            raise ValueError("Code or Message cannot be equal to nothing. ")
+        if not isinstance(self.code, str) or not isinstance(self.message, str):
+            raise ValueError("Error code and message must be strings.")
 
         if not self.code.strip() or not self.message.strip():
             raise ValueError(
                 "An error cannot be empty."
             )
-
-
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -35,7 +33,13 @@ class ToolResult:
     error: ToolError | None = None
 
     def __post_init__(self) -> None:
-        """Reject a successful result containing an error."""
+        """Validate the result envelope and reject contradictory outcomes."""
+        if not isinstance(self.success, bool):
+            raise ValueError("Tool result success must be a boolean.")
+
+        if self.error is not None and not isinstance(self.error, ToolError):
+            raise ValueError("Tool result error must be a ToolError or None.")
+
         if self.success and self.error is not None:
             raise ValueError(
                 "A successful tool result cannot also contain an error."

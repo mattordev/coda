@@ -6,6 +6,16 @@ from ai.tools.models import ToolError, ToolResult
 
 
 class ToolErrorTests(unittest.TestCase):
+    def test_rejects_non_string_error_fields(self):
+        for field in ("code", "message"):
+            for value in (12, False, [], {}):
+                with self.subTest(field=field, value=value):
+                    values = {"code": "device_error", "message": "Cannot print."}
+                    values[field] = value
+
+                    with self.assertRaisesRegex(ValueError, "must be strings"):
+                        ToolError(**values)
+
     def test_valid_error_preserves_code_and_message(self):
         error = ToolError(code="device_error", message="Cannot print.")
 
@@ -33,6 +43,18 @@ class ToolErrorTests(unittest.TestCase):
 
 
 class ToolResultTests(unittest.TestCase):
+    def test_success_requires_a_boolean(self):
+        for value in (None, 0, 1, "false", []):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be a boolean"):
+                    ToolResult(success=value)
+
+    def test_error_requires_a_structured_tool_error(self):
+        for value in ("Cannot print.", {"code": "device_error"}, False):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be a ToolError"):
+                    ToolResult(success=False, error=value)
+
     def test_success_can_have_no_payload(self):
         result = ToolResult(success=True)
 

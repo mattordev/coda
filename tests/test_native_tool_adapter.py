@@ -9,6 +9,12 @@ from ai.tools.native import NativeCommandAdapter
 
 
 class NativeCommandAdapterTests(unittest.TestCase):
+    def test_rejects_commands_without_a_callable_run_method(self):
+        for command in (None, object(), Mock(run=False)):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(TypeError, "callable run"):
+                    NativeCommandAdapter(command)
+
     def setUp(self):
         self.request = IntentRequest(
             intent=Intent(name="maps", description="Open a map."),
