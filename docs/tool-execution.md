@@ -2,8 +2,9 @@
 
 `Intent` describes a capability, `IntentRequest` represents one invocation,
 and `ToolResult` represents its execution outcome. This interface has no MCP
-SDK or transport dependency. Actual MCP discovery, sessions, permissions and
-runtime integration belong to the later MCP milestone issues.
+SDK or transport dependency. [Local MCP](mcp-local.md) supplies discovery,
+operation-scoped sessions and permissions behind this interface. Automatic
+voice/manual runtime integration belongs to the next routing issue.
 
 ## Capability metadata and arguments
 

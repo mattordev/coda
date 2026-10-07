@@ -1,0 +1,13 @@
+{
+    "id": "example",
+    "transport": "stdio",
+    "command": "python",
+    "args": ["/absolute/path/to/server.py"],
+    "trusted": false,
+    "allowed_tools": [],
+    "env": {},
+    "startup_timeout_seconds": 10,
+    "timeout_seconds": 30,
+    "max_output_bytes": 4194304,
+    "max_tools": 256
+}

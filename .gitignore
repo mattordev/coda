@@ -10,3 +10,4 @@ logs/telemetry/
 .coda-update-active.json
 .coda-release-cache.json
 .coda-release-cache-*
+mcp_servers/*.json

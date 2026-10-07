@@ -410,6 +410,7 @@ Commands are self-registering modules that own their intent metadata and
 - [Command Modules](docs/command-modules.md)
 - [Intent Routing](docs/intent-routing.md)
 - [Tool Execution](docs/tool-execution.md)
+- [Local MCP Servers](docs/mcp-local.md)
 - [Main Program Flow](docs/main-program-flow.md)
 - [Concurrent Runtime](docs/concurrent-runtime.md)
 - [Local Text-to-Speech](docs/local-tts.md)
