@@ -30,7 +30,7 @@ class IntentDispatcher:
 
     def execute(self, request: IntentRequest) -> ToolResult:
         """Execute the selected command and return a structured outcome."""
-        executor = self._executors.get(request.intent.name)
+        executor = self._executors.get(request.intent.name.strip().lower())
 
         if executor is None:
             return ToolResult(
@@ -70,6 +70,8 @@ class IntentDispatcher:
 
         if not name.strip():
             raise ValueError("Tool name cannot be empty.")
+
+        name = name.strip().lower()
 
         if name in self._executors:
             raise ValueError(f"Tool '{name}' is already registered.")

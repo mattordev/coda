@@ -1,4 +1,6 @@
-from .models import Intent
+from ai.tools.validation import compile_input_schema
+
+from .models import Intent, IntentParameter
 
 
 class IntentRegistry:
@@ -20,6 +22,7 @@ class IntentRegistry:
 
     def register(self, intent: Intent) -> None:
         """Add an intent and its aliases to the registry."""
+        self._validate_metadata(intent)
         name = self._normalize_name(intent.name)
 
         if not name:
@@ -104,6 +107,44 @@ class IntentRegistry:
 
         for example in normalized_examples:
             self._examples[example] = name
+
+    @staticmethod
+    def _validate_metadata(intent: Intent) -> None:
+        """Reject invalid capability metadata before changing registry state."""
+        if not isinstance(intent, Intent):
+            raise TypeError("Capability metadata must be an Intent.")
+        for field_name in ("name", "description", "source"):
+            value = getattr(intent, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Intent {field_name} cannot be empty or invalid.")
+        if intent.source != intent.source.strip().lower():
+            raise ValueError("Intent source must use lowercase without whitespace.")
+        for field_name in ("aliases", "examples"):
+            values = getattr(intent, field_name)
+            if not isinstance(values, (tuple, list)) or any(
+                not isinstance(value, str) for value in values
+            ):
+                raise ValueError(f"Intent {field_name} must contain strings.")
+        if not isinstance(intent.parameters, (tuple, list)):
+            raise ValueError("Intent parameters must be a sequence.")
+        names: set[str] = set()
+        for parameter in intent.parameters:
+            if not isinstance(parameter, IntentParameter):
+                raise ValueError("Intent parameters must be IntentParameter objects.")
+            if not isinstance(parameter.name, str) or not parameter.name.strip():
+                raise ValueError("Intent parameter name cannot be empty.")
+            name = parameter.name.strip().lower()
+            if name in names:
+                raise ValueError("Intent contains duplicate parameter names.")
+            if not isinstance(parameter.description, str):
+                raise ValueError("Intent parameter description must be a string.")
+            if not isinstance(parameter.required, bool):
+                raise ValueError("Intent parameter required must be a boolean.")
+            names.add(name)
+        if intent.input_schema is not None:
+            compile_input_schema(intent.input_schema)
+        elif intent.source != "native":
+            raise ValueError("External intent must declare an input schema.")
 
     def get(self, name: str) -> Intent | None:
         """Return the intent registered under a canonical name or alias."""

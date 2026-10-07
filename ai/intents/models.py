@@ -15,6 +15,8 @@ class Intent:
     parameters: tuple[IntentParameter, ...] = ()
     aliases: tuple[str, ...] = ()
     examples: tuple[str, ...] = ()
+    source: str = "native"
+    input_schema: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,7 @@ class IntentRequest:
     message: str
     confidence: float
     strategy: str | None = None
+    arguments: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         """Validate the structured intent request."""
@@ -59,7 +62,12 @@ class IntentResult:
         """Return whether a candidate was found but not accepted."""
         return self.matched and not self.accepted
 
-    def to_request(self, message: str) -> IntentRequest:
+    def to_request(
+        self,
+        message: str,
+        *,
+        arguments: dict[str, object] | None = None,
+    ) -> IntentRequest:
         """Convert an accepted result into a structured request."""
         if not self.accepted or self.intent is None:
             raise ValueError(
@@ -71,4 +79,5 @@ class IntentResult:
             message=message,
             confidence=self.confidence,
             strategy=self.strategy,
+            arguments=arguments,
         )

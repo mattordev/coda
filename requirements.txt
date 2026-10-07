@@ -13,6 +13,10 @@ anyio==4.13.0
     #   httpx
     #   openai
     #   starlette
+attrs==26.1.0
+    # via
+    #   jsonschema
+    #   referencing
 audioop-lts==0.2.2 ; python_full_version >= '3.13'
     # via
     #   speechrecognition
@@ -98,6 +102,10 @@ jinja2==3.1.6
     #   torch
 jiter==0.14.0
     # via openai
+jsonschema==4.26.0
+    # via -r requirements.in
+jsonschema-specifications==2025.9.1
+    # via jsonschema
 keyboard==0.13.5 ; sys_platform == 'linux' or sys_platform == 'win32'
     # via -r requirements.in
 markdown-it-py==4.2.0
@@ -170,12 +178,20 @@ pyyaml==6.0.3
     # via
     #   ctranslate2
     #   huggingface-hub
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
 requests==2.33.1
     # via
     #   -r requirements.in
     #   pocket-tts
 rich==15.0.0
     # via typer
+rpds-py==2026.9.1
+    # via
+    #   jsonschema
+    #   referencing
 safetensors==0.8.0
     # via pocket-tts
 scipy==1.17.1 ; python_full_version < '3.12'
@@ -233,6 +249,7 @@ typing-extensions==4.15.0
     #   pocket-tts
     #   pydantic
     #   pydantic-core
+    #   referencing
     #   speechrecognition
     #   starlette
     #   torch
