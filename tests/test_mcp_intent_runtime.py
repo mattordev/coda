@@ -128,6 +128,24 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertEqual(result.tool_result.error.code, "permission_denied")
         self.assertEqual(self.calls, [])
 
+    def test_runtime_stop_phrase_clears_pending_approval(self):
+        import coda_runtime
+        self.configure(confirm=True)
+        runtime.on_command("echo hello", {})
+        self.assertIsNotNone(runtime._pending_confirmation)
+        with patch.object(coda_runtime.active_request_state, "cancel_active", return_value=None), \
+             patch.object(coda_runtime.runtime_queues.speech, "cancel_current", return_value=None):
+            coda_runtime.cancel_active_request()
+        self.assertIsNone(runtime._pending_confirmation)
+        self.assertEqual(self.calls, [])
+
+    def test_debug_output_sanitizes_argument_secrets(self):
+        self.configure()
+        secret = "sk-" + "a" * 48
+        with patch("builtins.print") as output:
+            runtime.on_command('mcp.test.echo ' + json.dumps({"message":secret}), {}, debug=True)
+        self.assertNotIn(secret, repr(output.call_args_list))
+
     def test_failure_never_retries_or_uses_unrelated_fallback(self):
         self.configure()
         self.outcome = ToolResult(False, error=ToolError("timeout", "The MCP operation timed out."))

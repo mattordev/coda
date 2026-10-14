@@ -123,6 +123,14 @@ For the command module contract and a copyable example, see
 
 ## Tests
 
+MCP tools enter the same registry and strategies as built-in commands. The local
+classifier also receives input schemas and can return arguments for a selected
+tool; external validation and permissions remain execution responsibilities.
+Ambiguous candidates ask for clarification. Accepted tool failures stop without
+an unrelated conversation fallback; genuinely unmatched messages retain fallback.
+See the [MCP walkthrough](mcp-framework-walkthrough.md) for the complete runtime
+path, argument extraction, explicit confirmation and bounded result context.
+
 Run the intent tests with:
 
 ```powershell

@@ -125,6 +125,22 @@ class MCPLifecycleTests(unittest.TestCase):
         self.assertEqual(executor.execute(request).error.code, "tool_not_found")
         transport.request.assert_not_called()
 
+    def test_configuration_change_between_permission_and_invocation_rejects_stale_call(self):
+        manager, transport, intent = self.fake_manager()
+        executor = manager.executor(intent.name)
+
+        def replace_after_permission(*_args, **_kwargs):
+            definition = replace(manager._servers["test"].definition, command="replacement")
+            self.assertTrue(manager.replace_definition(definition).success)
+            self.assertTrue(manager.discover("test").success)
+            return None
+
+        with patch.object(manager, "_permission", side_effect=replace_after_permission):
+            result = executor.execute(IntentRequest(intent,"echo",1,arguments={"message":"hello"}))
+        self.assertEqual(result.error.code, "tool_not_found")
+        self.assertEqual(transport.request.call_count, 1)
+        self.assertEqual(transport.request.call_args.args[1], "discover")
+
     def test_permission_hook_errors_and_unknown_decisions_fail_closed(self):
         for decider in (Mock(side_effect=RuntimeError("private-token")), lambda *_: "unknown"):
             with self.subTest(decider=decider):

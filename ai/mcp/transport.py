@@ -156,11 +156,23 @@ class SDKStdioTransport:
                     session = PersistentSession(definition)
                     self._sessions[definition.name] = session
                 return_session = session
-            return return_session.request(
+            result = return_session.request(
                 operation, tool_name=tool_name, arguments=arguments,
                 cancel_event=cancel_event, retire_event=retire_event,
                 on_connected=on_connected,
             )
+            if result.error is not None and result.error.code == "session_retired":
+                # No action was enqueued: this is connection recovery, not replay.
+                if not return_session.done.wait(10):
+                    return failure("cleanup_timeout", "The MCP server cleanup has not completed.")
+                with self._sessions_lock:
+                    if self._sessions.get(definition.name) is return_session:
+                        del self._sessions[definition.name]
+                return self.request(
+                    definition, operation, tool_name=tool_name, arguments=arguments,
+                    cancel_event=cancel_event, retire_event=retire_event, on_connected=on_connected,
+                )
+            return result
         try:
             definition.headers() if isinstance(definition, RemoteServerDefinition) else definition.environment()
         except ValueError:

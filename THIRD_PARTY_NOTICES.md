@@ -1,5 +1,20 @@
 # Third-party notices
 
+## MCP Python SDK 2.3.0
+
+CODA uses the official Model Context Protocol Python SDK under the MIT licence.
+Its protocol/transport types remain behind CODA's MCP adapter boundary. The SDK
+and its dependencies are installed through the locked Python requirements;
+their upstream licence notices apply.
+
+https://github.com/modelcontextprotocol/python-sdk/tree/v2.3.0
+
+## httpx2 2.13.1
+
+CODA's remote MCP adapter configures an httpx2 HTTP client for environment-backed
+headers and bounded requests. The installed package declares BSD-3-Clause.
+See the distribution's licence notice and project metadata for the full terms.
+
 ## Pocket TTS 3.0.2
 
 CODA integrates the Pocket TTS Python implementation distributed by Kyutai

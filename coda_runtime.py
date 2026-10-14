@@ -311,6 +311,7 @@ def _is_latest_request(request_id: str | None) -> bool:
 
 def cancel_active_request() -> str | None:
     """Request cancellation of the active runtime request."""
+    command.cancel_pending_confirmation()
     request_id = active_request_state.cancel_active()
     speech_cancel_event = runtime_queues.speech.cancel_current()
     playback_cancelled = (

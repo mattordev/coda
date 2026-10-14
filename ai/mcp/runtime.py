@@ -76,7 +76,7 @@ class LocalMCPManager:
         with self._metadata_lock:
             return self._servers[server_id].state
 
-    def _request(self, server_id, operation, *, cancel_event=None, **kwargs):
+    def _request(self, server_id, operation, *, cancel_event=None, configuration_revision=None, **kwargs):
         runtime = self._servers.get(server_id)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
@@ -99,6 +99,8 @@ class LocalMCPManager:
             if cancel_event is not None and cancel_event.is_set():
                 return failure("cancelled", "The MCP operation was cancelled.")
             with self._metadata_lock:
+                if configuration_revision is not None and configuration_revision != runtime.configuration_revision:
+                    return failure("tool_not_found", "The discovered MCP tool is no longer available.")
                 if runtime.retire_requests or generation != runtime.generation:
                     return failure("cancelled", "The MCP operation was retired.")
                 if time.monotonic() < runtime.retry_after:
@@ -309,6 +311,7 @@ class MCPToolExecutor:
             lambda arguments: self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
+                configuration_revision=self._configuration_revision,
             ),
         )
         return adapter.execute(request)

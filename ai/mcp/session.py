@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 import json
 from queue import Empty, Queue
-from threading import Event, Thread
+from threading import Event, Thread, Lock
 import time
 
 import anyio
@@ -29,13 +29,17 @@ class PersistentSession:
         self.done = Event()
         self._queue = Queue()
         self._thread = None
+        self._lifecycle_lock = Lock()
 
     def request(self, operation, **options):
         job = _Operation(operation, options)
-        self._queue.put(job)
-        if self._thread is None:
-            self._thread = Thread(target=self._run, name=f"mcp-{self.definition.name}", daemon=True)
-            self._thread.start()
+        with self._lifecycle_lock:
+            if self.stop.is_set() or self.done.is_set():
+                return failure("session_retired", "The MCP session retired before accepting the request.")
+            self._queue.put(job)
+            if self._thread is None:
+                self._thread = Thread(target=self._run, name=f"mcp-{self.definition.name}", daemon=True)
+                self._thread.start()
         while not job.done.wait(0.01):
             if self.done.is_set():
                 return failure("connection_error", "The MCP session has closed; a later request may reconnect.")
@@ -59,7 +63,10 @@ class PersistentSession:
                     if self.stop.is_set() or any(e is not None and e.is_set() for e in events):
                         reason = "cancelled"
                     elif time.monotonic() >= deadline:
-                        reason = "timeout"
+                        with self._lifecycle_lock:
+                            if active is not None or self._queue.empty():
+                                reason = "timeout"
+                                self.stop.set()
                     if reason:
                         scope.cancel()
                         return
@@ -98,6 +105,7 @@ class PersistentSession:
             elif not connected and isinstance(error, ValueError):
                 reason = "configuration_error"
         finally:
+            self.stop.set()
             if active is not None and not active.done.is_set():
                 code = reason or ("mcp_protocol_error" if connected else "connection_error")
                 active.result = failure(code, "The MCP operation could not complete.")

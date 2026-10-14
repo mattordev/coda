@@ -15,7 +15,7 @@ from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
 from ai.tools.context import prepare_tool_context
 from ai.tools.models import ToolResult
-from ai.privacy.sanitizer import sanitize_structure
+from ai.privacy.sanitizer import sanitize_structure, sanitize_text
 
 
 _intent_router = None
@@ -69,6 +69,14 @@ def shutdown_tools(*, timeout_seconds=10):
     if _mcp_catalog is not None:
         return _mcp_catalog.close(timeout_seconds=timeout_seconds)
     return {}
+
+
+def cancel_pending_confirmation():
+    """A stop phrase cancels approval even when there is no active execution."""
+    global _pending_confirmation
+    had_pending = _pending_confirmation is not None
+    _pending_confirmation = None
+    return had_pending
 
 
 def reload_config():
@@ -211,7 +219,7 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         return cancelled_result
 
     if debug:
-        print(f"[DEBUG] Raw message: {msg}")
+        print(f"[DEBUG] Message: {sanitize_text(msg)}")
         print(
             f"[DEBUG] Available commands: "
             f"{sorted(commands.keys())}"
