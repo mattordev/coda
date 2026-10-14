@@ -340,6 +340,7 @@ def run(
 
             if follow_up_active:
                 if is_stop_phrase(message):
+                    command.cancel_pending_confirmation()
                     active_follow_up_state.close()
                     if debug_enabled:
                         print("[VOICE] Follow-up ended by user.")

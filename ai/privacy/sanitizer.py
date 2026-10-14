@@ -36,3 +36,19 @@ def sanitize_text(text: str, privacy_result=None) -> str:
 
     output.append(text[cursor:])
     return "".join(output)
+
+
+def sanitize_structure(value: object) -> object:
+    """Apply the existing text sanitizer to nested JSON values and object keys."""
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, dict):
+        return {
+            sanitize_text(key): sanitize_structure(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_structure(item) for item in value]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    raise ValueError("Privacy sanitization requires JSON-compatible data.")

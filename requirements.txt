@@ -8,11 +8,19 @@ annotated-doc==0.0.5
     #   typer
 annotated-types==0.8.0
     # via pydantic
-anyio==4.13.0
+anyio==4.14.2
     # via
+    #   -r requirements.in
     #   httpx
+    #   httpx2
+    #   mcp
     #   openai
+    #   sse-starlette
     #   starlette
+attrs==26.1.0
+    # via
+    #   jsonschema
+    #   referencing
 audioop-lts==0.2.2 ; python_full_version >= '3.13'
     # via
     #   speechrecognition
@@ -28,6 +36,8 @@ certifi==2026.7.22
     #   httpcore
     #   httpx
     #   requests
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
 charset-normalizer==3.3.2
     # via requests
 click==8.4.2
@@ -42,6 +52,8 @@ colorama==0.4.6
     #   typer
 comtypes==1.3.1 ; sys_platform == 'win32'
     # via pyttsx3
+cryptography==50.0.2
+    # via pyjwt
 ctranslate2==4.7.1
     # via faster-whisper
 decorator==5.1.1 ; sys_platform == 'win32'
@@ -64,22 +76,32 @@ flask==3.1.3
     # via -r requirements.in
 flatbuffers==25.12.19
     # via onnxruntime
-fsspec==2026.3.0
+fsspec==2026.6.0
     # via
+    #   -r requirements.in
     #   huggingface-hub
     #   torch
 h11==0.16.0
     # via
     #   httpcore
+    #   httpcore2
     #   uvicorn
 hf-xet==1.4.3 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
     # via huggingface-hub
 httpcore==1.0.9
     # via httpx
+httpcore2==2.13.1 ; sys_platform != 'emscripten'
+    # via httpx2
 httpx==0.28.1
     # via
     #   huggingface-hub
     #   openai
+httpx2==2.13.1
+    # via
+    #   -r requirements.in
+    #   mcp
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
+    # via httpx2
 huggingface-hub==1.10.2
     # via
     #   faster-whisper
@@ -89,6 +111,7 @@ idna==3.19
     # via
     #   anyio
     #   httpx
+    #   httpx2
     #   requests
 itsdangerous==2.2.0
     # via flask
@@ -98,6 +121,12 @@ jinja2==3.1.6
     #   torch
 jiter==0.14.0
     # via openai
+jsonschema==4.26.0
+    # via
+    #   -r requirements.in
+    #   mcp
+jsonschema-specifications==2025.9.1
+    # via jsonschema
 keyboard==0.13.5 ; sys_platform == 'linux' or sys_platform == 'win32'
     # via -r requirements.in
 markdown-it-py==4.2.0
@@ -107,6 +136,10 @@ markupsafe==2.1.5
     #   flask
     #   jinja2
     #   werkzeug
+mcp==2.3.0
+    # via -r requirements.in
+mcp-types==2.3.0
+    # via mcp
 mdurl==0.1.2
     # via markdown-it-py
 mpmath==1.3.0
@@ -131,6 +164,8 @@ onnxruntime==1.24.4
     # via faster-whisper
 openai==2.32.0
     # via -r requirements.in
+opentelemetry-api==1.45.1
+    # via mcp
 packaging==24.0
     # via
     #   huggingface-hub
@@ -143,39 +178,56 @@ psutil==7.2.2
     # via -r requirements.in
 pyaudio==0.2.14 ; sys_platform == 'linux' or sys_platform == 'win32'
     # via -r requirements.in
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
 pydantic==2.13.4
     # via
     #   fastapi
+    #   mcp
+    #   mcp-types
     #   openai
     #   pocket-tts
 pydantic-core==2.46.4
     # via pydantic
 pygments==2.21.0
     # via rich
+pyjwt==2.15.1
+    # via mcp
 pypiwin32==223 ; sys_platform == 'win32'
     # via pyttsx3
 python-dotenv==1.2.2
     # via -r requirements.in
 python-multipart==0.0.32
-    # via pocket-tts
+    # via
+    #   mcp
+    #   pocket-tts
 pyttsx3==2.90 ; sys_platform == 'linux' or sys_platform == 'win32'
     # via -r requirements.in
 pyuac==0.0.3 ; sys_platform == 'win32'
     # via -r requirements.in
-pywin32==306 ; sys_platform == 'win32'
+pywin32==312 ; sys_platform == 'win32'
     # via
+    #   mcp
     #   pypiwin32
     #   pyttsx3
 pyyaml==6.0.3
     # via
     #   ctranslate2
     #   huggingface-hub
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
 requests==2.33.1
     # via
     #   -r requirements.in
     #   pocket-tts
 rich==15.0.0
     # via typer
+rpds-py==2026.9.1
+    # via
+    #   jsonschema
+    #   referencing
 safetensors==0.8.0
     # via pocket-tts
 scipy==1.17.1 ; python_full_version < '3.12'
@@ -196,12 +248,17 @@ sniffio==1.3.1
     # via openai
 speechrecognition==3.17.0
     # via -r requirements.in
+sse-starlette==3.5.0
+    # via mcp
 standard-aifc==3.13.0 ; python_full_version >= '3.13'
     # via speechrecognition
 standard-chunk==3.13.0 ; python_full_version >= '3.13'
     # via standard-aifc
 starlette==1.6.0
-    # via fastapi
+    # via
+    #   fastapi
+    #   mcp
+    #   sse-starlette
 sympy==1.14.0
     # via
     #   onnxruntime
@@ -220,6 +277,10 @@ tqdm==4.66.3
     #   faster-whisper
     #   huggingface-hub
     #   openai
+truststore==0.10.4 ; sys_platform != 'emscripten'
+    # via
+    #   httpcore2
+    #   httpx2
 typer==0.27.1
     # via
     #   huggingface-hub
@@ -228,11 +289,16 @@ typing-extensions==4.15.0
     # via
     #   anyio
     #   fastapi
+    #   httpx2
     #   huggingface-hub
+    #   mcp
+    #   mcp-types
     #   openai
+    #   opentelemetry-api
     #   pocket-tts
     #   pydantic
     #   pydantic-core
+    #   referencing
     #   speechrecognition
     #   starlette
     #   torch
@@ -240,10 +306,17 @@ typing-extensions==4.15.0
 typing-inspection==0.4.4
     # via
     #   fastapi
+    #   mcp
     #   pydantic
-urllib3==2.7.0
-    # via requests
+urllib3==2.8.0
+    # via
+    #   -r requirements.in
+    #   requests
 uvicorn==0.52.4
-    # via pocket-tts
-werkzeug==3.1.8
-    # via flask
+    # via
+    #   mcp
+    #   pocket-tts
+werkzeug==3.1.9
+    # via
+    #   -r requirements.in
+    #   flask

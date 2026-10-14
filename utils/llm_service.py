@@ -120,6 +120,21 @@ def _new_system_message():
         risk=0.0,
     )
 
+
+def record_tool_exchange(message, result):
+    """Keep full results outside history; apply cloud privacy before truncation."""
+    from ai.tools.context import prepare_tool_context
+    local = prepare_tool_context(result, for_cloud=False)
+    cloud = prepare_tool_context(result, for_cloud=True)
+    if local is None:
+        local = "The tool completed without a conversational representation."
+    if cloud is None:
+        cloud = "[Tool result withheld by privacy policy.]"
+    privacy = analyze_privacy(message)
+    conversation_log.append(_new_message("user", message, risk=privacy["risk"], privacy_result=privacy))
+    conversation_log.append(_new_message("assistant", local, cloud_content=cloud))
+    _trim_conversation()
+
 def _reset_conversation():
     global conversation_log
 
