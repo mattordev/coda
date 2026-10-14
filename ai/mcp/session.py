@@ -41,7 +41,7 @@ class PersistentSession:
                 self._thread = Thread(target=self._run, name=f"mcp-{self.definition.name}", daemon=True)
                 self._thread.start()
         while not job.done.wait(0.01):
-            if self.done.is_set():
+            if self.done.is_set() and not job.done.is_set():
                 return failure("connection_error", "The MCP session has closed; a later request may reconnect.")
         return job.result
 
