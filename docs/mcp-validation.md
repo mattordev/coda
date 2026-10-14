@@ -66,6 +66,18 @@ matrix when the branch is pushed/reviewed; publication is not part of this task.
 
 ## Architectural choices and practical limits
 
+### Follow-up: readable tool speech
+
+After the original full-suite run above, an echo smoke test exposed protocol JSON
+being spoken. `ai/tools/presentation.py` now separates readable response text from
+the result/context envelope. All 75 selected presentation, MCP/intent runtime,
+context and execution tests passed in 34.445 seconds; errors-only Pylint and
+whitespace checks passed. The author's actual echo server returned exactly
+`Hello from CODA` and `Second call` as response text, while full payloads were
+retained. The earlier 697-test result predates this presentation follow-up.
+
+### Framework choices
+
 - Existing Intent models and source-agnostic selection remain the shared contract;
   native parsing remains command-owned, external argument validation stays in the
   adapter, and SDK types stay in the MCP transport boundary.

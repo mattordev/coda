@@ -180,8 +180,11 @@ runtime uses a configured local provider to extract explicit values against the
 selected schema. Missing/invalid values ask for a fresh clarified request; CODA
 does not invent defaults or coerce types. Native commands retain their parsing.
 
-Successful tool results are presented as deterministic bounded text, with detected
-secrets sanitized. `CommandResult.tool_result` retains the separate full envelope.
+Successful tool results are presented as readable bounded text, with detected
+secrets sanitized. MCP text blocks are preferred, JSON text becomes readable
+values, and structured content supplies a fallback. The result envelope and
+protocol metadata are not spoken; echo output is just its returned message.
+`CommandResult.tool_result` retains the separate full envelope.
 Conversation history receives at most 2000 characters each for local and cloud
 representations; cloud policy is applied to the full result before truncation.
 Follow-up questions can use that history. Accepted failures, permission outcomes

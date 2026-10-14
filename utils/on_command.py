@@ -13,9 +13,9 @@ from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
-from ai.tools.context import prepare_tool_context
+from ai.tools.presentation import prepare_tool_response
 from ai.tools.models import ToolResult
-from ai.privacy.sanitizer import sanitize_structure, sanitize_text
+from ai.privacy.sanitizer import sanitize_text
 
 
 _intent_router = None
@@ -196,12 +196,7 @@ def _tool_outcome(request, outcome, *, cancel_event=None):
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
     llm_service.record_tool_exchange(request.message, outcome)
-    if outcome.success:
-        display = ToolResult(success=True, data=sanitize_structure(outcome.data))
-        representation = prepare_tool_context(display, for_cloud=False, max_chars=1200)
-        response = f"Tool completed. {representation}" if representation else "Tool completed."
-    else:
-        response = outcome.error.message if outcome.error else "The tool failed."
+    response = prepare_tool_response(outcome)
     print(f"CODA: {response}")
     return CommandResult(
         handled=True, response_text=response, open_follow_up=True,

@@ -325,10 +325,15 @@ scanner. Full tool payloads are never printed wholesale or added to telemetry.
 
 ## Stop 8: result text reaches history, the dashboard and speech
 
-`_tool_outcome` retains full data in `CommandResult.tool_result`. It creates a
-separate sanitized display envelope and limits its deterministic text to 1200
-characters. This is deliberately simple JSON-oriented feedback, not an LLM
-summary. Failure uses a safe normalized error message.
+`_tool_outcome` retains full data in `CommandResult.tool_result` and calls
+`ai/tools/presentation.py: prepare_tool_response` for display and speech. Server
+text blocks are preferred; JSON text is rendered as readable values, with a
+structured-content fallback when no text is available. A single-field echo
+result `{"message":"Hello from CODA"}` becomes just `Hello from CODA`.
+Multi-field objects become labeled text. Protocol metadata and binary content
+are excluded; no readable content gets `Tool completed.`. Detected secrets are
+sanitized before the response is bounded to 1200 characters. This deterministic
+presentation uses no extra LLM call. Failure uses a safe normalized error message.
 
 `utils/llm_service.py: record_tool_exchange` adds one user/assistant exchange:
 

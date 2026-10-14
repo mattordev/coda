@@ -201,6 +201,7 @@ class MCPIntentRuntimeTests(unittest.TestCase):
             try:
                 result = runtime.run("please echo hello", {}, cancel_event=Event())
                 self.assertEqual(result.tool_result.data["structuredContent"]["message"], "hello")
+                self.assertEqual(result.response_text, f"Message: hello; Pid: {result.tool_result.data['structuredContent']['pid']}")
                 self.fallback.assert_not_called()
             finally:
                 self.assertTrue(runtime.shutdown_tools()["test"].success)

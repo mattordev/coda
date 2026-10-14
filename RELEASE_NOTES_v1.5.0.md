@@ -19,6 +19,8 @@ release or change the currently released source version.
   is introduced.
 - Results have a separate bounded, sanitized display and privacy-aware local/cloud
   conversation representation. Full payloads stay outside conversation/speech.
+  Display/speech extracts readable MCP text or structured values rather than
+  reading the protocol envelope; an echo message is spoken as just that message.
 - Disposable real stdio and authenticated loopback HTTP fixtures exercise
   persistence, routing, cancellation, limits, authentication and cleanup.
 
