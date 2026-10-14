@@ -23,6 +23,9 @@ eventually revived as the assistant it is today.
 - Speak through local neural Pocket TTS, optional ElevenLabs, and a final
   `pyttsx3` fallback.
 - Load self-registering commands from the `commands` directory.
+- Discover and invoke trusted MCP tools over local stdio or remote Streamable HTTP.
+- Reuse optional persistent MCP sessions with idle retirement and explicit cleanup.
+- Validate tool arguments and require explicit confirmation for configured actions.
 - Report live runtime state and transcripts through the dashboard.
 
 ### Commands
@@ -51,9 +54,10 @@ The active roadmap is maintained in the
 - [v1.4.4 - Reliable Updates and Recovery](https://github.com/mattordev/coda/milestone/10)
 - [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 
+- [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
+
 ### Future Milestones
 
-- [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 - [v1.6.0 - Semantic Intent Matching](https://github.com/mattordev/coda/milestone/5)
 
 ## Supported Platforms
@@ -398,6 +402,12 @@ The remaining provider, privacy, speech and model options are documented in
 
 ## Development
 
+The v1.5.0 MCP framework supports local and remote external tools. Start with the
+[implementation walkthrough](docs/mcp-framework-walkthrough.md), then configure
+[local](docs/mcp-local.md) or [remote](docs/mcp-remote.md) servers. A standalone
+MCP server is sufficient; a matching CODA command module is not required.
+Real integrations remain separate work for their authors.
+
 Run the complete unit-test suite with:
 
 ```text
@@ -409,6 +419,11 @@ Commands are self-registering modules that own their intent metadata and
 
 - [Command Modules](docs/command-modules.md)
 - [Intent Routing](docs/intent-routing.md)
+- [Tool Execution](docs/tool-execution.md)
+- [Local MCP Servers](docs/mcp-local.md)
+- [Remote MCP Servers](docs/mcp-remote.md)
+- [MCP Implementation Walkthrough](docs/mcp-framework-walkthrough.md)
+- [v1.5.0 Framework Validation](docs/mcp-validation.md)
 - [Main Program Flow](docs/main-program-flow.md)
 - [Concurrent Runtime](docs/concurrent-runtime.md)
 - [Local Text-to-Speech](docs/local-tts.md)

@@ -55,12 +55,21 @@ continues to the normal LLM fallback when that fallback is enabled.
 
 An accepted result is converted into an `IntentRequest`. This carries the
 matched intent, original message, confidence score and strategy name.
+It can also carry explicit structured `arguments` for an external tool.
 
 `IntentDispatcher` then:
 
-1. Looks up the loaded command using the intent's canonical name.
-2. Calls the module's `run(request)` function.
-3. Converts the command's return value to `True` or `False`.
+1. Looks up an executor using the intent's canonical name.
+2. Calls its `execute(request)` method. Native commands are wrapped by a
+   `NativeCommandAdapter`, which still calls the module's `run(request)`.
+3. Returns a structured `ToolResult` through `execute()`, or its boolean
+   `success` field through the compatible `dispatch()` method.
+
+Missing executors, invocation exceptions and invalid executor results become
+structured failures. Executors are registered separately from intent metadata;
+both native and external executors use the same lookup and execution path.
+See [Tool Execution](tool-execution.md) for the result contract, external
+argument validation and a complete example.
 
 A command should return `True` when it handled the request and `False` when it
 could not complete it. Once an intent has been accepted and dispatched, a
@@ -105,13 +114,22 @@ intent name, description, aliases, examples and parameters.
 | `ai/intents/router.py` | Detection strategies and confidence handling |
 | `ai/intents/factory.py` | Configures the default strategy order |
 | `ai/intents/local_classifier.py` | Local model prompt and response validation |
-| `ai/intents/dispatcher.py` | Runs the selected command module |
+| `ai/intents/dispatcher.py` | Resolves and executes native or external adapters |
+| `ai/tools/` | Shared execution protocol, results, adapters and schema validation |
 | `utils/on_command.py` | Connects routing, dispatch and LLM fallback |
 
 For the command module contract and a copyable example, see
 [Command Modules](command-modules.md).
 
 ## Tests
+
+MCP tools enter the same registry and strategies as built-in commands. The local
+classifier also receives input schemas and can return arguments for a selected
+tool; external validation and permissions remain execution responsibilities.
+Ambiguous candidates ask for clarification. Accepted tool failures stop without
+an unrelated conversation fallback; genuinely unmatched messages retain fallback.
+See the [MCP walkthrough](mcp-framework-walkthrough.md) for the complete runtime
+path, argument extraction, explicit confirmation and bounded result context.
 
 Run the intent tests with:
 

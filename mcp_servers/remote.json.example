@@ -1,0 +1,18 @@
+{
+    "id": "remote",
+    "transport": "streamable-http",
+    "url": "https://your-server.example/mcp",
+    "header_env": {"Authorization": "CODA_REMOTE_AUTHORIZATION"},
+    "trusted": false,
+    "allowed_tools": [],
+    "confirm_tools": [],
+    "session_mode": "operation",
+    "startup_mode": "lazy",
+    "idle_timeout_seconds": null,
+    "startup_timeout_seconds": 10,
+    "timeout_seconds": 30,
+    "reconnect_backoff_seconds": 2,
+    "max_output_bytes": 4194304,
+    "max_sse_event_bytes": 4194304,
+    "max_tools": 256
+}
