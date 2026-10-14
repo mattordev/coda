@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable
 from ai.intents.models import Intent, IntentParameter, IntentRequest
 from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
+from ai.mcp.remote import RemoteServerDefinition
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -37,6 +38,7 @@ class _ServerRuntime:
     generation: int = 0
     retire_requests: int = 0
     configuration_revision: int = 0
+    retry_after: float = 0.0
 
 
 class LocalMCPManager:
@@ -56,8 +58,8 @@ class LocalMCPManager:
         self._permission_decider = permission_decider
         self._closed = False
         for definition in definitions:
-            if not isinstance(definition, LocalServerDefinition):
-                raise TypeError("MCP definitions must be LocalServerDefinition objects.")
+            if not isinstance(definition, (LocalServerDefinition, RemoteServerDefinition)):
+                raise TypeError("MCP definitions must be CODA server definition objects.")
             if definition.name in self._servers:
                 raise ValueError("MCP server id is duplicated.")
             runtime = _ServerRuntime(definition)
@@ -92,12 +94,15 @@ class LocalMCPManager:
                 return failure("cancelled", "The MCP operation was cancelled.")
             if time.monotonic() >= deadline:
                 return failure("timeout", "The MCP server is busy.")
+        completed = False
         try:
             if cancel_event is not None and cancel_event.is_set():
                 return failure("cancelled", "The MCP operation was cancelled.")
             with self._metadata_lock:
                 if runtime.retire_requests or generation != runtime.generation:
                     return failure("cancelled", "The MCP operation was retired.")
+                if time.monotonic() < runtime.retry_after:
+                    return failure("connection_backoff", "The MCP server is waiting before reconnecting.")
                 runtime.retire_event.clear()
                 runtime.done.clear()
                 runtime.state = ServerState.STARTING
@@ -116,16 +121,23 @@ class LocalMCPManager:
             except Exception:
                 result = failure("connection_error", "The MCP operation could not complete.")
             with self._metadata_lock:
-                if runtime.retire_requests or generation != runtime.generation:
+                if runtime.retire_requests or generation != runtime.generation or (
+                    cancel_event is not None and cancel_event.is_set()
+                ):
                     result = failure("cancelled", "The MCP operation was retired.")
                 runtime.state = (
                     ServerState.CONNECTED if result.success and runtime.definition.session_mode == "persistent"
                     else ServerState.RETIRED if result.success else ServerState.FAILED
                 )
+                if result.error is not None and result.error.code in ("connection_error", "mcp_protocol_error", "timeout", "authentication_error"):
+                    runtime.retry_after = time.monotonic() + getattr(runtime.definition, "reconnect_backoff_seconds", 0)
+                elif result.success:
+                    runtime.retry_after = 0
+                completed = True
             return result
         finally:
             with self._metadata_lock:
-                if runtime.state in (ServerState.STARTING, ServerState.CONNECTED):
+                if not completed and runtime.state in (ServerState.STARTING, ServerState.CONNECTED):
                     runtime.state = ServerState.FAILED
             runtime.done.set()
             runtime.lock.release()
@@ -245,8 +257,8 @@ class LocalMCPManager:
 
     def replace_definition(self, definition: LocalServerDefinition) -> ToolResult:
         """Retire before replacing configuration; invalidate the old catalog."""
-        if not isinstance(definition, LocalServerDefinition):
-            raise TypeError("MCP definitions must be LocalServerDefinition objects.")
+        if not isinstance(definition, (LocalServerDefinition, RemoteServerDefinition)):
+            raise TypeError("MCP definitions must be CODA server definition objects.")
         runtime = self._servers.get(definition.name)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
@@ -260,6 +272,7 @@ class LocalMCPManager:
             with self._metadata_lock:
                 runtime.definition = definition
                 runtime.configuration_revision += 1
+                runtime.retry_after = 0
                 runtime.state = ServerState.CONFIGURED
                 self._tools = {name: tool for name, tool in self._tools.items() if tool[0] != definition.name}
             return ToolResult(success=True)

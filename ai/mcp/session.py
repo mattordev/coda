@@ -2,15 +2,13 @@
 
 from dataclasses import dataclass, field
 import json
-import os
 from queue import Empty, Queue
 from threading import Event, Thread
 import time
 
 import anyio
-from mcp import Client, StdioServerParameters, stdio_client
 
-from ai.mcp.transport import failure, _is_sdk_timeout, _private_sdk_diagnostics
+from ai.mcp.transport import failure, _is_sdk_timeout, _private_sdk_diagnostics, _client_context, _remote_error_code
 from ai.tools.models import ToolError, ToolResult
 
 
@@ -68,41 +66,34 @@ class PersistentSession:
                     await anyio.sleep(0.01)
 
             active = self._queue.get_nowait()
-            parameters = StdioServerParameters(
-                command=self.definition.command, args=list(self.definition.args),
-                env=self.definition.environment(), cwd=self.definition.cwd,
-            )
             async with anyio.create_task_group() as group:
                 group.start_soon(watch, group.cancel_scope)
-                with open(os.devnull, "w", encoding="utf-8") as errlog:
-                    async with Client(
-                        stdio_client(parameters, errlog=errlog),
-                        read_timeout_seconds=self.definition.timeout_seconds,
-                        input_required_max_rounds=0,
-                    ) as client:
-                        connected = True
-                        while True:
-                            deadline = time.monotonic() + self.definition.timeout_seconds
-                            callback = active.options.get("on_connected")
-                            if callback:
-                                callback()
-                            outcome = await self._execute(client, active)
-                            active.result = self._normalize(outcome)
-                            active.done.set()
-                            active = None
-                            idle = self.definition.idle_timeout_seconds
-                            deadline = float("inf") if idle is None else time.monotonic() + idle
-                            while active is None:
-                                try:
-                                    active = self._queue.get_nowait()
-                                except Empty:
-                                    await anyio.sleep(0.01)
+                async with _client_context(self.definition) as client:
+                    connected = True
+                    while True:
+                        deadline = time.monotonic() + self.definition.timeout_seconds
+                        callback = active.options.get("on_connected")
+                        if callback:
+                            callback()
+                        outcome = await self._execute(client, active)
+                        active.result = self._normalize(outcome)
+                        active.done.set()
+                        active = None
+                        idle = self.definition.idle_timeout_seconds
+                        deadline = float("inf") if idle is None else time.monotonic() + idle
+                        while active is None:
+                            try:
+                                active = self._queue.get_nowait()
+                            except Empty:
+                                await anyio.sleep(0.01)
 
         try:
             with _private_sdk_diagnostics():
                 anyio.run(perform)
         except Exception as error:
-            if _is_sdk_timeout(error):
+            if _remote_error_code(error):
+                reason = _remote_error_code(error)
+            elif _is_sdk_timeout(error):
                 reason = "timeout"
             elif not connected and isinstance(error, ValueError):
                 reason = "configuration_error"

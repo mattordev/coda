@@ -116,7 +116,36 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         "max_output_bytes", "max_tools",
         "session_mode", "startup_mode", "idle_timeout_seconds",
     }
-    if set(value) - allowed_keys or value.get("transport", "stdio") != "stdio":
+    transport = value.get("transport", "stdio")
+    if transport == "streamable-http":
+        from ai.mcp.remote import RemoteServerDefinition
+        remote_keys = (allowed_keys - {"command", "args", "env", "cwd"}) | {
+            "url", "header_env", "max_sse_event_bytes", "reconnect_backoff_seconds",
+        }
+        if set(value) - remote_keys:
+            raise ValueError("MCP definition has unsupported settings.")
+        headers = value.get("header_env", {})
+        tools = value.get("allowed_tools", [])
+        confirmations = value.get("confirm_tools", [])
+        if not isinstance(headers, dict):
+            raise ValueError("MCP header references must be an object.")
+        for names in (tools, confirmations):
+            if not isinstance(names, list) or any(not isinstance(name, str) for name in names) or len(set(names)) != len(names):
+                raise ValueError("MCP tool permissions must be unique strings.")
+        return RemoteServerDefinition(
+            name=value["id"], url=value["url"], header_env_refs=tuple(headers.items()),
+            trusted=value.get("trusted", False), allowed_tools=frozenset(tools),
+            confirm_tools=frozenset(confirmations),
+            startup_timeout_seconds=value.get("startup_timeout_seconds", 10.0),
+            timeout_seconds=value.get("timeout_seconds", 30.0),
+            max_output_bytes=value.get("max_output_bytes", 4 * 1024 * 1024),
+            max_tools=value.get("max_tools", 256),
+            session_mode=value.get("session_mode", "operation"), startup_mode=value.get("startup_mode", "lazy"),
+            idle_timeout_seconds=value.get("idle_timeout_seconds"),
+            max_sse_event_bytes=value.get("max_sse_event_bytes", 4 * 1024 * 1024),
+            reconnect_backoff_seconds=value.get("reconnect_backoff_seconds", 0.0),
+        )
+    if set(value) - allowed_keys or transport != "stdio":
         raise ValueError("MCP definition has unsupported settings.")
     args = value.get("args", [])
     env = value.get("env", {})

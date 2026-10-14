@@ -1,6 +1,6 @@
-"""Official MCP SDK boundary for bounded, operation-scoped stdio sessions."""
+"""Official MCP SDK boundary for bounded stdio and Streamable HTTP sessions."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 import json
 import logging
 import os
@@ -9,11 +9,14 @@ import time
 from collections.abc import Callable
 
 import anyio
+import httpx2
 from mcp import Client, StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp import types
 from mcp.shared.exceptions import MCPError
 
 from ai.mcp.config import LocalServerDefinition
+from ai.mcp.remote import RemoteServerDefinition
 from ai.tools.models import ToolError, ToolResult
 
 
@@ -25,7 +28,7 @@ def _is_sdk_timeout(error: BaseException) -> bool:
     """Recognize typed SDK timeouts without inspecting private error text."""
     if isinstance(error, BaseExceptionGroup):
         return any(_is_sdk_timeout(child) for child in error.exceptions)
-    return isinstance(error, TimeoutError) or (
+    return isinstance(error, (TimeoutError, httpx2.TimeoutException)) or (
         isinstance(error, MCPError) and error.code == types.REQUEST_TIMEOUT
     )
 
@@ -42,7 +45,7 @@ def _private_sdk_diagnostics():
     guard = PrivateDiagnostics()
     loggers = [
         logger for name, logger in list(logging.Logger.manager.loggerDict.items())
-        if name.startswith("mcp") and isinstance(logger, logging.Logger)
+        if name.startswith(("mcp", "httpx", "httpcore")) and isinstance(logger, logging.Logger)
     ]
     for logger in loggers:
         logger.addFilter(guard)
@@ -53,8 +56,58 @@ def _private_sdk_diagnostics():
             logger.removeFilter(guard)
 
 
+class _RemoteStatusError(Exception):
+    def __init__(self, code):
+        super().__init__("The remote MCP request failed.")
+        self.code = code
+
+
+def _remote_error_code(error):
+    if isinstance(error, BaseExceptionGroup):
+        return next((code for child in error.exceptions if (code := _remote_error_code(child))), None)
+    return error.code if isinstance(error, _RemoteStatusError) else None
+
+
+@asynccontextmanager
+async def _client_context(definition):
+    """Own HTTP connections or local subprocesses behind a common SDK boundary."""
+    if isinstance(definition, RemoteServerDefinition):
+        status_code = None
+
+        async def inspect_response(response):
+            nonlocal status_code
+            if response.status_code in (401, 403):
+                status_code = "authentication_error"
+            elif response.status_code == 413:
+                status_code = "output_limit"
+
+        try:
+            async with httpx2.AsyncClient(
+                headers=definition.headers(), timeout=httpx2.Timeout(definition.timeout_seconds),
+                event_hooks={"response": [inspect_response]}, trust_env=False,
+            ) as http:
+                async with Client(
+                    streamable_http_client(definition.url, http_client=http, max_sse_event_size=definition.max_sse_event_bytes),
+                    read_timeout_seconds=definition.timeout_seconds, input_required_max_rounds=0,
+                ) as client:
+                    yield client
+        except Exception:
+            if status_code is not None:
+                raise _RemoteStatusError(status_code) from None
+            raise
+    else:
+        parameters = StdioServerParameters(
+            command=definition.command, args=list(definition.args),
+            env=definition.environment(), cwd=definition.cwd,
+        )
+        with open(os.devnull, "w", encoding="utf-8") as errlog:
+            async with Client(stdio_client(parameters, errlog=errlog),
+                              read_timeout_seconds=definition.timeout_seconds, input_required_max_rounds=0) as client:
+                yield client
+
+
 class SDKStdioTransport:
-    """Own one SDK session/process per operation; always unwind its context."""
+    """Own local or remote SDK contexts; retain the original compatibility name."""
 
     def __init__(self):
         from threading import Lock
@@ -109,7 +162,7 @@ class SDKStdioTransport:
                 on_connected=on_connected,
             )
         try:
-            environment = definition.environment()
+            definition.headers() if isinstance(definition, RemoteServerDefinition) else definition.environment()
         except ValueError:
             return failure("configuration_error", "An MCP environment reference is unavailable.")
         reason = None
@@ -132,52 +185,46 @@ class SDKStdioTransport:
                         return
                     await anyio.sleep(0.01)
 
-            parameters = StdioServerParameters(
-                command=definition.command, args=list(definition.args),
-                env=environment, cwd=definition.cwd,
-            )
             async with anyio.create_task_group() as group:
                 group.start_soon(watch, group.cancel_scope)
                 # Server stderr can contain credentials; do not forward it.
-                with open(os.devnull, "w", encoding="utf-8") as errlog:
-                    async with Client(
-                        stdio_client(parameters, errlog=errlog),
-                        read_timeout_seconds=definition.timeout_seconds,
-                        input_required_max_rounds=0,
-                    ) as client:
-                        connected = True
-                        deadline = time.monotonic() + definition.timeout_seconds
-                        if on_connected is not None:
-                            on_connected()
-                        if operation == "discover":
-                            tools = []
-                            cursor = None
-                            seen_cursors = set()
-                            while True:
-                                page = await client.list_tools(cursor=cursor)
-                                tools.extend(tool.model_dump(mode="json", by_alias=True) for tool in page.tools)
-                                if len(tools) > definition.max_tools:
-                                    raise ValueError("MCP discovery exceeded the tool limit.")
-                                cursor = page.next_cursor
-                                if cursor is None:
-                                    break
-                                if cursor in seen_cursors:
-                                    raise ValueError("MCP discovery repeated a cursor.")
-                                seen_cursors.add(cursor)
-                            outcome = {"tools": tools}
-                        elif operation == "invoke":
-                            response = await client.call_tool(tool_name, arguments)
-                            outcome = response.model_dump(mode="json", by_alias=True)
-                        else:
-                            raise ValueError("Unknown MCP operation.")
-                        # SDK teardown has its own bounded waits; the call is complete.
-                        deadline = float("inf")
+                async with _client_context(definition) as client:
+                    connected = True
+                    deadline = time.monotonic() + definition.timeout_seconds
+                    if on_connected is not None:
+                        on_connected()
+                    if operation == "discover":
+                        tools = []
+                        cursor = None
+                        seen_cursors = set()
+                        while True:
+                            page = await client.list_tools(cursor=cursor)
+                            tools.extend(tool.model_dump(mode="json", by_alias=True) for tool in page.tools)
+                            if len(tools) > definition.max_tools:
+                                raise ValueError("MCP discovery exceeded the tool limit.")
+                            cursor = page.next_cursor
+                            if cursor is None:
+                                break
+                            if cursor in seen_cursors:
+                                raise ValueError("MCP discovery repeated a cursor.")
+                            seen_cursors.add(cursor)
+                        outcome = {"tools": tools}
+                    elif operation == "invoke":
+                        response = await client.call_tool(tool_name, arguments)
+                        outcome = response.model_dump(mode="json", by_alias=True)
+                    else:
+                        raise ValueError("Unknown MCP operation.")
+                    # SDK teardown has its own bounded waits; the call is complete.
+                    deadline = float("inf")
                 group.cancel_scope.cancel()
 
         try:
             with _private_sdk_diagnostics():
                 anyio.run(perform)
         except Exception as error:
+            remote_code = _remote_error_code(error)
+            if remote_code:
+                return failure(remote_code, "The remote MCP request was rejected.")
             if reason is None and _is_sdk_timeout(error):
                 reason = "timeout"
             if reason is None:

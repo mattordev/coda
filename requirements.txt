@@ -95,7 +95,9 @@ httpx==0.28.1
     #   huggingface-hub
     #   openai
 httpx2==2.13.1
-    # via mcp
+    # via
+    #   -r requirements.in
+    #   mcp
 httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
 huggingface-hub==1.10.2
