@@ -6,11 +6,14 @@ Python SDK pinned to `mcp==2.3.0`. SDK types remain inside
 `ai/mcp/transport.py`; callers receive CODA models and ordinary JSON values.
 The manual/voice runtime loads definitions during intent configuration, starts
 explicitly eager servers in a background warm-up, and discovers remaining trusted
-servers on the first unmatched lookup. Native matches do not wait for lazy MCP
+servers when deterministic matching first misses. Exact native matches do not wait for lazy MCP
 discovery. Explicit `mcp.<server>.<tool>` requests discover only their named server
 before deterministic matching, avoiding a first-use local-classifier wait.
 Unknown explicit tool names return unavailable without model interpretation.
 Optional servers discover concurrently and failures remain isolated.
+Natural-language classification runs after that discovery, with the combined
+native/MCP catalog, so an undiscovered tool cannot be hidden by a native-only
+classifier decision. There is only one classification attempt per routed request.
 
 ## Configuration and trust
 

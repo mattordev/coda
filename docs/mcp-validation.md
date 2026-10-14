@@ -85,6 +85,17 @@ unavailable names do not trigger classification or fallback. The author's actual
 lazy echo server took 0.917 seconds on first use and 0.010 seconds on reuse, with
 no classifier invocation. Errors-only Pylint and whitespace checks passed.
 
+Natural-language discovery-order follow-up: 56 selected MCP/intent runtime,
+router and factory tests passed in 22.937 seconds. A regression model chooses
+native `say` when echo metadata is absent; the first natural-language request now
+classifies once with both capabilities and chooses echo. Deterministic native
+matches skip discovery/classification, and failed discovery still permits native
+classification. A fresh tool catalog with the author's actual local model and
+echo server selected echo on the first sentence, returned the exact message and
+made one real classifier call in 7.36 seconds. Timing depends on model state;
+this proves routing rather than a fixed latency guarantee. Errors-only Pylint
+and whitespace checks passed.
+
 - Existing Intent models and source-agnostic selection remain the shared contract;
   native parsing remains command-owned, external argument validation stays in the
   adapter, and SDK types stay in the MCP transport boundary.

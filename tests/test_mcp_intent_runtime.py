@@ -8,7 +8,7 @@ from threading import Event
 import unittest
 from unittest.mock import Mock, patch
 
-from ai.intents import IntentRegistry, IntentRouter
+from ai.intents import Intent, IntentRegistry, IntentRouter
 from ai.intents.local_classifier import LocalClassifierStrategy
 from ai.intents.router import ExactMatchStrategy, CommandPrefixStrategy
 from ai.mcp.config import LocalServerDefinition
@@ -55,13 +55,13 @@ class MCPIntentRuntimeTests(unittest.TestCase):
 
         self.transport.request.side_effect = execute
 
-    def configure(self, *, allowed=True, confirm=False, decider=None):
+    def configure(self, *, allowed=True, confirm=False, decider=None, commands=None):
         manager = LocalMCPManager([LocalServerDefinition(
             "test", "unused", trusted=True,
             allowed_tools=frozenset({"echo"}) if allowed else frozenset(),
             confirm_tools=frozenset({"echo"}) if confirm else frozenset(),
         )], transport=self.transport, permission_decider=decider)
-        runtime.configure_intent_router({}, mcp_manager=manager)
+        runtime.configure_intent_router(commands or {}, mcp_manager=manager)
         self.addCleanup(runtime.shutdown_tools)
         return manager
 
@@ -83,6 +83,49 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertTrue(result.tool_result.success)
         self.assertEqual(self.calls[0]["arguments"], {"message": "typed"})
         self.generate.assert_not_called()
+
+    def test_first_natural_language_request_classifies_once_with_native_and_mcp_catalog(self):
+        native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
+        commands = {"say": native}
+        self.configure(commands=commands)
+
+        def classify(messages):
+            catalog = json.loads(messages[1]["content"])["available_intents"]
+            names = {item["name"] for item in catalog}
+            # Reproduce the real model's native choice when echo isn't available.
+            selected = "mcp.test.echo" if "mcp.test.echo" in names else "say"
+            return json.dumps({"intent": selected, "confidence": 0.95, "arguments": {"message":"hello"}}), None
+
+        self.generate.side_effect = classify
+        result = runtime.on_command("use the test echo tool to repeat hello", commands)
+        self.assertEqual(result.command_matches, ("mcp.test.echo",))
+        self.generate.assert_called_once()
+        native.run.assert_not_called()
+        names = {item["name"] for item in json.loads(self.generate.call_args.args[0][1]["content"])["available_intents"]}
+        self.assertEqual(names, {"say", "mcp.test.echo"})
+
+    def test_deterministic_native_request_does_not_discover_or_classify(self):
+        native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
+        commands = {"say": native}
+        self.configure(commands=commands)
+        result = runtime.on_command("say hello", commands)
+        self.assertTrue(result.handled)
+        native.run.assert_called_once()
+        self.transport.request.assert_not_called()
+        self.generate.assert_not_called()
+
+    def test_failed_discovery_still_allows_native_natural_language_classification(self):
+        from ai.tools.models import ToolError
+        native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
+        commands = {"say": native}
+        self.configure(commands=commands)
+        self.transport.request.side_effect = None
+        self.transport.request.return_value = ToolResult(False, error=ToolError("connection_error", "Unavailable."))
+        self.generate.return_value = ('{"intent":"say","confidence":0.95}', None)
+        result = runtime.on_command("please speak hello", commands)
+        self.assertTrue(result.handled)
+        native.run.assert_called_once()
+        self.generate.assert_called_once()
 
     def test_explicit_unavailable_tool_never_calls_classifier_or_fallback(self):
         self.configure()

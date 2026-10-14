@@ -15,7 +15,7 @@ from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_response
 from ai.tools.models import ToolResult
-from ai.intents.router import IntentRouter, ExactMatchStrategy, CommandPrefixStrategy
+from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStrategy, CommandPrefixStrategy
 from ai.privacy.sanitizer import sanitize_text
 
 
@@ -138,6 +138,10 @@ def _dispatch_intent(
         # An explicit canonical name needs no model interpretation, including
         # when the named server/tool is unavailable or misspelled.
         result = IntentRouter(registry, strategies=(ExactMatchStrategy(), CommandPrefixStrategy())).route(message)
+    elif _mcp_catalog is not None and _intent_registry is not None:
+        result = IntentRouter(_intent_registry, strategies=(
+            ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
+        )).route(message)
     else:
         result = _intent_router.route(message)
     if not is_explicit_mcp and not result.matched and _mcp_catalog is not None:
@@ -150,7 +154,7 @@ def _dispatch_intent(
                 registry.register(intent)
             _intent_registry = registry
             _intent_router = create_router(registry)
-            result = _intent_router.route(message)
+        result = _intent_router.route(message)
 
     if debug:
         print(

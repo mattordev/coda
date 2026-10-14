@@ -27,7 +27,7 @@ flowchart TD
     H -->|Other input or none| H0{Explicit MCP canonical name?}
     H0 -->|Yes| H1[Discover named server; common deterministic router]
     H1 --> M
-    H0 -->|No| I[IntentRouter.route]
+    H0 -->|No| I[Common router: exact, example and prefix matching]
     I --> J{Matched?}
     J -->|No| K[MCPRuntimeCatalog.discover: trusted optional servers]
     K --> L[Register common Intent descriptors; route again]
@@ -134,15 +134,18 @@ are programmatically inspectable. There is no configuration-management UI yet.
 
 `MCPRuntimeCatalog.discover` connects trusted unattempted servers concurrently,
 with up to eight discovery workers. Each server has its own timeout and result.
-First discovery can delay an unmatched request, but a native match avoids lazy
-discovery. Initial failures are remembered rather than retried on every turn;
+Exact, alias, example and prefix matches avoid lazy discovery. When those rules
+miss, discovery precedes classification so the model sees both native and MCP
+capabilities on its first call. A natural-language native request can therefore
+incur initial discovery latency too. Initial failures are remembered rather than retried on every turn;
 reconfigure/restart to retry. The catalog is a snapshot, not live subscriptions.
 
 An explicit `mcp.<server>.<tool>` request discovers only that server before
 routing. The common router uses exact/prefix matching for this lookup, so first
 use does not wait for a classifier against an incomplete native-only catalog.
 Unavailable or misspelled explicit tools also skip classification/fallback.
-Natural-language requests retain the existing classifier path.
+Natural-language requests use one classifier call after discovery, rather than
+an earlier native-only classification followed by a second classification.
 
 `LocalMCPManager.discover` calls `_request(server_id, "discover")`, then checks the
 entire returned catalog using a temporary `IntentRegistry`. Invalid names,
