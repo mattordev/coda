@@ -54,8 +54,6 @@ The active roadmap is maintained in the
 - [v1.4.4 - Reliable Updates and Recovery](https://github.com/mattordev/coda/milestone/10)
 - [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 
-### Implementation Complete, Release Pending
-
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 
 ### Future Milestones
@@ -404,8 +402,7 @@ The remaining provider, privacy, speech and model options are documented in
 
 ## Development
 
-The MCP framework is implemented on this feature branch; no v1.5.0 release has
-been published by this work. Start with the
+The v1.5.0 MCP framework supports local and remote external tools. Start with the
 [implementation walkthrough](docs/mcp-framework-walkthrough.md), then configure
 [local](docs/mcp-local.md) or [remote](docs/mcp-remote.md) servers. A standalone
 MCP server is sufficient; a matching CODA command module is not required.
