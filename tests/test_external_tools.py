@@ -277,7 +277,7 @@ class CapabilityMetadataTests(unittest.TestCase):
         native_registry = IntentRegistry()
         external_registry = IntentRegistry()
         external = printer_intent()
-        native_registry.register(replace(external, source="native", input_schema=None))
+        native_registry.register(replace(external, source="native"))
         external_registry.register(external)
 
         self.assertEqual(

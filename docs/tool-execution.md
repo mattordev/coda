@@ -3,8 +3,9 @@
 `Intent` describes a capability, `IntentRequest` represents one invocation,
 and `ToolResult` represents its execution outcome. This interface has no MCP
 SDK or transport dependency. [Local MCP](mcp-local.md) supplies discovery,
-operation-scoped sessions and permissions behind this interface. Automatic
-voice/manual runtime integration belongs to the next routing issue.
+operation-scoped or persistent sessions and permissions behind this interface.
+The manual/voice runtime discovers trusted tools, carries validated arguments,
+and presents bounded results through this common execution path.
 
 ## Capability metadata and arguments
 
@@ -27,10 +28,11 @@ definitions.
 `IntentRequest.arguments` contains the structured arguments for one call.
 It defaults to `None` for compatibility. The external adapter treats that as
 an empty object, which works for tools with no required arguments. The router
-selects capabilities; it does not yet extract external arguments from natural
-language. Callers must supply arguments, or integrations can supply a custom
-preprocessor. Native commands still receive the original request and parse
-its message themselves.
+selects capabilities and the local classifier can return structured values.
+`ai/tools/arguments.py` handles explicit JSON or local schema-guided extraction
+when needed. Integrations can still supply a custom preprocessor through the
+external adapter. Native commands receive the original request and parse its
+message themselves.
 
 ## Results and errors
 

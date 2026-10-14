@@ -189,7 +189,7 @@ class LocalMCPManager:
             raise ValueError("MCP tool has not been discovered.")
         return MCPToolExecutor(self, *tool, cancel_event=cancel_event)
 
-    def _permission(self, server_id, name, request):
+    def _permission(self, server_id, name, request, *, confirmed=False):
         definition = self._servers[server_id].definition
         if not definition.trusted or name not in definition.allowed_tools:
             return failure("permission_denied", "The MCP tool is not permitted.")
@@ -198,10 +198,12 @@ class LocalMCPManager:
                 decision = self._permission_decider(server_id, name, request)
             except Exception:
                 decision = "deny"
-            if decision == "confirm":
+            if decision == "confirm" and not confirmed:
                 return failure("confirmation_required", "The MCP action requires confirmation.")
-            if decision != "allow":
+            if decision not in ("allow", "confirm"):
                 return failure("permission_denied", "The MCP tool is not permitted.")
+        if name in definition.confirm_tools and not confirmed:
+            return failure("confirmation_required", "The MCP action requires confirmation.")
         return None
 
     def retire(self, server_id: str, *, timeout_seconds: float = 10.0) -> ToolResult:
@@ -277,7 +279,7 @@ class MCPToolExecutor:
         self._cancel_event = cancel_event
         self._configuration_revision = manager._servers[server_id].configuration_revision
 
-    def execute(self, request: IntentRequest, *, cancel_event: Event | None = None) -> ToolResult:
+    def execute(self, request: IntentRequest, *, cancel_event: Event | None = None, confirmed=False) -> ToolResult:
         cancel_event = cancel_event if cancel_event is not None else self._cancel_event
         with self._manager._metadata_lock:
             current = self._manager._tools.get(self._intent.name)
@@ -286,7 +288,7 @@ class MCPToolExecutor:
             or self._configuration_revision != self._manager._servers[self._server_id].configuration_revision
         ):
             return failure("tool_not_found", "The discovered MCP tool is no longer available.")
-        denied = self._manager._permission(self._server_id, self._tool_name, request)
+        denied = self._manager._permission(self._server_id, self._tool_name, request, confirmed=confirmed)
         if denied is not None:
             return denied
         adapter = ExternalToolAdapter(

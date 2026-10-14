@@ -43,6 +43,7 @@ class IntentResult:
     strategy: str | None = None
     accepted: bool = False
     error: str | None = None
+    arguments: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         """Validate the intent result after initialization."""
@@ -79,5 +80,5 @@ class IntentResult:
             message=message,
             confidence=self.confidence,
             strategy=self.strategy,
-            arguments=arguments,
+            arguments=self.arguments if arguments is None else arguments,
         )

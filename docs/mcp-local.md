@@ -4,8 +4,10 @@ CODA's local MCP layer discovers operator-configured stdio servers and exposes
 tools through the shared Intent and executor interfaces. It uses the official
 Python SDK pinned to `mcp==2.3.0`. SDK types remain inside
 `ai/mcp/transport.py`; callers receive CODA models and ordinary JSON values.
-Automatic registration in the voice/manual runtime and natural-language
-argument extraction belong to #142.
+The manual/voice runtime loads definitions during intent configuration, starts
+explicitly eager servers in a background warm-up, and discovers remaining trusted
+servers on the first unmatched lookup. Native matches do not wait for lazy MCP
+discovery. Optional servers discover concurrently and failures remain isolated.
 
 ## Configuration and trust
 
@@ -56,6 +58,12 @@ The directory contains operator-controlled executable configuration:
   `confirm`; errors/unknown values deny. `confirm` returns
   `confirmation_required` before invocation. No approval UI is implemented.
 - SDK sampling, elicitation and input-required continuations are not enabled.
+
+`confirm_tools` is an optional subset of `allowed_tools`. It requires a one-use
+confirmation for those actions even on a trusted server. CODA asks the user to
+say/type `confirm` or `cancel`; approval expires after 60 seconds, is cleared by
+other input/cancellation/reconfiguration, and never grants permission to a denied
+tool. Dynamic permission callbacks can still deny a previously confirmed action.
 
 ## Lifecycle and execution
 
@@ -161,6 +169,29 @@ from ai.tools.context import prepare_tool_context
 context_text = prepare_tool_context(result, for_cloud=True, max_chars=2000)
 # None means this result must not enter the cloud conversation.
 ```
+
+## Text and voice requests
+
+The shared local classifier receives tool names, descriptions and input schemas.
+It can select a capability and return structured arguments. Those arguments are
+validated before invocation. Exact manual requests also work without a model:
+`mcp.printer.status {"detail": true}`. If selection has no argument object, the
+runtime uses a configured local provider to extract explicit values against the
+selected schema. Missing/invalid values ask for a fresh clarified request; CODA
+does not invent defaults or coerce types. Native commands retain their parsing.
+
+Successful tool results are presented as deterministic bounded text, with detected
+secrets sanitized. `CommandResult.tool_result` retains the separate full envelope.
+Conversation history receives at most 2000 characters each for local and cloud
+representations; cloud policy is applied to the full result before truncation.
+Follow-up questions can use that history. Accepted failures, permission outcomes
+and ambiguous candidates never fall through to unrelated conversation actions.
+Genuinely unmatched requests keep the existing general LLM fallback.
+
+Failed discovery is not retried on every conversation turn; reconfigure/restart
+to retry a failed initial catalog. A disconnected discovered server can reconnect
+on a later action without replaying the failed action. Confirmation is held in
+memory for the single-user runtime and does not survive shutdown.
 
 ## Tests and references
 

@@ -677,6 +677,7 @@ def shutdown_runtime(timeout_seconds=4.0):
 
     active_request_state.cancel_active()
     stop_execution_thread(timeout_seconds=timeout_seconds)
+    command.shutdown_tools(timeout_seconds=timeout_seconds)
 
     speech.configure_speech_submitter(None)
     stop_speech_thread(timeout_seconds=timeout_seconds)
@@ -742,6 +743,7 @@ def _run_runtime(skip_update_check=False):
     # but waits for the updater to commit before starting workers or reading input.
     from utils.update_bootstrap import acknowledge_handoff
     acknowledge_handoff(Path(__file__).resolve().parent)
+    command.start_tools()
 
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")

@@ -21,6 +21,7 @@ class LocalServerDefinition:
     cwd: str | None = None
     trusted: bool = False
     allowed_tools: frozenset[str] = frozenset()
+    confirm_tools: frozenset[str] = frozenset()
     startup_timeout_seconds: float = 10.0
     timeout_seconds: float = 30.0
     max_output_bytes: int = 4 * 1024 * 1024
@@ -56,6 +57,8 @@ class LocalServerDefinition:
             not isinstance(name, str) or not name.strip() for name in self.allowed_tools
         ):
             raise ValueError("MCP allowed tools must contain non-empty names.")
+        if not isinstance(self.confirm_tools, frozenset) or not self.confirm_tools <= self.allowed_tools:
+            raise ValueError("MCP confirmation tools must be a subset of allowed tools.")
         if self.cwd is not None and (
             not isinstance(self.cwd, str) or not Path(self.cwd).is_absolute()
         ):
@@ -109,7 +112,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         raise ValueError("MCP definition must be an object.")
     allowed_keys = {
         "id", "transport", "command", "args", "env", "cwd", "trusted",
-        "allowed_tools", "startup_timeout_seconds", "timeout_seconds",
+        "allowed_tools", "confirm_tools", "startup_timeout_seconds", "timeout_seconds",
         "max_output_bytes", "max_tools",
         "session_mode", "startup_mode", "idle_timeout_seconds",
     }
@@ -118,6 +121,11 @@ def _read_definition(path: Path) -> LocalServerDefinition:
     args = value.get("args", [])
     env = value.get("env", {})
     tools = value.get("allowed_tools", [])
+    confirmations = value.get("confirm_tools", [])
+    if not isinstance(confirmations, list) or any(not isinstance(name, str) for name in confirmations):
+        raise ValueError("MCP confirmation tools must be strings.")
+    if len(confirmations) != len(set(confirmations)):
+        raise ValueError("MCP confirmation tools must be unique.")
     if not isinstance(args, list) or not isinstance(env, dict) or not isinstance(tools, list):
         raise ValueError("MCP args, environment, or allowlist has an invalid shape.")
     if any(not isinstance(tool, str) for tool in tools) or len(tools) != len(set(tools)):
@@ -126,6 +134,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         name=value["id"], command=value["command"], args=tuple(args),
         env_refs=tuple(env.items()), cwd=value.get("cwd"),
         trusted=value.get("trusted", False), allowed_tools=frozenset(tools),
+        confirm_tools=frozenset(confirmations),
         startup_timeout_seconds=value.get("startup_timeout_seconds", 10.0),
         timeout_seconds=value.get("timeout_seconds", 30.0),
         max_output_bytes=value.get("max_output_bytes", 4 * 1024 * 1024),
