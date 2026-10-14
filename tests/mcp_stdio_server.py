@@ -24,6 +24,13 @@ def main():
     from mcp.server import MCPServer
 
     server = MCPServer("coda-test-server", log_level="ERROR")
+    counter = 0
+
+    @server.tool(structured_output=True)
+    def increment() -> dict[str, int]:
+        nonlocal counter
+        counter += 1
+        return {"count": counter, "pid": os.getpid()}
 
     if mode == "invalid_catalog":
         @server.tool(name="invalid tool name")

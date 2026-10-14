@@ -56,6 +56,24 @@ def _private_sdk_diagnostics():
 class SDKStdioTransport:
     """Own one SDK session/process per operation; always unwind its context."""
 
+    def __init__(self):
+        from threading import Lock
+        self._sessions = {}
+        self._sessions_lock = Lock()
+
+    def retire(self, server_id, *, timeout_seconds=10.0):
+        with self._sessions_lock:
+            session = self._sessions.get(server_id)
+        if session is None:
+            return ToolResult(success=True)
+        session.stop.set()
+        if not session.done.wait(timeout_seconds):
+            return failure("cleanup_timeout", "The MCP server cleanup has not completed.")
+        with self._sessions_lock:
+            if self._sessions.get(server_id) is session:
+                del self._sessions[server_id]
+        return ToolResult(success=True)
+
     def request(
         self,
         definition: LocalServerDefinition,
@@ -75,6 +93,21 @@ class SDKStdioTransport:
             return failure("permission_denied", "The MCP tool is not permitted.")
         if any(event is not None and event.is_set() for event in (cancel_event, retire_event)):
             return failure("cancelled", "The MCP operation was cancelled.")
+        if definition.session_mode == "persistent":
+            from ai.mcp.session import PersistentSession
+            with self._sessions_lock:
+                session = self._sessions.get(definition.name)
+                if session is not None and session.definition != definition:
+                    return failure("configuration_error", "Retire the MCP session before replacing configuration.")
+                if session is None or session.done.is_set():
+                    session = PersistentSession(definition)
+                    self._sessions[definition.name] = session
+                return_session = session
+            return return_session.request(
+                operation, tool_name=tool_name, arguments=arguments,
+                cancel_event=cancel_event, retire_event=retire_event,
+                on_connected=on_connected,
+            )
         try:
             environment = definition.environment()
         except ValueError:

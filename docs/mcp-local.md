@@ -64,7 +64,31 @@ invocation opens a fresh SDK-owned process/session on demand and closes it
 afterward. The SDK handles stdin closure, bounded waits, termination/killing
 and reaping, including cancellation. Operation-scoped connections incur
 startup cost and do not preserve in-memory server state between calls.
-Persistent sessions, eager startup and idle-retirement policy are future work.
+Set `session_mode` to `persistent` to reuse one process/session across discovery
+and calls. The default `operation` mode retains the behavior above. Persistent
+sessions preserve server in-memory state until retirement or failure. They cost
+resources while idle but avoid repeated startup latency.
+
+`startup_mode` defaults to `lazy`. Persistent servers may opt into `eager`;
+the host explicitly calls `manager.start_eager()` after construction. Each
+server returns its own outcome; an unavailable optional server does not disable
+other servers. Configuration scanning and manager construction still launch
+nothing. `idle_timeout_seconds` accepts a positive finite duration or `null`
+(the default), which retains a persistent session until explicit cleanup.
+Idle time begins after a completed operation, never during an active call.
+
+Each persistent SDK session has one owning worker thread/async task. Per-server
+serialization makes concurrent first use create one session. Timeout or active
+cancellation retires the session conservatively; a later explicit request can
+connect again, but the failed action is never automatically replayed. Domain
+tool errors and output-limit results do not by themselves close a healthy
+session. Server state is lost whenever a process/session is replaced.
+
+`manager.replace_definition(definition)` retires the old process before changing
+configuration and removes its catalog. Discover again to obtain fresh executors.
+`manager.close()` rejects further requests and retires every owned session.
+Hosts must call it during shutdown. Explicit retirement permits later requests;
+shutdown does not. SDK cleanup retains its own bounded teardown waits.
 
 States are `configured`, `starting`, `connected`, `available`, `retired` and
 `failed`. `available` means a catalog was discovered, not that a process is

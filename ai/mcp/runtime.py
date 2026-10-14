@@ -36,6 +36,7 @@ class _ServerRuntime:
     done: Event = field(default_factory=Event)
     generation: int = 0
     retire_requests: int = 0
+    configuration_revision: int = 0
 
 
 class LocalMCPManager:
@@ -53,6 +54,7 @@ class LocalMCPManager:
         self._metadata_lock = Lock()
         self._transport = transport or SDKStdioTransport()
         self._permission_decider = permission_decider
+        self._closed = False
         for definition in definitions:
             if not isinstance(definition, LocalServerDefinition):
                 raise TypeError("MCP definitions must be LocalServerDefinition objects.")
@@ -79,6 +81,8 @@ class LocalMCPManager:
         if not runtime.definition.trusted:
             return failure("permission_denied", "The MCP process is not trusted.")
         with self._metadata_lock:
+            if self._closed:
+                return failure("cancelled", "The MCP manager has shut down.")
             if runtime.retire_requests:
                 return failure("cancelled", "The MCP server is being retired.")
             generation = runtime.generation
@@ -112,7 +116,12 @@ class LocalMCPManager:
             except Exception:
                 result = failure("connection_error", "The MCP operation could not complete.")
             with self._metadata_lock:
-                runtime.state = ServerState.RETIRED if result.success else ServerState.FAILED
+                if runtime.retire_requests or generation != runtime.generation:
+                    result = failure("cancelled", "The MCP operation was retired.")
+                runtime.state = (
+                    ServerState.CONNECTED if result.success and runtime.definition.session_mode == "persistent"
+                    else ServerState.RETIRED if result.success else ServerState.FAILED
+                )
             return result
         finally:
             with self._metadata_lock:
@@ -123,6 +132,9 @@ class LocalMCPManager:
 
     def discover(self, server_id: str, *, cancel_event: Event | None = None) -> ToolResult:
         """Fetch and validate an atomic capability catalog for one trusted server."""
+        with self._metadata_lock:
+            runtime = self._servers.get(server_id)
+            generation = runtime.generation if runtime is not None else None
         result = self._request(server_id, "discover", cancel_event=cancel_event)
         if not result.success:
             return result
@@ -161,6 +173,8 @@ class LocalMCPManager:
                 self._servers[server_id].state = ServerState.FAILED
             return failure("invalid_tool_metadata", "The MCP server supplied invalid tool metadata.")
         with self._metadata_lock:
+            if self._closed or runtime.retire_requests or generation != runtime.generation:
+                return failure("cancelled", "The MCP discovery was retired.")
             self._tools = {
                 name: tool for name, tool in self._tools.items() if tool[0] != server_id
             } | pending
@@ -202,8 +216,50 @@ class LocalMCPManager:
         try:
             if not runtime.done.wait(timeout=timeout_seconds):
                 return failure("cleanup_timeout", "The MCP server cleanup has not completed.")
+            close_session = getattr(self._transport, "retire", None)
+            if callable(close_session):
+                closed = close_session(server_id, timeout_seconds=timeout_seconds)
+                if isinstance(closed, ToolResult) and not closed.success:
+                    return closed
             with self._metadata_lock:
                 runtime.state = ServerState.RETIRED
+            return ToolResult(success=True)
+        finally:
+            with self._metadata_lock:
+                runtime.retire_requests -= 1
+
+    def start_eager(self) -> dict[str, ToolResult]:
+        """Explicit warm-up; failures remain independent of other servers."""
+        return {
+            name: self.discover(name) for name, runtime in self._servers.items()
+            if runtime.definition.startup_mode == "eager"
+        }
+
+    def close(self, *, timeout_seconds: float = 10.0) -> dict[str, ToolResult]:
+        """Reject new work and retire all sessions owned by this manager."""
+        with self._metadata_lock:
+            self._closed = True
+        return {name: self.retire(name, timeout_seconds=timeout_seconds) for name in self._servers}
+
+    def replace_definition(self, definition: LocalServerDefinition) -> ToolResult:
+        """Retire before replacing configuration; invalidate the old catalog."""
+        if not isinstance(definition, LocalServerDefinition):
+            raise TypeError("MCP definitions must be LocalServerDefinition objects.")
+        runtime = self._servers.get(definition.name)
+        if runtime is None:
+            return failure("server_not_found", "The MCP server is not configured.")
+        # Hold the retirement barrier until configuration and catalog change together.
+        with self._metadata_lock:
+            runtime.retire_requests += 1
+        try:
+            result = self.retire(definition.name)
+            if not result.success:
+                return result
+            with self._metadata_lock:
+                runtime.definition = definition
+                runtime.configuration_revision += 1
+                runtime.state = ServerState.CONFIGURED
+                self._tools = {name: tool for name, tool in self._tools.items() if tool[0] != definition.name}
             return ToolResult(success=True)
         finally:
             with self._metadata_lock:
@@ -219,12 +275,16 @@ class MCPToolExecutor:
         self._tool_name = tool_name
         self._intent = deepcopy(intent)
         self._cancel_event = cancel_event
+        self._configuration_revision = manager._servers[server_id].configuration_revision
 
     def execute(self, request: IntentRequest, *, cancel_event: Event | None = None) -> ToolResult:
         cancel_event = cancel_event if cancel_event is not None else self._cancel_event
         with self._manager._metadata_lock:
             current = self._manager._tools.get(self._intent.name)
-        if current is None or current[2] != self._intent:
+        if (
+            current is None or current[2] != self._intent
+            or self._configuration_revision != self._manager._servers[self._server_id].configuration_revision
+        ):
             return failure("tool_not_found", "The discovered MCP tool is no longer available.")
         denied = self._manager._permission(self._server_id, self._tool_name, request)
         if denied is not None:

@@ -25,8 +25,23 @@ class LocalServerDefinition:
     timeout_seconds: float = 30.0
     max_output_bytes: int = 4 * 1024 * 1024
     max_tools: int = 256
+    session_mode: str = "operation"
+    startup_mode: str = "lazy"
+    idle_timeout_seconds: float | None = None
 
     def __post_init__(self):
+        if self.session_mode not in ("operation", "persistent"):
+            raise ValueError("MCP session mode must be operation or persistent.")
+        if self.startup_mode not in ("lazy", "eager"):
+            raise ValueError("MCP startup mode must be lazy or eager.")
+        if self.startup_mode == "eager" and self.session_mode != "persistent":
+            raise ValueError("Eager startup requires a persistent MCP session.")
+        idle = self.idle_timeout_seconds
+        if idle is not None and (
+            isinstance(idle, bool) or not isinstance(idle, (int, float))
+            or not isfinite(idle) or idle <= 0
+        ):
+            raise ValueError("MCP idle timeout must be a positive finite number or null.")
         if not isinstance(self.name, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.name):
             raise ValueError("MCP server id must be a lowercase identifier.")
         if not isinstance(self.command, str) or not self.command.strip() or "\0" in self.command:
@@ -96,6 +111,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         "id", "transport", "command", "args", "env", "cwd", "trusted",
         "allowed_tools", "startup_timeout_seconds", "timeout_seconds",
         "max_output_bytes", "max_tools",
+        "session_mode", "startup_mode", "idle_timeout_seconds",
     }
     if set(value) - allowed_keys or value.get("transport", "stdio") != "stdio":
         raise ValueError("MCP definition has unsupported settings.")
@@ -114,6 +130,9 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         timeout_seconds=value.get("timeout_seconds", 30.0),
         max_output_bytes=value.get("max_output_bytes", 4 * 1024 * 1024),
         max_tools=value.get("max_tools", 256),
+        session_mode=value.get("session_mode", "operation"),
+        startup_mode=value.get("startup_mode", "lazy"),
+        idle_timeout_seconds=value.get("idle_timeout_seconds"),
     )
 
 
