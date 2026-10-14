@@ -15,6 +15,7 @@ from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_response
 from ai.tools.models import ToolResult
+from ai.intents.router import IntentRouter, ExactMatchStrategy, CommandPrefixStrategy
 from ai.privacy.sanitizer import sanitize_text
 
 
@@ -120,8 +121,26 @@ def _dispatch_intent(
     if _intent_router is None:
         raise RuntimeError("Intent router has not been configured.")
 
-    result = _intent_router.route(message)
-    if not result.matched and _mcp_catalog is not None:
+    explicit_tool = message.split(maxsplit=1)[0].lower()
+    is_explicit_mcp = explicit_tool.startswith("mcp.")
+    if is_explicit_mcp:
+        parts = explicit_tool.split(".", maxsplit=2)
+        if len(parts) != 3 or not parts[1] or not parts[2] or _mcp_catalog is None:
+            return CommandResult(handled=True, response_text="That MCP tool is unavailable. Check its configuration and discovery status.")
+        intents = _mcp_catalog.discover(server_id=parts[1], cancel_event=cancel_event)
+        if cancel_event is not None and cancel_event.is_set():
+            return CommandResult(handled=False)
+        registry = create_command_registry(commands)
+        for intent in intents:
+            registry.register(intent)
+        _intent_registry = registry
+        _intent_router = create_router(registry)
+        # An explicit canonical name needs no model interpretation, including
+        # when the named server/tool is unavailable or misspelled.
+        result = IntentRouter(registry, strategies=(ExactMatchStrategy(), CommandPrefixStrategy())).route(message)
+    else:
+        result = _intent_router.route(message)
+    if not is_explicit_mcp and not result.matched and _mcp_catalog is not None:
         intents = _mcp_catalog.discover(cancel_event=cancel_event)
         if cancel_event is not None and cancel_event.is_set():
             return CommandResult(handled=False)

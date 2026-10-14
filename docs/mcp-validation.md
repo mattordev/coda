@@ -78,6 +78,13 @@ retained. The earlier 697-test result predates this presentation follow-up.
 
 ### Framework choices
 
+Explicit-name first-use follow-up: 53 selected MCP/intent runtime, router and
+factory tests passed in 17.275 seconds. Regression checks prove that an explicit
+JSON call skips classification and discovers only its named server, and that
+unavailable names do not trigger classification or fallback. The author's actual
+lazy echo server took 0.917 seconds on first use and 0.010 seconds on reuse, with
+no classifier invocation. Errors-only Pylint and whitespace checks passed.
+
 - Existing Intent models and source-agnostic selection remain the shared contract;
   native parsing remains command-owned, external argument validation stays in the
   adapter, and SDK types stay in the MCP transport boundary.

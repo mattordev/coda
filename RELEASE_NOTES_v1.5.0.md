@@ -9,6 +9,8 @@ release or change the currently released source version.
   `mcp_servers`, with environment-backed credentials and safe per-file errors.
 - Trusted tools can be selected through manual/voice intent routing. Schema
   validation applies to structured local-model arguments and explicit JSON calls.
+  Explicit canonical MCP requests discover their named server before matching
+  and skip intent classification, including on first use or unavailable names.
 - Optional persistent clients avoid repeated startup; lazy/eager startup, idle
   retention, explicit retirement, configuration replacement and shutdown are
   supported. Operation-scoped behavior remains the default.

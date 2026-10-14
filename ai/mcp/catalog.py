@@ -18,11 +18,12 @@ class MCPRuntimeCatalog:
         self._attempted = set()
         self._intents = {}
 
-    def discover(self, *, eager_only=False, cancel_event=None):
+    def discover(self, *, eager_only=False, cancel_event=None, server_id=None):
         with self._lock:
             servers = [
                 name for name, runtime in self.manager._servers.items()
                 if runtime.definition.trusted and name not in self._attempted
+                and (server_id is None or name == server_id)
                 and (not eager_only or runtime.definition.startup_mode == "eager")
             ]
             if servers:

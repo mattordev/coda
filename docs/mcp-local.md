@@ -7,7 +7,10 @@ Python SDK pinned to `mcp==2.3.0`. SDK types remain inside
 The manual/voice runtime loads definitions during intent configuration, starts
 explicitly eager servers in a background warm-up, and discovers remaining trusted
 servers on the first unmatched lookup. Native matches do not wait for lazy MCP
-discovery. Optional servers discover concurrently and failures remain isolated.
+discovery. Explicit `mcp.<server>.<tool>` requests discover only their named server
+before deterministic matching, avoiding a first-use local-classifier wait.
+Unknown explicit tool names return unavailable without model interpretation.
+Optional servers discover concurrently and failures remain isolated.
 
 ## Configuration and trust
 

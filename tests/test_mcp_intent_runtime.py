@@ -82,6 +82,29 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
         self.assertTrue(result.tool_result.success)
         self.assertEqual(self.calls[0]["arguments"], {"message": "typed"})
+        self.generate.assert_not_called()
+
+    def test_explicit_unavailable_tool_never_calls_classifier_or_fallback(self):
+        self.configure()
+        for message in ("mcp.test.missing {}", "mcp.unknown.echo {}", "mcp.test"):
+            with self.subTest(message=message):
+                result = runtime.on_command(message, {})
+                self.assertIn("unavailable", result.response_text)
+        self.generate.assert_not_called()
+        self.fallback.assert_not_called()
+        self.assertEqual(self.calls, [])
+
+    def test_explicit_first_use_discovers_only_the_named_server(self):
+        definitions = [LocalServerDefinition(
+            name, "unused", trusted=True, allowed_tools=frozenset({"echo"}),
+        ) for name in ("test", "unrelated")]
+        manager = LocalMCPManager(definitions, transport=self.transport)
+        runtime.configure_intent_router({}, mcp_manager=manager)
+        self.addCleanup(runtime.shutdown_tools)
+        result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+        self.assertTrue(result.tool_result.success)
+        self.assertEqual([call.args[0].name for call in self.transport.request.call_args_list], ["test", "test"])
+        self.generate.assert_not_called()
 
     def test_invalid_arguments_never_invoke_or_fall_back(self):
         self.configure()
