@@ -7,15 +7,46 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import psutil
 
 from ai.intents import IntentRequest
 from ai.mcp.config import LocalServerDefinition
 from ai.mcp.runtime import LocalMCPManager
+from ai.mcp.session import PersistentSession, _Operation
+from ai.mcp.transport import failure
+from ai.tools.models import ToolResult
 
 
 class PersistentSessionTests(unittest.TestCase):
+    def test_completed_result_is_not_replaced_by_session_closed_error(self):
+        for expected in (
+            failure("timeout", "The operation timed out."),
+            failure("cancelled", "The operation was cancelled."),
+            ToolResult(True, {"message": "completed"}),
+        ):
+            with self.subTest(result=expected):
+                session = PersistentSession(LocalServerDefinition("test", "unused", trusted=True))
+                session._thread = object()  # Reproduce the handoff without a worker.
+                job = _Operation("invoke", {})
+                calls = 0
+
+                def completion_between_wait_and_closed_check(_timeout):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        job.result = expected
+                        job.done.set()
+                        session.done.set()
+                        return False  # Wait expired just before completion.
+                    return True
+
+                with patch("ai.mcp.session._Operation", return_value=job), \
+                     patch.object(job.done, "wait", side_effect=completion_between_wait_and_closed_check):
+                    result = session.request("invoke")
+                self.assertIs(result, expected)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
