@@ -12,6 +12,13 @@ from starlette.responses import JSONResponse, PlainTextResponse
 import uvicorn
 
 
+def publish_ready_port(ready: Path, port: int):
+    """Readers must never observe an existing but partially written ready file."""
+    temporary = ready.with_suffix(".tmp")
+    temporary.write_text(str(port), encoding="utf-8")
+    temporary.replace(ready)
+
+
 def main():
     ready, mode, actions = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
     server = MCPServer("coda-http-test", log_level="ERROR")
@@ -92,7 +99,7 @@ def main():
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
-    ready.write_text(str(port), encoding="utf-8")
+    publish_ready_port(ready, port)
     config = uvicorn.Config(authenticated, log_level="critical", access_log=False, lifespan="on")
     uvicorn.Server(config).run(sockets=[listener])
 

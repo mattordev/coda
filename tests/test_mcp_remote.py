@@ -94,6 +94,21 @@ class RemoteMCPTests(unittest.TestCase):
         self.assertNotIn("private-test-token", repr(found.servers))
         self.assertFalse(found.servers[1].trusted)
 
+    def test_ready_port_is_published_only_after_the_value_is_complete(self):
+        from tests.mcp_http_server import publish_ready_port
+        ready = self.directory / "ready"
+        original_write = Path.write_text
+
+        def interrupted_write(path, text, **options):
+            original_write(path, "", **options)
+            self.assertFalse(ready.exists(), "The reader could observe an empty ready file.")
+            return original_write(path, text, **options)
+
+        with patch.object(Path, "write_text", autospec=True, side_effect=interrupted_write):
+            publish_ready_port(ready, 12345)
+        self.assertEqual(ready.read_text(encoding="utf-8"), "12345")
+        self.assertFalse(ready.with_suffix(".tmp").exists())
+
     def test_invalid_endpoint_credentials_headers_and_limits_fail_safely(self):
         definition = self.definition("https://example.invalid/mcp")
         for changes in (

@@ -33,7 +33,7 @@ return useful tool output through the existing text and voice runtime.
 
 ## Validation
 
-- Full Windows Python 3.11 automated suite: 710 tests, with the opt-in offline
+- Full Windows Python 3.11 automated suite: 711 tests, with the opt-in offline
   updater environment smoke enabled and one expected platform-specific skip.
 - Release CI covers Windows and Ubuntu with Python 3.11 and 3.12; Pylint covers
   both supported Python versions.
