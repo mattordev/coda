@@ -109,6 +109,28 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertIn("file99.py", result.display_text)
         self.assertIs(result.tool_result, self.outcome)
 
+    def test_original_question_selects_directory_speech_without_changing_display(self):
+        self.configure()
+        self.outcome = ToolResult(True, {
+            "content": [{"type": "text", "text": "[FILE] a-old.py\n[FILE] b-new.py\n[DIR] project"}],
+            "structuredContent": {"kind": "directory_listing", "entries": [
+                {"name": "a-old.py", "type": "file", "modified_at": 1},
+                {"name": "b-new.py", "type": "file", "modified_at": 2},
+                {"name": "project", "type": "directory", "modified_at": 99},
+            ]},
+        })
+        overview = runtime.on_command("What's in this folder?", {})
+        recent = runtime.on_command("What have I edited recently?", {})
+        names = runtime.on_command("Read all filenames", {})
+        self.assertEqual(overview.response_text, "The listing contains 1 directory and 2 files.")
+        self.assertLess(recent.response_text.index("b-new.py"), recent.response_text.index("a-old.py"))
+        self.assertNotIn('"project"', recent.response_text)
+        self.assertLess(names.response_text.index("a-old.py"), names.response_text.index("b-new.py"))
+        self.assertEqual(overview.display_text, recent.display_text)
+        self.assertEqual(recent.display_text, names.display_text)
+        self.assertIs(names.tool_result, self.outcome)
+        self.fallback.assert_not_called()
+
     def test_bundled_filesystem_round_trip_through_manual_entrypoint(self):
         from ai.mcp.bundled import bundled_launch
         with tempfile.TemporaryDirectory() as directory:

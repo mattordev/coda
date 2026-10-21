@@ -79,11 +79,20 @@ when entries are partial; Coda will avoid claiming complete directory totals.
 Legacy text listings with one `[FILE] name` or `[DIR] name` per line also work.
 Counts and examples come only from the returned data.
 
-When every entry supplies a finite numeric `modified_at` Unix timestamp, spoken
-examples use the three most recently modified entries, newest first. Missing or
-invalid timestamps preserve the supplied order. The raw data and displayed
-listing are not reordered. Folder timestamps describe immediate directory-entry
-changes, not recursive edits inside a project.
+Speech selects a style from the original question:
+
+- **Overview** (default): counts of files and directories, without example names.
+- **Recent files** (for example, "What have I edited recently?"): the three most
+  recently modified files, newest first. All returned files need finite numeric
+  `modified_at` Unix timestamps; missing/invalid dates produce an honest fallback.
+- **All names** (for example, "Read all filenames"): names in the supplied order,
+  respecting file/folder filters and the speech budget.
+
+The raw data and displayed listing are not reordered. Explicit JSON command
+arguments and path names do not select a response style. Folder timestamps
+describe immediate directory-entry changes, not recursive edits inside a
+project. Recent project activity is explicitly unsupported until a separate
+bounded project scan is implemented.
 
 Requests for counts, files/folders, all names or a named entry influence speech; large exact-name
 requests still point to visual output when they exceed the speech budget.
