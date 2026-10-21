@@ -38,6 +38,12 @@ independent diagnosis. Arbitrary/unknown exceptions get an honest spoken
 fallback and detailed visual feedback. Coda never follows instructions in an
 error payload or replays the action to obtain a better error.
 
+Short plain-language errors can be quoted as a server report (for example,
+"The tool reported: The printer is offline."). Messages containing paths,
+tracebacks, credential terms, recognized secrets or instruction-like wording
+remain visual only. This is a conservative deterministic filter, not a semantic
+verification of a server's claims.
+
 If speech cannot explain a failure, inspect terminal/dashboard output and the
 local log. Missing server details remain unknown; check the server's own
 configuration and diagnostics. Raw SDK exception strings, subprocess stderr and
