@@ -38,12 +38,17 @@ def server_error(result):
         code = error.get("code") if isinstance(error.get("code"), str) else None
         message = error.get("message") if isinstance(error.get("message"), str) else ""
     blocks = result.data.get("content")
-    if not message and isinstance(blocks, list):
-        message = "\n".join(
+    if isinstance(blocks, list):
+        text = "\n".join(
             block["text"] for block in blocks
             if isinstance(block, dict) and block.get("type") == "text"
             and isinstance(block.get("text"), str)
         )
+        if text and text != message:
+            message = message + "\n" + text if message else text
+    diagnostic = result.data.get("diagnostic")
+    if isinstance(diagnostic, dict) and isinstance(diagnostic.get("exception_type"), str):
+        message += "\nException type: " + diagnostic["exception_type"]
     return code, message
 
 

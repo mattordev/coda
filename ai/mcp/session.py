@@ -49,6 +49,7 @@ class PersistentSession:
         active = None
         connected = False
         reason = None
+        exception_type = None
         deadline = time.monotonic() + self.definition.startup_timeout_seconds
 
         async def perform():
@@ -98,6 +99,7 @@ class PersistentSession:
             with _private_sdk_diagnostics():
                 anyio.run(perform)
         except Exception as error:
+            exception_type = type(error).__name__
             if _remote_error_code(error):
                 reason = _remote_error_code(error)
             elif _is_sdk_timeout(error):
@@ -108,7 +110,16 @@ class PersistentSession:
             self.stop.set()
             if active is not None and not active.done.is_set():
                 code = reason or ("mcp_protocol_error" if connected else "connection_error")
-                active.result = failure(code, "The MCP operation could not complete.")
+                messages = {
+                    "timeout": "The MCP operation timed out.",
+                    "cancelled": "The MCP operation was cancelled.",
+                    "configuration_error": "The MCP configuration is invalid.",
+                    "connection_error": "The MCP server could not be started or connected.",
+                    "mcp_protocol_error": "The MCP server returned an invalid response or disconnected.",
+                    "authentication_error": "The remote MCP request was rejected.",
+                    "output_limit": "The MCP response exceeded the configured output limit.",
+                }
+                active.result = failure(code, messages.get(code, "The MCP operation could not complete."), exception_type=exception_type)
                 active.done.set()
             self.done.set()
 
