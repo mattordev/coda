@@ -13,7 +13,8 @@ from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
-from ai.tools.presentation import prepare_tool_response
+from ai.tools.presentation import prepare_tool_display, prepare_tool_response
+from ai.tools.diagnostics import record_tool_failure
 from ai.tools.models import ToolResult
 from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStrategy, CommandPrefixStrategy
 from ai.privacy.sanitizer import sanitize_text
@@ -33,6 +34,7 @@ class CommandResult:
     open_follow_up: bool = False
     command_matches: tuple[str, ...] = ()
     tool_result: ToolResult | None = None
+    display_text: str | None = None
 
     def __bool__(self):
         return self.handled
@@ -220,10 +222,13 @@ def _tool_outcome(request, outcome, *, cancel_event=None):
         return CommandResult(handled=False)
     llm_service.record_tool_exchange(request.message, outcome)
     response = prepare_tool_response(outcome)
-    print(f"CODA: {response}")
+    display = prepare_tool_display(outcome)
+    if not outcome.success:
+        record_tool_failure(request.intent.name, display)
+    print(f"CODA: {display}")
     return CommandResult(
         handled=True, response_text=response, open_follow_up=True,
-        command_matches=(request.intent.name,), tool_result=outcome,
+        command_matches=(request.intent.name,), tool_result=outcome, display_text=display,
     )
 
 

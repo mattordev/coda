@@ -37,6 +37,7 @@ class ExecutionResult:
     open_follow_up: bool = False
     cancelled: bool = False
     error: str | None = None
+    display_text: str | None = None
     
 @dataclass(frozen=True)
 class SpeechTask:
