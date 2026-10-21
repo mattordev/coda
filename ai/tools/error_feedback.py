@@ -71,6 +71,18 @@ def spoken_error(result):
             "FileNotFoundError": ERROR_EXPLANATIONS["not_found"],
             "NotADirectoryError": ERROR_EXPLANATIONS["not_a_directory"],
         }[exception[1]]
+    # Short prose may be quoted as a server claim. Technical/private payloads
+    # stay on screen; no text is parsed into actions or fed to a summarizing model.
+    prose = details.strip()
+    unsafe = re.search(
+        r"[\r\n]|[A-Za-z]:[\\/]|(?:^|\s)[\\/]|https?://|"
+        r"\b(?:\w*Error|traceback|token|secret|password|credentials?|api[_ -]?key)\b|"
+        r"\b(?:ignore|instructions?|system prompt|execute|commands?|delete|transfer)\b|"
+        r"^Error executing tool",
+        prose, re.IGNORECASE,
+    )
+    if 2 <= len(prose.split()) <= 35 and len(prose) <= 220 and not unsafe and safe_diagnostic(prose) == prose:
+        return "The tool reported: " + prose
     return "The tool reported a failure. I couldn't determine the reason. Details are available on screen."
 
 
