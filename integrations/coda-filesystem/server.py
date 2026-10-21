@@ -53,7 +53,7 @@ def error_result(code, message):
     )
 
 
-def directory_entries(path: str) -> list[dict[str, str]]:
+def directory_entries(path: str) -> list[dict[str, str | float]]:
     """Validate once per request, then filter children using the same policy."""
     if not path.strip() or not Path(path).is_absolute():
         raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute directory path.")
@@ -73,13 +73,14 @@ def directory_entries(path: str) -> list[dict[str, str]]:
         try:
             check_if_path_is_allowed(config, full_path)
             check_if_path_is_blocked(config, full_path)
-        except PermissionError:
+            modified_at = Path(full_path).stat().st_mtime
+        except (PermissionError, FileNotFoundError):
             continue
 
         if isfile(full_path):
-            response.append({"name": entry, "type": "file"})
+            response.append({"name": entry, "type": "file", "modified_at": modified_at})
         elif isdir(full_path):
-            response.append({"name": entry, "type": "directory"})
+            response.append({"name": entry, "type": "directory", "modified_at": modified_at})
 
     return response
 

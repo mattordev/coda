@@ -132,7 +132,7 @@ class MCPIntentRuntimeTests(unittest.TestCase):
             self.assertIn("1 file", result.response_text)
             self.assertEqual(result.display_text, "[FILE] main.py")
             self.assertEqual(history.get_recent_tool_result().data["structuredContent"]["entries"],
-                             [{"name": "main.py", "type": "file"}])
+                             [{"name": "main.py", "type": "file", "modified_at": (allowed / "main.py").stat().st_mtime}])
             self.generate.assert_not_called()
             self.fallback.assert_not_called()
 

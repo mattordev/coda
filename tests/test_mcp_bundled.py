@@ -91,7 +91,7 @@ class BundledMCPTests(unittest.TestCase):
                                                         arguments={"path": str(allowed)})
                     self.assertTrue(result.success, result.error)
                     self.assertEqual(result.data["structuredContent"]["entries"], [{
-                        "name": "main.py", "type": "file",
+                        "name": "main.py", "type": "file", "modified_at": (allowed / "main.py").stat().st_mtime,
                     }])
 
     def test_missing_or_linked_entrypoint_is_rejected(self):
@@ -143,7 +143,9 @@ class BundledMCPTests(unittest.TestCase):
                         self.assertEqual(found.data["tools"][0]["name"], "list_directory")
                         result = transport.request(current, "invoke", tool_name="list_directory", arguments={"path": str(allowed)})
                         self.assertTrue(result.success, result.error)
-                        self.assertEqual(result.data["structuredContent"]["entries"], [{"name": "main.py", "type": "file"}])
+                        self.assertEqual(result.data["structuredContent"]["entries"], [{
+                            "name": "main.py", "type": "file", "modified_at": (allowed / "main.py").stat().st_mtime,
+                        }])
                         self.assertNotIn(".env", prepare_tool_display(result))
                         self.assertIn("main.py", prepare_tool_response(result))
                         denied = transport.request(current, "invoke", tool_name="list_directory", arguments={"path": str(root)})

@@ -8,6 +8,30 @@ from ai.tools.presentation import prepare_tool_display, prepare_tool_response
 
 
 class ToolResultSummaryTests(unittest.TestCase):
+    def test_recent_examples_do_not_reorder_raw_data_or_include_older_entries(self):
+        entries = [{"name": "a-old", "type": "file", "modified_at": 1},
+                   {"name": "b-new", "type": "file", "modified_at": 4},
+                   {"name": "c-next", "type": "directory", "modified_at": 3},
+                   {"name": "d-third", "type": "file", "modified_at": 2}]
+        result = self.listing(entries)
+        original = deepcopy(result.data)
+        speech = prepare_tool_response(result)
+        self.assertNotIn('"a-old"', speech)
+        self.assertLess(speech.index("b-new"), speech.index("c-next"))
+        self.assertLess(speech.index("c-next"), speech.index("d-third"))
+        self.assertEqual(result.data, original)
+        files = prepare_tool_response(result, question="Which files are there?")
+        self.assertLess(files.index("d-third"), files.index("a-old"))
+        self.assertNotIn('"c-next"', files)
+
+    def test_missing_or_invalid_timestamps_keep_original_order(self):
+        for timestamp in (None, True, "yesterday", float("nan"), float("inf")):
+            with self.subTest(timestamp=timestamp):
+                entries = [{"name": "first", "type": "file", "modified_at": timestamp},
+                           {"name": "second", "type": "file", "modified_at": 100}]
+                speech = prepare_tool_response(self.listing(entries))
+                self.assertLess(speech.index("first"), speech.index("second"))
+
     def listing(self, entries, **extra):
         return ToolResult(True, {"structuredContent": {
             "kind": "directory_listing", "entries": entries, **extra,
