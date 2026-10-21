@@ -16,8 +16,36 @@ from runtime.messages import (
 )
 from runtime.runtime_queue import RuntimeQueues
 from runtime.follow_up import FollowUpState
+from ai.tools.models import ToolResult
 
 class RuntimeExecutionTests(unittest.TestCase):
+
+    def test_runtime_displays_details_queues_summary_and_retains_full_result(self):
+        queues = RuntimeQueues()
+        stop_event = threading.Event()
+        request = RuntimeRequest("list directory", InputSource.MANUAL)
+        raw = ToolResult(True, {"entries": ["one", "two"]})
+        command_result = SimpleNamespace(
+            handled=True, response_text="There are two entries.",
+            display_text="[FILE] one\n[FILE] two", tool_result=raw, open_follow_up=False,
+        )
+        with (patch.object(coda_runtime, "runtime_queues", queues),
+              patch.object(coda_runtime.command, "run", return_value=command_result),
+              patch.object(coda_runtime.dashboard_state, "record_ai_response") as display,
+              patch("builtins.print")):
+            worker = threading.Thread(target=coda_runtime._execution_loop, args=(stop_event,))
+            worker.start()
+            try:
+                queues.requests.put(request)
+                result = queues.events.get(timeout=3)
+                task = queues.speech.get(timeout=3)
+            finally:
+                stop_event.set()
+                worker.join(timeout=3)
+        self.assertIs(result.tool_result, raw)
+        self.assertEqual(task.text, command_result.response_text)
+        display.assert_called_once_with(command_result.display_text, source="tts")
+        self.assertFalse(worker.is_alive())
 
     def test_detailed_display_and_speech_survive_execution_conversion(self):
         request = RuntimeRequest("list directory", InputSource.MANUAL)

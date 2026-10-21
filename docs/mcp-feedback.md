@@ -5,6 +5,15 @@ MCP results have separate data, visual and spoken representations. The full
 mutates it. Conversation history continues to use `prepare_tool_context`, with
 its existing local/cloud privacy rules and size limits.
 
+The execution event also carries the full `tool_result` (excluded from its
+repr). The last eight complete results are retained as local snapshots until
+conversation reset; host code can use `utils.llm_service.get_recent_tool_result()`
+for subsequent processing. Returned snapshots cannot mutate stored results.
+These are not automatically sent to models: apply `prepare_tool_context` before
+any model exposure. Model-visible excerpts are explicitly labeled untrusted
+data, with a matching system instruction. Retention is in memory only and
+bounded by result count and the existing per-server output limit.
+
 ## Failures
 
 The SDK error envelope already survives in `ToolResult.data`. Coda keeps the
@@ -42,6 +51,9 @@ If speech cannot explain a failure, inspect terminal/dashboard output and the
 local log. Missing server details remain unknown; check the server's own
 configuration and diagnostics. Raw SDK exception strings, subprocess stderr and
 stack traces are not automatically enabled or forwarded.
+Host adapter exceptions use `mcp_internal_error`; visual diagnostics retain the
+exception type without exposing arbitrary private exception strings. SDK and
+connection/protocol failures also retain exception types where available.
 
 ## Successful results
 

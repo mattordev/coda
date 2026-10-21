@@ -109,6 +109,33 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertIn("file99.py", result.display_text)
         self.assertIs(result.tool_result, self.outcome)
 
+    def test_bundled_filesystem_round_trip_through_manual_entrypoint(self):
+        from ai.mcp.bundled import bundled_launch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            allowed = root / "allowed"
+            allowed.mkdir()
+            (allowed / "main.py").touch()
+            config = root / "permissions.json"
+            config.write_text(json.dumps({"read": {
+                "allowed_roots": [str(allowed)], "blocked_paths": [],
+            }}), encoding="utf-8")
+            command, args = bundled_launch("filesystem")
+            manager = LocalMCPManager([LocalServerDefinition(
+                "filesystem", command, (*args, "--config", str(config)), trusted=True,
+                allowed_tools=frozenset({"list_directory"}),
+            )])
+            runtime.configure_intent_router({}, mcp_manager=manager)
+            self.addCleanup(runtime.shutdown_tools)
+            result = runtime.on_command('mcp.filesystem.list_directory ' + json.dumps({"path": str(allowed)}), {})
+            self.assertTrue(result.tool_result.success, result.tool_result.error)
+            self.assertIn("1 file", result.response_text)
+            self.assertEqual(result.display_text, "[FILE] main.py")
+            self.assertEqual(history.get_recent_tool_result().data["structuredContent"]["entries"],
+                             [{"name": "main.py", "type": "file"}])
+            self.generate.assert_not_called()
+            self.fallback.assert_not_called()
+
     def test_first_natural_language_request_classifies_once_with_native_and_mcp_catalog(self):
         native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
         commands = {"say": native}
