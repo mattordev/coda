@@ -84,6 +84,22 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertEqual(self.calls[0]["arguments"], {"message": "typed"})
         self.generate.assert_not_called()
 
+    def test_server_failure_keeps_diagnostics_separate_from_speech_and_context(self):
+        self.configure()
+        self.outcome = ToolResult(False, {
+            "isError": True, "content": [{"type": "text", "text": "PermissionError: /private/location"}],
+        }, ToolError("mcp_tool_error", "The MCP tool reported a failure."))
+        with patch.object(runtime, "record_tool_failure") as log, patch("builtins.print") as output:
+            result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+        self.assertIn("permission", result.response_text)
+        self.assertNotIn("/private/location", result.response_text)
+        self.assertIn("/private/location", result.display_text)
+        self.assertIs(result.tool_result, self.outcome)
+        self.assertIn("/private/location", history.conversation_log[-1]["content"])
+        log.assert_called_once_with("mcp.test.echo", result.display_text)
+        output.assert_called_once_with(f"CODA: {result.display_text}")
+        self.fallback.assert_not_called()
+
     def test_first_natural_language_request_classifies_once_with_native_and_mcp_catalog(self):
         native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
         commands = {"say": native}
