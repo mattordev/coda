@@ -107,7 +107,7 @@ class PersistentSessionTests(unittest.TestCase):
         for worker in workers:
             worker.join(20)
             self.assertFalse(worker.is_alive())
-        self.assertTrue(all(result.success for result in results))
+        self.assertTrue(all(result.success for result in results), results)
         first = self.invoke(manager).data["structuredContent"]
         self.assertEqual(first["pid"], int(self.pid.read_text()))
         self.assertEqual(self.invoke(manager).data["structuredContent"]["count"], 2)

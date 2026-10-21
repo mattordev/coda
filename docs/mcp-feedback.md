@@ -60,6 +60,9 @@ stack traces are not automatically enabled or forwarded.
 Host adapter exceptions use `mcp_internal_error`; visual diagnostics retain the
 exception type without exposing arbitrary private exception strings. SDK and
 connection/protocol failures also retain exception types where available.
+Queued callers waiting for a cold server launch receive the configured startup
+allowance as well as the normal wait budget. Waiting behind an already-connected
+operation still uses only the normal timeout.
 
 ## Successful results
 
