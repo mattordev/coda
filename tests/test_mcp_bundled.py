@@ -50,6 +50,35 @@ class BundledMCPTests(unittest.TestCase):
                     self.assertEqual(found.servers, ())
                     self.assertIn("filesystem.json", found.errors)
 
+    def test_same_definition_really_launches_from_two_relocated_installations(self):
+        source = bundled.INSTALL_ROOT / "integrations" / "coda-filesystem" / "server.py"
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            allowed = base / "allowed"
+            allowed.mkdir()
+            (allowed / "main.py").touch()
+            definition_json = json.dumps({"id": "filesystem", "bundled_server": "filesystem",
+                                          "trusted": True, "allowed_tools": ["list_directory"]})
+            for name in ("install one", "relocated-安装"):
+                with self.subTest(installation=name):
+                    root = base / name
+                    server_dir = root / "integrations" / "coda-filesystem"
+                    server_dir.mkdir(parents=True)
+                    (server_dir / "server.py").write_bytes(source.read_bytes())
+                    (server_dir / "filesystem.config.json").write_text(json.dumps({"read": {
+                        "allowed_roots": [str(allowed)], "blocked_paths": [],
+                    }}), encoding="utf-8")
+                    configs = root / "mcp_servers"
+                    configs.mkdir()
+                    (configs / "filesystem.json").write_text(definition_json, encoding="utf-8")
+                    with patch.object(bundled, "INSTALL_ROOT", root):
+                        found = discover_definitions(configs)
+                    self.assertEqual(found.errors, {})
+                    result = SDKStdioTransport().request(found.servers[0], "invoke", tool_name="list_directory",
+                                                        arguments={"path": str(allowed)})
+                    self.assertTrue(result.success, result.error)
+                    self.assertEqual(result.data["structuredContent"]["entries"], [{"name": "main.py", "type": "file"}])
+
     def test_missing_or_linked_entrypoint_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(bundled, "INSTALL_ROOT", Path(directory)):
             with self.assertRaises(ValueError):

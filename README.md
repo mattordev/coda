@@ -429,6 +429,8 @@ Commands are self-registering modules that own their intent metadata and
 - [Local Text-to-Speech](docs/local-tts.md)
 - [LLM Providers](docs/providers.md)
 - [Privacy Routing](docs/privacy-routing.md)
+- [MCP display, speech and failure feedback](docs/mcp-feedback.md)
+- [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
 
 ## AI-Assisted Development
 
