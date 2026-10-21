@@ -100,6 +100,15 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         output.assert_called_once_with(f"CODA: {result.display_text}")
         self.fallback.assert_not_called()
 
+    def test_large_listing_keeps_visual_result_and_question_specific_speech(self):
+        self.configure()
+        text = "\n".join(f"[FILE] file{i}.py" for i in range(100))
+        self.outcome = ToolResult(True, {"content": [{"type": "text", "text": text}]})
+        result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+        self.assertIn("100 files", result.response_text)
+        self.assertIn("file99.py", result.display_text)
+        self.assertIs(result.tool_result, self.outcome)
+
     def test_first_natural_language_request_classifies_once_with_native_and_mcp_catalog(self):
         native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))
         commands = {"say": native}
