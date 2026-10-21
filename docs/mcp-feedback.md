@@ -92,6 +92,10 @@ Filename dots are rendered as the word "dot" in spoken names, including leading
 dots and multiple extensions (".gitignore", "archive.tar.gz"). Names are sanitized
 before punctuation changes. Displayed names and retained data preserve their
 original spelling; ordinary sentence punctuation is not rewritten.
+Known final file extensions also use explicit spoken forms: ".md" becomes
+"dot markdown" and ".json" becomes "dot jay son", case-insensitively. Unknown
+extensions retain their spelling, and folder names are not treated as file
+extensions.
 
 The raw data and displayed listing are not reordered. Explicit JSON command
 arguments and path names do not select a response style. Folder timestamps

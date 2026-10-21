@@ -120,7 +120,7 @@ class ToolResultSummaryTests(unittest.TestCase):
 
     def test_filename_dots_are_spoken_while_display_and_raw_names_stay_exact(self):
         from tts.spoken_text import normalise_spoken_text
-        for name, spoken in (("dashboard_state.json", "dashboard_state dot json"),
+        for name, spoken in (("dashboard_state.json", "dashboard_state dot jay son"),
                              ("archive.tar.gz", "archive dot tar dot gz"),
                              (".gitignore", "dot gitignore")):
             with self.subTest(name=name):
@@ -132,6 +132,22 @@ class ToolResultSummaryTests(unittest.TestCase):
                     self.assertIn(spoken, normalise_spoken_text(speech))
                 self.assertIn(name, prepare_tool_display(result))
                 self.assertEqual(result.data, original)
+
+    def test_known_file_extensions_have_explicit_spoken_pronunciation(self):
+        for name, kind, spoken in (
+            ("README.md", "file", "README dot markdown"),
+            ("NOTES.MD", "file", "NOTES dot markdown"),
+            ("settings.JSON", "file", "settings dot jay son"),
+            ("notes.backup.md", "file", "notes dot backup dot markdown"),
+            ("unknown.xyz", "file", "unknown dot xyz"),
+            ("project.md", "directory", "project dot md"),
+        ):
+            with self.subTest(name=name, kind=kind):
+                result = self.listing([{"name": name, "type": kind}])
+                speech = prepare_tool_response(result, question="Read all names")
+                self.assertIn('"' + spoken + '"', speech)
+                self.assertIn(name, prepare_tool_display(result))
+                self.assertEqual(result.data["structuredContent"]["entries"][0]["name"], name)
 
     def test_partial_results_do_not_claim_complete_totals(self):
         speech = prepare_tool_response(self.listing([{"name": "one", "type": "file"}], truncated=True))

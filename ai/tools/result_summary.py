@@ -7,6 +7,9 @@ import re
 from ai.privacy.sanitizer import sanitize_text
 
 
+_SPOKEN_EXTENSIONS = {"md": "markdown", "json": "jay son"}
+
+
 def _payload(data):
     if isinstance(data, dict) and data.get("structuredContent") is not None:
         return data["structuredContent"]
@@ -43,7 +46,11 @@ def _names(entries, limit):
     # Filename dots must be words for TTS, rather than sentence-ending pauses.
     names = []
     for entry in entries[:limit]:
-        name = sanitize_text(entry["name"])[:80].replace("\n", " ")
+        original = sanitize_text(entry["name"])
+        name = original[:80].replace("\n", " ")
+        stem, dot, extension = name.rpartition(".")
+        if stem and entry["type"] == "file" and len(original) <= 80:
+            name = stem + dot + _SPOKEN_EXTENSIONS.get(extension.casefold(), extension)
         name = re.sub(r"\s+", " ", name.replace(".", " dot ")).strip()
         names.append('"' + name + '"')
     return ", ".join(names)
