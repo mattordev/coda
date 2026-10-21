@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Event
+from ai.tools.models import ToolResult
 import time
 import uuid
 
@@ -38,6 +39,7 @@ class ExecutionResult:
     cancelled: bool = False
     error: str | None = None
     display_text: str | None = None
+    tool_result: ToolResult | None = field(default=None, repr=False)
     
 @dataclass(frozen=True)
 class SpeechTask:

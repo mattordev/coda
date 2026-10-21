@@ -364,6 +364,7 @@ def _create_execution_result(
         handled=command_result.handled,
         response_text=command_result.response_text,
         display_text=getattr(command_result, "display_text", None),
+        tool_result=getattr(command_result, "tool_result", None),
         open_follow_up=(
             command_result.open_follow_up
             and request.source == InputSource.VOICE
