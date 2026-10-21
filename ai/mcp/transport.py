@@ -20,8 +20,9 @@ from ai.mcp.remote import RemoteServerDefinition
 from ai.tools.models import ToolError, ToolResult
 
 
-def failure(code: str, message: str) -> ToolResult:
-    return ToolResult(success=False, error=ToolError(code=code, message=message))
+def failure(code: str, message: str, *, exception_type: str | None = None) -> ToolResult:
+    data = {"diagnostic": {"exception_type": exception_type}} if exception_type else None
+    return ToolResult(success=False, data=data, error=ToolError(code=code, message=message))
 
 
 def _is_sdk_timeout(error: BaseException) -> bool:
@@ -244,6 +245,7 @@ class SDKStdioTransport:
                     "mcp_protocol_error" if connected else "connection_error",
                     "The MCP server returned an invalid response or disconnected."
                     if connected else "The MCP server could not be started or connected.",
+                    exception_type=type(error).__name__,
                 )
         if reason is not None:
             return failure(

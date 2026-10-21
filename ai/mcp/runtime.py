@@ -120,8 +120,11 @@ class LocalMCPManager:
                 )
                 if not isinstance(result, ToolResult):
                     result = failure("mcp_protocol_error", "The MCP response was invalid.")
-            except Exception:
-                result = failure("connection_error", "The MCP operation could not complete.")
+            except Exception as error:
+                result = failure(
+                    "mcp_internal_error", "An unexpected error prevented the MCP operation from completing.",
+                    exception_type=type(error).__name__,
+                )
             with self._metadata_lock:
                 if runtime.retire_requests or generation != runtime.generation or (
                     cancel_event is not None and cancel_event.is_set()

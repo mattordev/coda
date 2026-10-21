@@ -50,6 +50,15 @@ class MCPSDKBoundaryTests(unittest.TestCase):
 
 
 class MCPLifecycleTests(unittest.TestCase):
+    def test_unexpected_transport_adapter_exception_has_its_own_error_category(self):
+        transport = Mock()
+        transport.request.side_effect = RuntimeError("private-internal-token")
+        manager = LocalMCPManager([LocalServerDefinition("test", "unused", trusted=True)], transport=transport)
+        result = manager.discover("test")
+        self.assertEqual(result.error.code, "mcp_internal_error")
+        self.assertEqual(result.data["diagnostic"]["exception_type"], "RuntimeError")
+        self.assertNotIn("private-internal-token", repr(result))
+
     def test_retirement_prevents_new_work_until_cleanup_finishes(self):
         active = Event()
         cleanup_started = Event()
