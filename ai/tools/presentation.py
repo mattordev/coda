@@ -5,6 +5,7 @@ import json
 from ai.privacy.sanitizer import sanitize_text
 from ai.tools.models import ToolResult
 from ai.tools.error_feedback import error_display, safe_diagnostic, spoken_error
+from ai.tools.result_summary import summarize_result
 
 
 def _readable(value, *, depth=0, max_items=20):
@@ -39,7 +40,7 @@ def _readable(value, *, depth=0, max_items=20):
     return ""
 
 
-def prepare_tool_response(result: ToolResult, *, max_chars: int = 1200) -> str:
+def prepare_tool_response(result: ToolResult, *, max_chars: int = 1200, question: str = "") -> str:
     """Prefer server text, fall back to structured values, never speak metadata."""
     if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
         raise ValueError("Tool response limit must be a positive integer.")
@@ -61,7 +62,7 @@ def prepare_tool_response(result: ToolResult, *, max_chars: int = 1200) -> str:
             text = ""
         else:
             text = _readable(data)
-        text = text or "Tool completed."
+        text = summarize_result(result.data, text, question) or text or "Tool completed."
     text = sanitize_text(text)
     if len(text) > max_chars:
         return text[:max_chars - 1].rstrip() + "…"

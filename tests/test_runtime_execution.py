@@ -19,6 +19,14 @@ from runtime.follow_up import FollowUpState
 
 class RuntimeExecutionTests(unittest.TestCase):
 
+    def test_detailed_display_and_speech_survive_execution_conversion(self):
+        request = RuntimeRequest("list directory", InputSource.MANUAL)
+        command = SimpleNamespace(handled=True, response_text="There are 100 files.",
+                                  display_text="[FILE] full listing", open_follow_up=False)
+        result = coda_runtime._create_execution_result(request, command)
+        self.assertEqual(result.response_text, "There are 100 files.")
+        self.assertEqual(result.display_text, "[FILE] full listing")
+
     def test_execution_loop_processes_queued_request(self):
         queues = RuntimeQueues()
         stop_event = threading.Event()
