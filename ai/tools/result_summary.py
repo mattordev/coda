@@ -1,6 +1,7 @@
 """Deterministic summaries of returned data; no model calls or tool execution."""
 
 import json
+from math import isfinite
 import re
 
 
@@ -20,6 +21,15 @@ def _directory_entries(data, text):
         )):
             if all(isinstance(entry, dict) and isinstance(entry.get("name"), str)
                    and entry.get("type") in ("file", "directory", "dir") for entry in entries):
+                # Missing/invalid metadata must not masquerade as a known date.
+                # sorted() leaves the original alphabetical display data intact.
+                if entries and all(
+                    isinstance(entry.get("modified_at"), (int, float))
+                    and not isinstance(entry["modified_at"], bool)
+                    and (isinstance(entry["modified_at"], int) or isfinite(entry["modified_at"]))
+                    for entry in entries
+                ):
+                    entries = sorted(entries, key=lambda entry: entry["modified_at"], reverse=True)
                 return [(entry["name"], "directory" if entry["type"] == "dir" else entry["type"])
                         for entry in entries], payload.get("truncated") is True
     # The speech renderer may limit content blocks; counts must use every

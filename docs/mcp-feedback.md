@@ -77,8 +77,15 @@ An empty `entries` array means no accessible entries were returned, not proof
 that the underlying directory has no blocked children. Set `truncated: true`
 when entries are partial; Coda will avoid claiming complete directory totals.
 Legacy text listings with one `[FILE] name` or `[DIR] name` per line also work.
-Counts and examples come only from the returned data. Requests for counts,
-files/folders, all names or a named entry influence speech; large exact-name
+Counts and examples come only from the returned data.
+
+When every entry supplies a finite numeric `modified_at` Unix timestamp, spoken
+examples use the three most recently modified entries, newest first. Missing or
+invalid timestamps preserve the supplied order. The raw data and displayed
+listing are not reordered. Folder timestamps describe immediate directory-entry
+changes, not recursive edits inside a project.
+
+Requests for counts, files/folders, all names or a named entry influence speech; large exact-name
 requests still point to visual output when they exceed the speech budget.
 
 Generic large arrays get item counts, and long unrecognized text is signposted
