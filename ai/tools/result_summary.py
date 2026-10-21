@@ -21,16 +21,7 @@ def _directory_entries(data, text):
         )):
             if all(isinstance(entry, dict) and isinstance(entry.get("name"), str)
                    and entry.get("type") in ("file", "directory", "dir") for entry in entries):
-                # Missing/invalid metadata must not masquerade as a known date.
-                # sorted() leaves the original alphabetical display data intact.
-                if entries and all(
-                    isinstance(entry.get("modified_at"), (int, float))
-                    and not isinstance(entry["modified_at"], bool)
-                    and (isinstance(entry["modified_at"], int) or isfinite(entry["modified_at"]))
-                    for entry in entries
-                ):
-                    entries = sorted(entries, key=lambda entry: entry["modified_at"], reverse=True)
-                return [(entry["name"], "directory" if entry["type"] == "dir" else entry["type"])
+                return [dict(entry, type="directory" if entry["type"] == "dir" else entry["type"])
                         for entry in entries], payload.get("truncated") is True
     # The speech renderer may limit content blocks; counts must use every
     # returned listing block, not just the excerpt prepared for reading.
@@ -40,31 +31,57 @@ def _directory_entries(data, text):
                          and isinstance(block.get("text"), str))
     lines = text.splitlines()
     if lines and all(re.fullmatch(r"\[(FILE|DIR)\] .+", line) for line in lines):
-        return [(line.split(" ", 1)[1], "file" if line.startswith("[FILE]") else "directory")
+        return [{"name": line.split(" ", 1)[1], "type": "file" if line.startswith("[FILE]") else "directory"}
                 for line in lines], False
     return None
 
 
 def _names(entries, limit):
     # Names remain quoted data. Bound each value independently before joining.
-    return ", ".join('"' + name[:80].replace("\n", " ") + '"' for name, _ in entries[:limit])
+    return ", ".join('"' + entry["name"][:80].replace("\n", " ") + '"' for entry in entries[:limit])
+
+
+def _question_text(question):
+    """Explicit JSON arguments and path names are data, not presentation requests."""
+    question = question.casefold().strip()
+    if re.match(r"mcp\.[\w.-]+\s*\{", question):
+        return ""
+    question = re.sub(r'''(["'])[^"']*[\\/][^"']*\1''', "", question)
+    return re.sub(r"(?:[a-z]:[\\/]|/|~[\\/])\S+", "", question)
+
+
+def _presentation_style(question):
+    """Select presentation independently from extracting directory facts."""
+    if re.search(r"\b(?:recent(?:ly)?|latest|newest|last\s+(?:edited|modified|changed))\b(?!\.)", question):
+        return "recent_files"
+    if re.search(r"\b(?:all|every|exact)\s+(?:the\s+)?(?:file\s*names?|files?|entries|folders|directories|names)\b|"
+                 r"\b(?:read|list|say)\s+(?:out\s+)?(?:the\s+)?(?:file\s*names?|names|everything)\b", question):
+        return "all_names"
+    return "overview"
+
+
+def _valid_modified_at(entry):
+    value = entry.get("modified_at")
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and (
+        isinstance(value, int) or isfinite(value)
+    )
 
 
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
     directory = _directory_entries(data, text)
-    question = question.casefold()
+    question = _question_text(question)
     if directory is not None:
         entries, partial = directory
         if not entries:
             return "No accessible entries were returned." if partial else "There are no accessible entries in that directory."
         # Answer an explicit filename question from the returned entries only.
         specific = [entry for entry in entries if re.search(
-            r"(?<![\w.])" + re.escape(entry[0].casefold()) + r"(?![\w.])", question
+            r"(?<![\w.])" + re.escape(entry["name"].casefold()) + r"(?![\w.])", question
         )] if re.search(r"\b(is|does|find|contain|has|have)\b", question) else []
         if specific:
             return "The listing includes " + _names(specific, 3) + "."
-        files = sum(kind == "file" for _, kind in entries)
+        files = sum(entry["type"] == "file" for entry in entries)
         directories = len(entries) - files
         counts = []
         if directories:
@@ -75,22 +92,34 @@ def summarize_result(data, text, question):
         counts_text = prefix + " and ".join(counts) + "."
         if re.search(r"\b(how many|count|number of)\b", question):
             return counts_text
+        style = _presentation_style(question)
+        partial_note = " This is a partial result." if partial else ""
+        if style == "overview":
+            return counts_text + partial_note
+        if style == "recent_files":
+            if re.search(r"\bprojects?\b", question):
+                return counts_text + " Recent project activity needs a scan inside each project, which isn't supported yet."
+            selected = [entry for entry in entries if entry["type"] == "file"]
+            if not selected:
+                return counts_text + " No files were returned." + partial_note
+            if not all(_valid_modified_at(entry) for entry in selected):
+                return counts_text + " Modification times are missing or invalid, so I can't reliably identify the most recently edited files." + partial_note
+            selected = sorted(selected, key=lambda entry: entry["modified_at"], reverse=True)
+            return counts_text + " The most recently modified files returned are " + _names(selected, 3) + "." + partial_note
         selected = entries
         if re.search(r"\b(files|filenames)\b", question) and not re.search(r"\b(directories|folders)\b", question):
-            selected = [entry for entry in entries if entry[1] == "file"]
+            selected = [entry for entry in entries if entry["type"] == "file"]
         elif re.search(r"\b(directories|folders)\b", question) and not re.search(r"\bfiles\b", question):
-            selected = [entry for entry in entries if entry[1] == "directory"]
+            selected = [entry for entry in entries if entry["type"] == "directory"]
         if not selected:
             return counts_text + " No matching entries were returned."
-        explicit = bool(re.search(r"\b(all|every|exact)\b", question))
-        limit = len(selected) if explicit else 3
+        limit = len(selected)
         names = _names(selected, limit)
         # Exact requests still have a speech budget; explicitly point to the rest.
         if len(names) > 750:
             names = _names(selected, 5)
             limit = 5
         suffix = " The remaining entries are kept in the full result; see the detailed output on screen." if len(selected) > limit else ""
-        partial_note = " This is a partial result." if partial else ""
         return counts_text + " Entries include " + names + "." + suffix + partial_note
 
     payload = _payload(data)

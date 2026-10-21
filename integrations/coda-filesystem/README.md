@@ -6,7 +6,8 @@ This is a standalone, read-only MCP server using the same SDK as Coda.
 so Coda can explain them without speaking private paths.
 
 Each entry also supplies its `modified_at` timestamp. The displayed listing stays
-alphabetical; Coda uses the newest modification times to choose spoken examples.
+alphabetical. General requests get spoken counts, recent-edits requests get the
+three newest files, and explicit filename requests get names within the speech limit.
 Folder timestamps reflect changes to immediate entries, not edits throughout a project.
 
 ## Enable in Coda

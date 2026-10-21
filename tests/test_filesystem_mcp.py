@@ -60,7 +60,8 @@ class FilesystemMCPTests(unittest.TestCase):
         entries = result.structured_content["entries"]
         self.assertEqual([entry["modified_at"] for entry in entries], [1000, 4000, 3000, 2000])
         self.assertEqual(result.content[0].text.splitlines()[0], "[FILE] a-old.py")
-        speech = prepare_tool_response(ToolResult(True, result.model_dump(mode="json", by_alias=True)))
+        speech = prepare_tool_response(ToolResult(True, result.model_dump(mode="json", by_alias=True)),
+                                       question="What have I edited recently?")
         self.assertNotIn("a-old.py", speech)
         self.assertLess(speech.index("b-new.py"), speech.index("c-next.py"))
         self.assertLess(speech.index("c-next.py"), speech.index("d-third.py"))
