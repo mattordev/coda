@@ -430,6 +430,14 @@ Commands are self-registering modules that own their intent metadata and
 - [LLM Providers](docs/providers.md)
 - [Privacy Routing](docs/privacy-routing.md)
 
+## AI-Assisted Development
+
+Coda is developed with substantial AI assistance, particularly
+since approximately v1.2.0.
+
+For details about AI involvement, development practices,
+human oversight, and learning objectives, see [AI_USAGE.md](AI_USAGE.md).
+
 ## Licence
 
 CODA is licensed under the GNU AGPLv3. See [LICENCE.md](LICENCE.md).
