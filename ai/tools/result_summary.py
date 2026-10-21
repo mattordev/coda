@@ -4,6 +4,8 @@ import json
 from math import isfinite
 import re
 
+from ai.privacy.sanitizer import sanitize_text
+
 
 def _payload(data):
     if isinstance(data, dict) and data.get("structuredContent") is not None:
@@ -37,8 +39,14 @@ def _directory_entries(data, text):
 
 
 def _names(entries, limit):
-    # Names remain quoted data. Bound each value independently before joining.
-    return ", ".join('"' + entry["name"][:80].replace("\n", " ") + '"' for entry in entries[:limit])
+    # Redact before transforming punctuation so secrets remain recognizable.
+    # Filename dots must be words for TTS, rather than sentence-ending pauses.
+    names = []
+    for entry in entries[:limit]:
+        name = sanitize_text(entry["name"])[:80].replace("\n", " ")
+        name = re.sub(r"\s+", " ", name.replace(".", " dot ")).strip()
+        names.append('"' + name + '"')
+    return ", ".join(names)
 
 
 def _question_text(question):

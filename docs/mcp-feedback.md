@@ -88,6 +88,11 @@ Speech selects a style from the original question:
 - **All names** (for example, "Read all filenames"): names in the supplied order,
   respecting file/folder filters and the speech budget.
 
+Filename dots are rendered as the word "dot" in spoken names, including leading
+dots and multiple extensions (".gitignore", "archive.tar.gz"). Names are sanitized
+before punctuation changes. Displayed names and retained data preserve their
+original spelling; ordinary sentence punctuation is not rewritten.
+
 The raw data and displayed listing are not reordered. Explicit JSON command
 arguments and path names do not select a response style. Folder timestamps
 describe immediate directory-entry changes, not recursive edits inside a

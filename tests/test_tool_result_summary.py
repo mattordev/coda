@@ -48,10 +48,10 @@ class ToolResultSummaryTests(unittest.TestCase):
         self.assertEqual(prepare_tool_response(result, question="What's in this folder?"),
                          "The listing contains 1 directory and 2 files.")
         recent = prepare_tool_response(result, question="Show the latest files")
-        self.assertLess(recent.index("b-new.py"), recent.index("a-old.py"))
+        self.assertLess(recent.index("b-new dot py"), recent.index("a-old dot py"))
         self.assertNotIn('"project"', recent)
         names = prepare_tool_response(result, question="Read out all filenames")
-        self.assertLess(names.index("a-old.py"), names.index("b-new.py"))
+        self.assertLess(names.index("a-old dot py"), names.index("b-new dot py"))
         self.assertEqual(result.data, original)
 
     def test_text_only_listing_cannot_claim_recent_edit_information(self):
@@ -113,10 +113,25 @@ class ToolResultSummaryTests(unittest.TestCase):
         self.assertIn("5 files", count)
         self.assertNotIn('"file0.py"', count)
         exact = prepare_tool_response(result, question="Read all filenames")
-        self.assertIn('"file4.py"', exact)
+        self.assertIn('"file4 dot py"', exact)
         self.assertNotIn('"tests"', exact)
         specific = prepare_tool_response(result, question="Does it contain file4.py?")
-        self.assertEqual(specific, 'The listing includes "file4.py".')
+        self.assertEqual(specific, 'The listing includes "file4 dot py".')
+
+    def test_filename_dots_are_spoken_while_display_and_raw_names_stay_exact(self):
+        from tts.spoken_text import normalise_spoken_text
+        for name, spoken in (("dashboard_state.json", "dashboard_state dot json"),
+                             ("archive.tar.gz", "archive dot tar dot gz"),
+                             (".gitignore", "dot gitignore")):
+            with self.subTest(name=name):
+                result = self.listing([{"name": name, "type": "file", "modified_at": 1}])
+                original = deepcopy(result.data)
+                for question in ("Read all filenames", "What did I edit recently?", f"Does it contain {name}?"):
+                    speech = prepare_tool_response(result, question=question)
+                    self.assertIn('"' + spoken + '"', speech)
+                    self.assertIn(spoken, normalise_spoken_text(speech))
+                self.assertIn(name, prepare_tool_display(result))
+                self.assertEqual(result.data, original)
 
     def test_partial_results_do_not_claim_complete_totals(self):
         speech = prepare_tool_response(self.listing([{"name": "one", "type": "file"}], truncated=True))
