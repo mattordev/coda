@@ -115,11 +115,12 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         "allowed_tools", "confirm_tools", "startup_timeout_seconds", "timeout_seconds",
         "max_output_bytes", "max_tools",
         "session_mode", "startup_mode", "idle_timeout_seconds",
+        "bundled_server",
     }
     transport = value.get("transport", "stdio")
     if transport == "streamable-http":
         from ai.mcp.remote import RemoteServerDefinition
-        remote_keys = (allowed_keys - {"command", "args", "env", "cwd"}) | {
+        remote_keys = (allowed_keys - {"command", "args", "env", "cwd", "bundled_server"}) | {
             "url", "header_env", "max_sse_event_bytes", "reconnect_backoff_seconds",
         }
         if set(value) - remote_keys:
@@ -147,7 +148,15 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         )
     if set(value) - allowed_keys or transport != "stdio":
         raise ValueError("MCP definition has unsupported settings.")
-    args = value.get("args", [])
+    if "bundled_server" in value:
+        if set(value) & {"command", "args", "cwd"}:
+            raise ValueError("Bundled MCP definitions cannot override the launch command, args or cwd.")
+        from ai.mcp.bundled import bundled_launch
+        command, bundled_args = bundled_launch(value["bundled_server"])
+        args = list(bundled_args)
+    else:
+        command = value["command"]
+        args = value.get("args", [])
     env = value.get("env", {})
     tools = value.get("allowed_tools", [])
     confirmations = value.get("confirm_tools", [])
@@ -160,7 +169,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
     if any(not isinstance(tool, str) for tool in tools) or len(tools) != len(set(tools)):
         raise ValueError("MCP allowed tools must be unique strings.")
     return LocalServerDefinition(
-        name=value["id"], command=value["command"], args=tuple(args),
+        name=value["id"], command=command, args=tuple(args),
         env_refs=tuple(env.items()), cwd=value.get("cwd"),
         trusted=value.get("trusted", False), allowed_tools=frozenset(tools),
         confirm_tools=frozenset(confirmations),
