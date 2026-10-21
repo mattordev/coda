@@ -48,3 +48,9 @@ If speech cannot explain a failure, inspect terminal/dashboard output and the
 local log. Missing server details remain unknown; check the server's own
 configuration and diagnostics. Raw SDK exception strings, subprocess stderr and
 stack traces are not automatically enabled or forwarded.
+Host adapter exceptions use `mcp_internal_error`; visual diagnostics retain the
+exception type without exposing arbitrary private exception strings. SDK and
+connection/protocol failures also retain exception types where available.
+Queued callers waiting for a cold server launch receive the configured startup
+allowance as well as the normal wait budget. Waiting behind an already-connected
+operation still uses only the normal timeout.

@@ -88,7 +88,13 @@ class LocalMCPManager:
             if runtime.retire_requests:
                 return failure("cancelled", "The MCP server is being retired.")
             generation = runtime.generation
-        deadline = time.monotonic() + runtime.definition.timeout_seconds
+            # Queued first-use callers share a cold launch. Its startup budget
+            # must not be cut short by the shorter normal-action/busy timeout.
+            startup_wait = (
+                0 if runtime.state == ServerState.CONNECTED
+                else runtime.definition.startup_timeout_seconds
+            )
+        deadline = time.monotonic() + startup_wait + runtime.definition.timeout_seconds
         while not runtime.lock.acquire(timeout=0.01):
             if cancel_event is not None and cancel_event.is_set():
                 return failure("cancelled", "The MCP operation was cancelled.")
