@@ -17,4 +17,3 @@ path are resolved by Coda, independent of cwd. This is an explicit selection,
 not automatic discovery or enablement. Trust and exact tool permissions still
 default to deny. See the [filesystem setup](../integrations/coda-filesystem/README.md)
 and [feedback behavior](../docs/mcp-feedback.md).
-

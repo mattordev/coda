@@ -85,25 +85,25 @@ def directory_entries(path: str) -> list[dict[str, str]]:
 
 def get_permissions_from_config(config: dict):
     allowed_dirs = config['read']['allowed_roots']
-    
+
     return allowed_dirs
 
 def check_if_path_is_allowed(config: dict, path: str):
     allowed_dirs = get_permissions_from_config(config)
     requested_path = Path(path).resolve()
-    
+
     is_allowed = False
-    
+
     for allowed_dir in allowed_dirs:
         allowed_root = Path(allowed_dir).resolve()
-        
+
         if requested_path.is_relative_to(allowed_root):
             is_allowed = True
             break
-        
+
     if not is_allowed:
         raise FilesystemPermissionError("outside_allowed_roots", f"Coda is not permitted to read this folder: {path}. Please edit your config.")
-    
+
 def check_if_path_is_blocked(config: dict, path_to_check: str):
     blocked_paths = config['read']['blocked_paths']
     lexical_path = Path(path_to_check).absolute()
@@ -129,7 +129,7 @@ def check_if_path_is_blocked(config: dict, path_to_check: str):
                     "blocked_path",
                     f"Coda is not permitted to access: {requested_path}"
                 )
-        
+
 def load_config() -> dict:
     """Loads filesystem config, defines what can be accessed and what is restricted"""
     try:
