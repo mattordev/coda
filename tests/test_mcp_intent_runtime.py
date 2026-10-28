@@ -30,6 +30,16 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         log = patch.object(history, "conversation_log", [])
         log.start()
         self.addCleanup(log.stop)
+        interpretation = patch.object(history, "call_with_messages", return_value=("The tool returned the requested data.", None))
+        interpretation.start()
+        self.addCleanup(interpretation.stop)
+        for name, options in (
+            ("should_skip_provider", {"return_value": False}),
+            ("log_attempt", {}), ("log_failure", {}), ("record_attempt", {}),
+        ):
+            telemetry = patch("ai.llm_router.core.logger." + name, **options)
+            telemetry.start()
+            self.addCleanup(telemetry.stop)
         self.generate = Mock(return_value=(json.dumps({
             "intent": "mcp.test.echo", "confidence": 0.95, "arguments": {"message": "hello"},
         }), None))
@@ -97,7 +107,7 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertIs(result.tool_result, self.outcome)
         self.assertIn("/private/location", history.conversation_log[-1]["content"])
         log.assert_called_once_with("mcp.test.echo", result.display_text)
-        output.assert_called_once_with(f"CODA: {result.display_text}")
+        output.assert_called_once_with(f"CODA: {result.response_text}")
         self.fallback.assert_not_called()
 
     def test_large_listing_keeps_visual_result_and_question_specific_speech(self):

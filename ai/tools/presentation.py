@@ -90,3 +90,15 @@ def prepare_tool_display(result: ToolResult, *, max_chars: int = 12000) -> str:
             text = _readable(data, max_items=None)
         text = text or "Tool completed."
     return safe_diagnostic(text, max_chars=max_chars)
+
+
+def prepare_full_tool_output(result: ToolResult, *, max_chars=8 * 1024 * 1024):
+    """Explicit diagnostic access to the complete normalized envelope, redacted."""
+    try:
+        text = json.dumps({
+            "success": result.success, "data": result.data,
+            "error": {"code": result.error.code, "message": result.error.message} if result.error else None,
+        }, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return "The retained result cannot be represented as JSON."
+    return safe_diagnostic(text, max_chars=max_chars)

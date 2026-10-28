@@ -134,7 +134,7 @@ def summarize_result(data, text, question):
         if len(names) > 750:
             names = _names(selected, 5)
             limit = 5
-        suffix = " The remaining entries are kept in the full result; see the detailed output on screen." if len(selected) > limit else ""
+        suffix = " The remaining entries are kept in the full result; say show tool output for details." if len(selected) > limit else ""
         return counts_text + " Entries include " + names + "." + suffix + partial_note
 
     payload = _payload(data)
@@ -144,7 +144,7 @@ def summarize_result(data, text, question):
         if not payload:
             return "The tool returned no items."
         if len(payload) > 5:
-            return f"The tool returned {len(payload)} items. The detailed results are shown on screen."
+            return f"The tool returned {len(payload)} items. Say show tool output for details."
     # Text-only JSON arrays are common in third-party tools.
     if isinstance(text, str) and text.startswith("["):
         try:
@@ -152,7 +152,7 @@ def summarize_result(data, text, question):
         except (ValueError, RecursionError):
             values = None
         if isinstance(values, list) and len(values) > 5:
-            return f"The tool returned {len(values)} items. The detailed results are shown on screen."
+            return f"The tool returned {len(values)} items. Say show tool output for details."
     if len(text) > 600 or len(text.splitlines()) > 8:
-        return "The tool returned a longer response. The detailed result is shown on screen."
+        return "The tool returned a longer response. Say show tool output for the details."
     return None
