@@ -363,6 +363,7 @@ def _create_execution_result(
         request_id=request.request_id,
         handled=command_result.handled,
         response_text=command_result.response_text,
+        display_text=getattr(command_result, "display_text", None),
         open_follow_up=(
             command_result.open_follow_up
             and request.source == InputSource.VOICE
@@ -425,7 +426,7 @@ def _execution_loop(stop_event):
                     and not execution_result.cancelled
                 ):
                     dashboard_state.record_ai_response(
-                        execution_result.response_text,
+                        execution_result.display_text or execution_result.response_text,
                         source="tts",
                     )
                     runtime_queues.speech.put(

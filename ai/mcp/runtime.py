@@ -88,7 +88,13 @@ class LocalMCPManager:
             if runtime.retire_requests:
                 return failure("cancelled", "The MCP server is being retired.")
             generation = runtime.generation
-        deadline = time.monotonic() + runtime.definition.timeout_seconds
+            # Queued first-use callers share a cold launch. Its startup budget
+            # must not be cut short by the shorter normal-action/busy timeout.
+            startup_wait = (
+                0 if runtime.state == ServerState.CONNECTED
+                else runtime.definition.startup_timeout_seconds
+            )
+        deadline = time.monotonic() + startup_wait + runtime.definition.timeout_seconds
         while not runtime.lock.acquire(timeout=0.01):
             if cancel_event is not None and cancel_event.is_set():
                 return failure("cancelled", "The MCP operation was cancelled.")
@@ -120,8 +126,11 @@ class LocalMCPManager:
                 )
                 if not isinstance(result, ToolResult):
                     result = failure("mcp_protocol_error", "The MCP response was invalid.")
-            except Exception:
-                result = failure("connection_error", "The MCP operation could not complete.")
+            except Exception as error:
+                result = failure(
+                    "mcp_internal_error", "An unexpected error prevented the MCP operation from completing.",
+                    exception_type=type(error).__name__,
+                )
             with self._metadata_lock:
                 if runtime.retire_requests or generation != runtime.generation or (
                     cancel_event is not None and cancel_event.is_set()
