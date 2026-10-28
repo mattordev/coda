@@ -171,6 +171,11 @@ def _dispatch_intent(
         )
 
     if not result.accepted:
+        if result.error:
+            return CommandResult(
+                handled=True,
+                response_text="I couldn't determine which action to run because intent routing failed. No action was run. Please try again or use an explicit command.",
+            )
         if result.needs_clarification:
             return CommandResult(handled=True, response_text="Please clarify which action you want me to perform.", open_follow_up=True)
         if message.lower().startswith("mcp."):

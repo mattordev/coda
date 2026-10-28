@@ -142,6 +142,9 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
             cloud_withheld = True
     if cloud_withheld:
         providers = [name for name in providers if core.registry.get_provider_type(name) != 'cloud']
+    core._debug_print(
+        f"[MCP INTERPRETATION] Privacy: {privacy['level']}; cloud action: {cloud_action}; providers: {providers}"
+    )
     if not providers:
         return Interpretation(UNAVAILABLE)
     partial = len(serialized) > MAX_CONTEXT_CHARS or _partial_source(result.data) or len(question) > 1000
@@ -176,9 +179,10 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
                 payload['tool_result_excerpt'] = payload['tool_result_excerpt'][:len(payload['tool_result_excerpt']) // 2]
                 payload_text = json.dumps(payload, ensure_ascii=False, allow_nan=False)
         exposure['partial'] = payload['partial']
+        # Some local chat templates only accept one leading system message.
+        # Keep the mandatory data boundary outside the configurable prompt cap.
         messages = [
-            {'role': 'system', 'content': llm_service._get_system_prompt()[:4000]},
-            {'role': 'system', 'content': INSTRUCTIONS},
+            {'role': 'system', 'content': llm_service._get_system_prompt()[:4000] + '\n\n' + INSTRUCTIONS},
             {'role': 'user', 'content': payload_text},
         ]
         return llm_service.call_with_messages(name, messages, cancel_event=cancel_event)
