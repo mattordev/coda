@@ -234,7 +234,6 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     if debug:
         print(f"[MCP TOOL] {request.intent.name}: {'completed' if outcome.success else 'failed'}")
         print(f"[MCP OUTPUT]\n{display}")
-    print(f"CODA: {response}")
     return CommandResult(
         handled=True, response_text=response, used_llm=interpreted.used_llm, open_follow_up=True,
         command_matches=(request.intent.name,), tool_result=outcome, display_text=display,
@@ -257,14 +256,12 @@ def _retained_tool_reply(message, *, cancel_event=None, debug=False):
             if cancel_event is not None and cancel_event.is_set():
                 return CommandResult(handled=False)
             print(f"[MCP OUTPUT]\n{display}")
-        print(f"CODA: {response}")
         return CommandResult(True, response_text=response, display_text=display, tool_result=result)
     if not is_result_follow_up(message):
         return None
     result = llm_service.get_tool_follow_up_context()
     if result is None:
         response = 'Which file or tool result do you mean? Please provide an absolute path or retrieve the result first.'
-        print(f"CODA: {response}")
         return CommandResult(True, response_text=response, open_follow_up=True)
     interpreted = interpret_result(result, message, cancel_event=cancel_event, force=True)
     if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
@@ -273,12 +270,21 @@ def _retained_tool_reply(message, *, cancel_event=None, debug=False):
         return CommandResult(handled=False)
     if debug:
         print("[MCP CONTEXT] Answering from the retained tool result; no tool call.")
-    print(f"CODA: {interpreted.text}")
     return CommandResult(True, response_text=interpreted.text, used_llm=interpreted.used_llm,
                          open_follow_up=True, tool_result=result, display_text=prepare_tool_display(result))
 
 
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
+    """Emit the single finalized response used by every input and speech path."""
+    result = _on_command(msg, commands, debug=debug, cancel_event=cancel_event)
+    if cancel_event is not None and cancel_event.is_set():
+        return CommandResult(handled=False)
+    if result.response_text:
+        print(f"CODA: {result.response_text}")
+    return result
+
+
+def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     global _pending_confirmation
     normalized_message = msg.strip()
 
@@ -393,8 +399,6 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             used_llm=True,
             open_follow_up=True,
         )
-
-    print(f"CODA: {response_text}")
 
     return CommandResult(
         handled=True,

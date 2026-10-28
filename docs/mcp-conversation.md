@@ -38,7 +38,9 @@ precedence over implicit follow-up detection. Missing context asks which result
 is meant; a request to refresh/read again goes through ordinary routing.
 
 `CODA:` contains the exact text queued for TTS, not the raw README. The compatibility
-dashboard receives that same answer. Ordinary logs do not dump long tool content.
+dashboard receives that same answer. The public command handler prints it once,
+including tool-unavailable, argument-clarification and confirmation replies.
+Ordinary logs do not dump long tool content.
 Debug mode prints a completion label and redacted bounded details as `[MCP OUTPUT]`.
 The console remains useful if no TTS provider is available. Existing pronunciation
 normalization/segmentation may change how punctuation is spoken; it does not
