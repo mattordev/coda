@@ -5,6 +5,7 @@ import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.speak_response as speak_response
 import utils.stt_service as stt_service
+from runtime import model_warmup
 
 
 INTENT = Intent(
@@ -45,13 +46,19 @@ def _print_status():
     print(f"Debug mode is {'enabled' if debug_enabled else 'disabled'}.")
     print(f"LLM fallback is {llm_service.describe_llm_fallback()}.")
     print(f"Speech-to-text is {stt_service.describe_stt_provider()}.")
+    for subsystem, status in model_warmup.snapshot().items():
+        duration = status["duration_seconds"]
+        elapsed = "" if duration is None else f" ({duration:.2f}s)"
+        print(f"Pre-warm {subsystem}: {status['state']}{elapsed}")
 
 
 def _reload_runtime_config():
+    model_warmup.shutdown()
     dotenv_loaded, source = runtime_state.reload_dotenv()
     command.reload_config()
-    speak_response.reload_config()
+    speak_response.reload_config(check_availability=False)
     stt_service.reload_config()
+    model_warmup.start()
 
     if dotenv_loaded:
         print(f"Reloaded configuration from {source}.")

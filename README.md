@@ -431,6 +431,8 @@ Commands are self-registering modules that own their intent metadata and
 - [Privacy Routing](docs/privacy-routing.md)
 - [MCP display, speech and failure feedback](docs/mcp-feedback.md)
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
+- [Bundled MCP catalog, settings and update lifecycle](docs/mcp-bundled.md)
+- [Optional model pre-warming](docs/model-prewarming.md)
 
 ## Licence
 

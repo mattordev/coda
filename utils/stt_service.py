@@ -2,6 +2,7 @@ import os
 import platform
 import shutil
 import tempfile
+from threading import Lock
 
 import speech_recognition as sr
 import utils.runtime_state as runtime_state
@@ -23,6 +24,10 @@ if load_dotenv is not None:
 
 whisper_model_cache = {}
 failed_whisper_attempts = {}
+_whisper_state_lock = Lock()
+_whisper_init_lock = Lock()
+_whisper_generation = 0
+_whisper_closed = False
 
 
 class SpeechToTextError(Exception):
@@ -57,14 +62,47 @@ def _normalize_provider_name(provider):
 
 
 def reload_config():
-    global whisper_model_cache
-    global failed_whisper_attempts
-
     if load_dotenv is not None:
         load_dotenv(override=True)
 
-    whisper_model_cache = {}
-    failed_whisper_attempts = {}
+    _reset_models(closed=False)
+
+
+def _reset_models(*, closed):
+    global whisper_model_cache, failed_whisper_attempts, _whisper_generation, _whisper_closed
+    with _whisper_state_lock:
+        _whisper_generation += 1
+        _whisper_closed = closed
+        whisper_model_cache = {}
+        failed_whisper_attempts = {}
+
+
+def shutdown():
+    """Drop retained state; a late native load cannot repopulate the cache."""
+    _reset_models(closed=True)
+
+
+def start():
+    """Allow a fresh runtime lifetime after shutdown without loading anything."""
+    global _whisper_closed
+    with _whisper_state_lock:
+        _whisper_closed = False
+
+
+def prewarm(cancel_event):
+    """Use the configured Whisper hardware/model chain, retaining one success."""
+    if _get_stt_provider() != "faster-whisper" or cancel_event.is_set():
+        return False
+    for attempt in _get_available_whisper_attempts():
+        if cancel_event.is_set():
+            return False
+        try:
+            _load_whisper_model(*attempt)
+            return not cancel_event.is_set()
+        except Exception:
+            if cancel_event.is_set():
+                return False
+    raise SpeechToTextError("No eligible Whisper model could be prepared.")
 
 
 def _cuda_available():
@@ -141,14 +179,19 @@ def _load_whisper_model(model_name, device, compute_type):
 
     cache_key = (model_name, device, compute_type)
 
-    if cache_key not in whisper_model_cache:
-        whisper_model_cache[cache_key] = WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute_type,
-        )
-
-    return whisper_model_cache[cache_key]
+    with _whisper_init_lock:
+        with _whisper_state_lock:
+            if _whisper_closed:
+                raise SpeechToTextError("Whisper runtime is closed.")
+            if cache_key in whisper_model_cache:
+                return whisper_model_cache[cache_key]
+            generation = _whisper_generation
+        loaded = WhisperModel(model_name, device=device, compute_type=compute_type)
+        with _whisper_state_lock:
+            if _whisper_closed or generation != _whisper_generation:
+                raise SpeechToTextError("Whisper configuration changed while loading.")
+            whisper_model_cache[cache_key] = loaded
+            return loaded
 
 
 def _get_failed_whisper_attempt_message(attempt):
