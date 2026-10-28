@@ -1,6 +1,6 @@
 import socket
 import os
-from threading import Event
+from threading import Event, RLock
 
 import requests
 from ai.providers.cancellable import CancellationScope
@@ -22,6 +22,7 @@ _api_key_loaded = False
 _eleven_labs_disabled = False
 _elevenlabs_provider: ElevenLabsProvider | None = None
 _pockettts_provider: PocketTTSProvider | None = None
+_pocket_provider_lock = RLock()
 _pyttsx3_provider = Pyttsx3Provider()
 
 SpeechSubmitter = Callable[[str], bool]
@@ -61,7 +62,7 @@ def ensure_api_key_loaded():
         return False
 
 
-def reload_config():
+def reload_config(*, check_availability=True):
     global _api_key_loaded
     global _eleven_labs_disabled
     global _elevenlabs_provider
@@ -74,20 +75,22 @@ def reload_config():
     _eleven_labs_disabled = False
     _elevenlabs_provider = None
 
-    if _pockettts_provider is not None:
-        _pockettts_provider.close()
-    _pockettts_provider = None
+    with _pocket_provider_lock:
+        if _pockettts_provider is not None:
+            _pockettts_provider.close()
+        _pockettts_provider = None
 
-    return is_tts_available()
+    return is_tts_available() if check_availability else True
 
 
 def shutdown() -> None:
     """Release retained TTS provider state during application shutdown."""
     global _pockettts_provider
 
-    if _pockettts_provider is not None:
-        _pockettts_provider.close()
-        _pockettts_provider = None
+    with _pocket_provider_lock:
+        if _pockettts_provider is not None:
+            _pockettts_provider.close()
+            _pockettts_provider = None
 
 
 def is_connected():
@@ -182,10 +185,18 @@ def _resolve_pyttsx3_provider() -> SpeechProvider:
 def _resolve_pockettts_provider() -> SpeechProvider:
     global _pockettts_provider
 
-    if _pockettts_provider is None:
-        _pockettts_provider = PocketTTSProvider()
+    with _pocket_provider_lock:
+        if _pockettts_provider is None:
+            _pockettts_provider = PocketTTSProvider()
+        return _pockettts_provider
 
-    return _pockettts_provider
+
+def prewarm(cancel_event):
+    """Warm the first configured local model provider; never contact cloud TTS."""
+    names = tts_registry.parse_provider_order(os.getenv("TTS_PROVIDER_ORDER"))
+    if "pockettts" not in names or cancel_event.is_set():
+        return False
+    return _resolve_pockettts_provider().prewarm(cancel_event)
 
 
 _TTS_PROVIDER_RESOLVERS: tts_registry.ProviderResolvers = {
