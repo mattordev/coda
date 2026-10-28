@@ -147,7 +147,7 @@ class BundledMCPTests(unittest.TestCase):
                             "name": "main.py", "type": "file", "modified_at": (allowed / "main.py").stat().st_mtime,
                         }])
                         self.assertNotIn(".env", prepare_tool_display(result))
-                        self.assertIn("main.py", prepare_tool_response(result))
+                        self.assertIn("1 file", prepare_tool_response(result))
                         denied = transport.request(current, "invoke", tool_name="list_directory", arguments={"path": str(root)})
                         self.assertFalse(denied.success)
                         self.assertEqual(denied.error.code, "mcp_tool_error")
