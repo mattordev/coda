@@ -19,6 +19,7 @@ class PocketTTSRuntime(Protocol):
 
 RuntimeFactory = Callable[[str, str | None], PocketTTSRuntime]
 PLAYBACK_TAIL_SECONDS = 0.2
+_INITIALIZATION_LOCK = Lock()
 POCKET_CHUNK_TARGET = 45
 
 
@@ -138,6 +139,7 @@ class PocketTTSProvider:
             "CODA_POCKET_TTS_VOICE"
         )
         self._lock = Lock()
+        self._state_lock = Lock()
         self._runtime: PocketTTSRuntime | None = None
         self._load_error: Exception | None = None
         self._closed = False
@@ -167,37 +169,49 @@ class PocketTTSProvider:
 
     def close(self) -> None:
         """Release retained model and failed-startup state."""
-        with self._lock:
+        with self._state_lock:
             self._closed = True
             self._runtime = None
             self._load_error = None
 
+    def prewarm(self, cancel_event):
+        """Load the normal retained runtime without producing audio."""
+        if cancel_event.is_set() or self._ffplay_path is None:
+            return False
+        self._get_runtime()
+        return not cancel_event.is_set()
+
     def _get_runtime(self) -> PocketTTSRuntime:
         with self._lock:
-            if self._closed:
-                raise RuntimeError("Pocket TTS provider is closed.")
-
-            if self._runtime is not None:
-                return self._runtime
-
-            if self._load_error is not None:
-                raise RuntimeError(
-                    "Pocket TTS initialization previously failed: "
-                    f"{self._load_error}"
-                ) from self._load_error
+            with self._state_lock:
+                if self._closed:
+                    raise RuntimeError("Pocket TTS provider is closed.")
+                if self._runtime is not None:
+                    return self._runtime
+                if self._load_error is not None:
+                    raise RuntimeError(
+                        "Pocket TTS initialization previously failed: "
+                        f"{self._load_error}"
+                    ) from self._load_error
 
             try:
-                self._runtime = self._runtime_factory(
-                    self._language,
-                    self._voice,
-                )
+                with _INITIALIZATION_LOCK:
+                    if self._closed:
+                        raise RuntimeError("Pocket TTS provider is closed.")
+                    loaded = self._runtime_factory(self._language, self._voice)
+                    with self._state_lock:
+                        if self._closed:
+                            raise RuntimeError("Pocket TTS provider closed while loading.")
+                        self._runtime = loaded
             except Exception as error:
-                self._load_error = error
+                with self._state_lock:
+                    if not self._closed:
+                        self._load_error = error
                 raise RuntimeError(
                     f"Pocket TTS could not be initialized: {error}"
                 ) from error
 
-            return self._runtime
+            return loaded
 
 
 class PocketTTSSession:

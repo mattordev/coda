@@ -7,6 +7,7 @@ from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
+from runtime import model_warmup
 
 import os
 import sys
@@ -14,6 +15,7 @@ import json
 import importlib
 from importlib.machinery import SourceFileLoader
 import utils.voice_recognizer as voice_recognizer
+import utils.stt_service as stt_service
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.dashboard_state as dashboard_state
@@ -681,6 +683,8 @@ def shutdown_runtime(timeout_seconds=4.0):
     active_request_state.cancel_active()
     stop_execution_thread(timeout_seconds=timeout_seconds)
     command.shutdown_tools(timeout_seconds=timeout_seconds)
+    model_warmup.shutdown(timeout_seconds=timeout_seconds)
+    stt_service.shutdown()
 
     speech.configure_speech_submitter(None)
     stop_speech_thread(timeout_seconds=timeout_seconds)
@@ -747,6 +751,8 @@ def _run_runtime(skip_update_check=False):
     from utils.update_bootstrap import acknowledge_handoff
     acknowledge_handoff(Path(__file__).resolve().parent)
     command.start_tools()
+    stt_service.start()
+    model_warmup.start()
 
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
