@@ -76,10 +76,26 @@ class LocalMCPManager:
         with self._metadata_lock:
             return self._servers[server_id].state
 
+    def inspect(self):
+        """Return safe status dimensions without credentials or permission paths."""
+        with self._metadata_lock:
+            return {name: {
+                "bundle": getattr(runtime.definition, "bundled_server", None),
+                "enabled": getattr(runtime.definition, "enabled", True),
+                "trusted": runtime.definition.trusted,
+                "availability": "error" if getattr(runtime.definition, "bundle_error", None) else "available",
+                "error": getattr(runtime.definition, "bundle_error", None),
+                "connection": runtime.state.value,
+            } for name, runtime in self._servers.items()}
+
     def _request(self, server_id, operation, *, cancel_event=None, configuration_revision=None, **kwargs):
         runtime = self._servers.get(server_id)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
+        if not getattr(runtime.definition, "enabled", True):
+            return failure("server_disabled", "The bundled MCP server is disabled; explicitly enable it in its definition.")
+        if getattr(runtime.definition, "bundle_error", None):
+            return failure("configuration_error", runtime.definition.bundle_error)
         if not runtime.definition.trusted:
             return failure("permission_denied", "The MCP process is not trusted.")
         with self._metadata_lock:
@@ -214,7 +230,7 @@ class LocalMCPManager:
 
     def _permission(self, server_id, name, request, *, confirmed=False):
         definition = self._servers[server_id].definition
-        if not definition.trusted or name not in definition.allowed_tools:
+        if not getattr(definition, "enabled", True) or not definition.trusted or name not in definition.allowed_tools:
             return failure("permission_denied", "The MCP tool is not permitted.")
         if self._permission_decider is not None:
             try:
@@ -257,7 +273,8 @@ class LocalMCPManager:
         """Explicit warm-up; failures remain independent of other servers."""
         return {
             name: self.discover(name) for name, runtime in self._servers.items()
-            if runtime.definition.startup_mode == "eager"
+            if runtime.definition.startup_mode == "eager" and getattr(runtime.definition, "enabled", True)
+            and runtime.definition.trusted and not getattr(runtime.definition, "bundle_error", None)
         }
 
     def close(self, *, timeout_seconds: float = 10.0) -> dict[str, ToolResult]:

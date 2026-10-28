@@ -219,3 +219,9 @@ passed it. Remote matrix results and actual release-artifact validation remain
 release gates.
 Set `CODA_RUN_UPDATE_ENV_SMOKE=1` to additionally create a real environment with
 pip and verify an offline requirements install plus `pip check`.
+# MCP configuration preservation
+
+Archive updates preserve private `mcp_servers/*.json` and
+`integrations/*/*.config.json` files; rollback restores their original directories.
+External configuration remains external. See [bundled MCP lifecycle](mcp-bundled.md)
+for the exact preservation boundary and manual migration instructions.
