@@ -142,9 +142,9 @@ class MCPIntentRuntimeTests(unittest.TestCase):
             config.write_text(json.dumps({"read": {
                 "allowed_roots": [str(allowed)], "blocked_paths": [],
             }}), encoding="utf-8")
-            command, args = bundled_launch("filesystem")
+            command, args = bundled_launch("filesystem", {"config_file": str(config)})
             manager = LocalMCPManager([LocalServerDefinition(
-                "filesystem", command, (*args, "--config", str(config)), trusted=True,
+                "filesystem", command, args, trusted=True,
                 allowed_tools=frozenset({"list_directory"}),
             )])
             runtime.configure_intent_router({}, mcp_manager=manager)
