@@ -90,16 +90,18 @@ def read_file(path: str) -> CallToolResult:
         
 
 def read_safe_file(path: Path) -> str:
-    
-    file_size = path.stat().st_size
+    """Bound the actual read, including files that grow after the size check."""
     max_file_size_mib = 1
     max_file_size_b = max_file_size_mib * 1024 * 1024   
-    
-    if file_size > max_file_size_b:
+
+    if path.stat().st_size > max_file_size_b:
         raise ValueError(f"{path.name} is too big to be read, please open it manually.")
-    else:
-        file = path.read_text(encoding="utf-8")
-        return file
+    with path.open("rb") as source:
+        data = source.read(max_file_size_b + 1)
+    if len(data) > max_file_size_b:
+        raise ValueError(f"{path.name} is too big to be read, please open it manually.")
+    # Match read_text's universal newline handling without an unbounded text read.
+    return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def error_result(code, message):
