@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -42,8 +43,28 @@ class FilesystemMCPTests(unittest.TestCase):
         result = filesystem.list_directory(str(self.root))
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["entries"], [
-            {"name": "main.py", "type": "file"}, {"name": "tests", "type": "directory"}])
+            {"name": "main.py", "type": "file", "modified_at": (self.root / "main.py").stat().st_mtime},
+            {"name": "tests", "type": "directory", "modified_at": (self.root / "tests").stat().st_mtime}])
         self.assertIn("[FILE] main.py", result.content[0].text)
+
+    def test_real_modification_times_drive_speech_while_display_stays_alphabetical(self):
+        from ai.tools.models import ToolResult
+        from ai.tools.presentation import prepare_tool_response
+
+        for name, timestamp in (("a-old.py", 1000), ("b-new.py", 4000),
+                                ("c-next.py", 3000), ("d-third.py", 2000)):
+            path = self.root / name
+            path.touch()
+            os.utime(path, (timestamp, timestamp))
+        result = filesystem.list_directory(str(self.root))
+        entries = result.structured_content["entries"]
+        self.assertEqual([entry["modified_at"] for entry in entries], [1000, 4000, 3000, 2000])
+        self.assertEqual(result.content[0].text.splitlines()[0], "[FILE] a-old.py")
+        speech = prepare_tool_response(ToolResult(True, result.model_dump(mode="json", by_alias=True)),
+                                       question="What have I edited recently?")
+        self.assertNotIn("a-old dot py", speech)
+        self.assertLess(speech.index("b-new dot py"), speech.index("c-next dot py"))
+        self.assertLess(speech.index("c-next dot py"), speech.index("d-third dot py"))
 
     def test_requested_and_ancestor_blocked_paths_are_denied(self):
         blocked = self.root / ".ssh-test"

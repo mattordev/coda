@@ -221,7 +221,7 @@ def _tool_outcome(request, outcome, *, cancel_event=None):
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
     llm_service.record_tool_exchange(request.message, outcome)
-    response = prepare_tool_response(outcome)
+    response = prepare_tool_response(outcome, question=request.message)
     display = prepare_tool_display(outcome)
     if not outcome.success:
         record_tool_failure(request.intent.name, display)

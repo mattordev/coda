@@ -5,6 +5,15 @@ MCP results have separate data, visual and spoken representations. The full
 mutates it. Conversation history continues to use `prepare_tool_context`, with
 its existing local/cloud privacy rules and size limits.
 
+The execution event also carries the full `tool_result` (excluded from its
+repr). The last eight complete results are retained as local snapshots until
+conversation reset; host code can use `utils.llm_service.get_recent_tool_result()`
+for subsequent processing. Returned snapshots cannot mutate stored results.
+These are not automatically sent to models: apply `prepare_tool_context` before
+any model exposure. Model-visible excerpts are explicitly labeled untrusted
+data, with a matching system instruction. Retention is in memory only and
+bounded by result count and the existing per-server output limit.
+
 ## Failures
 
 The SDK error envelope already survives in `ToolResult.data`. Coda keeps the
@@ -54,3 +63,56 @@ connection/protocol failures also retain exception types where available.
 Queued callers waiting for a cold server launch receive the configured startup
 allowance as well as the normal wait budget. Waiting behind an already-connected
 operation still uses only the normal timeout.
+
+## Successful results
+
+Terminal and dashboard receive detailed sanitized output (up to 12,000
+characters); speech has its own 1,200-character budget. Truncation is marked
+with an ellipsis and never changes the retained raw result.
+
+For interoperable directory summaries a server can return
+`structuredContent: {"kind": "directory_listing", "entries": [{"name":
+"tests", "type": "directory"}, {"name": "main.py", "type": "file"}]}`.
+An empty `entries` array means no accessible entries were returned, not proof
+that the underlying directory has no blocked children. Set `truncated: true`
+when entries are partial; Coda will avoid claiming complete directory totals.
+Legacy text listings with one `[FILE] name` or `[DIR] name` per line also work.
+Counts and examples come only from the returned data.
+
+Speech selects a style from the original question:
+
+- **Overview** (default): counts of files and directories, without example names.
+- **Recent files** (for example, "What have I edited recently?"): the three most
+  recently modified files, newest first. All returned files need finite numeric
+  `modified_at` Unix timestamps; missing/invalid dates produce an honest fallback.
+- **All names** (for example, "Read all filenames"): names in the supplied order,
+  respecting file/folder filters and the speech budget.
+
+Filename dots are rendered as the word "dot" in spoken names, including leading
+dots and multiple extensions (".gitignore", "archive.tar.gz"). Names are sanitized
+before punctuation changes. Displayed names and retained data preserve their
+original spelling; ordinary sentence punctuation is not rewritten.
+Known final file extensions also use explicit spoken forms: ".md" becomes
+"dot markdown" and ".json" becomes "dot jay son", case-insensitively. Unknown
+extensions retain their spelling, and folder names are not treated as file
+extensions.
+
+The raw data and displayed listing are not reordered. Explicit JSON command
+arguments and path names do not select a response style. Folder timestamps
+describe immediate directory-entry changes, not recursive edits inside a
+project. Recent project activity is explicitly unsupported until a separate
+bounded project scan is implemented.
+
+Requests for counts, files/folders, all names or a named entry influence speech; large exact-name
+requests still point to visual output when they exceed the speech budget.
+
+Generic large arrays get item counts, and long unrecognized text is signposted
+on screen rather than read in full. Short natural text passes through. Missing
+content keeps the neutral completion fallback, separate from a known empty
+listing. Arbitrary entry values are quoted data, never instructions or actions.
+
+Summarization is deterministic and makes no LLM calls, so it adds no model cost,
+network latency or new cloud exposure. Optional LLM summarization was considered
+and deferred: predictable structures cover the current need. Any future opt-in
+summarizer must have bounded latency/cost, preserve original-question grounding,
+apply local/cloud privacy policy and fall back safely without replaying tools.
