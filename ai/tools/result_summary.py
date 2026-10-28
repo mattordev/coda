@@ -5,7 +5,7 @@ import re
 
 
 def _payload(data):
-    if isinstance(data, dict) and "structuredContent" in data:
+    if isinstance(data, dict) and data.get("structuredContent") is not None:
         return data["structuredContent"]
     return data
 
@@ -22,6 +22,12 @@ def _directory_entries(data, text):
                    and entry.get("type") in ("file", "directory", "dir") for entry in entries):
                 return [(entry["name"], "directory" if entry["type"] == "dir" else entry["type"])
                         for entry in entries], payload.get("truncated") is True
+    # The speech renderer may limit content blocks; counts must use every
+    # returned listing block, not just the excerpt prepared for reading.
+    if isinstance(data, dict) and isinstance(data.get("content"), list):
+        text = "\n".join(block["text"] for block in data["content"]
+                         if isinstance(block, dict) and block.get("type") == "text"
+                         and isinstance(block.get("text"), str))
     lines = text.splitlines()
     if lines and all(re.fullmatch(r"\[(FILE|DIR)\] .+", line) for line in lines):
         return [(line.split(" ", 1)[1], "file" if line.startswith("[FILE]") else "directory")
@@ -73,7 +79,7 @@ def summarize_result(data, text, question):
         if len(names) > 750:
             names = _names(selected, 5)
             limit = 5
-        suffix = " The remaining entries are shown on screen." if len(selected) > limit else ""
+        suffix = " The remaining entries are kept in the full result; see the detailed output on screen." if len(selected) > limit else ""
         partial_note = " This is a partial result." if partial else ""
         return counts_text + " Entries include " + names + "." + suffix + partial_note
 

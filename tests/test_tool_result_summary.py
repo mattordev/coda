@@ -25,6 +25,13 @@ class ToolResultSummaryTests(unittest.TestCase):
         self.assertIn("file99.py", prepare_tool_display(result))
         self.assertEqual(result.data, original)
 
+    def test_counts_use_all_content_blocks_instead_of_the_speech_excerpt(self):
+        result = ToolResult(True, {"content": [
+            {"type": "text", "text": f"[FILE] file{i}.py"} for i in range(100)
+        ]})
+        self.assertIn("100 files", prepare_tool_response(result))
+        self.assertNotIn("20 files", prepare_tool_response(result))
+
     def test_short_natural_text_passes_through(self):
         self.assertEqual(prepare_tool_response(ToolResult(True, "The printer is ready.")), "The printer is ready.")
 
