@@ -456,6 +456,22 @@ class UpdateManagerTests(unittest.TestCase):
         self.dependencies.assert_not_called()
         self.assertEqual((self.root / "main.py").read_text(), "old code")
 
+    def test_existing_link_cannot_redirect_archive_extraction(self):
+        workspace = self.root / 'attempt'
+        workspace.mkdir()
+        outside = self.root / 'outside'
+        outside.mkdir()
+        try:
+            (workspace / updater.EXTRACT_DIR).symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('Symbolic links require OS privileges')
+        with zipfile.ZipFile(workspace / updater.ZIP_NAME, 'w') as archive:
+            archive.writestr('file.txt', 'must not escape')
+        with self.assertRaises(ValueError):
+            updater.extract_download(workspace)
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual((self.root / "main.py").read_text(), "old code")
+
     def test_version_mismatch_is_rejected_before_dependency_installation(self):
         def download(workspace, release, progress=None):
             with zipfile.ZipFile(workspace / updater.ZIP_NAME, "w") as archive:

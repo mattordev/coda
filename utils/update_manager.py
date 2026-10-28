@@ -63,7 +63,11 @@ def extract_download(workspace):
     # Extract into a temp directory first, never directly into root.
     # Validate every member path to prevent Zip Slip directory traversal.
     extract_path = workspace / EXTRACT_DIR
+    _reject_links(extract_path)
     extract_path.mkdir(parents=True, exist_ok=True)
+    # Windows may supply an 8.3 alias for TEMP. Compare canonical paths on both
+    # sides, while still refusing an extraction directory redirected by a link.
+    extract_path = extract_path.resolve()
     with zipfile.ZipFile(workspace / ZIP_NAME, "r") as zip_ref:
         if len(zip_ref.infolist()) > 10000 or sum(item.file_size for item in zip_ref.infolist()) > 512 * 1024 * 1024:
             raise ValueError("Downloaded archive exceeds extraction limits")

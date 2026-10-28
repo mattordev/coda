@@ -218,6 +218,6 @@ print(json.dumps({'python': sys.executable, 'command': definition.command, 'resu
                                         text=True, timeout=45, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 payload = json.loads(result.stdout)
-                self.assertEqual(Path(payload['python']), python)
-                self.assertEqual(Path(payload['command']), python)
+                self.assertEqual(Path(payload['python']).resolve(), python.resolve())
+                self.assertEqual(Path(payload['command']).resolve(), python.resolve())
                 self.assertEqual(payload['result']['message'], 'archive probe')
