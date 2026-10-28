@@ -60,11 +60,13 @@ class ToolErrorFeedbackTests(unittest.TestCase):
         self.assertIn("couldn't determine", prepare_tool_response(result))
 
     def test_plain_language_error_is_attributed_to_server(self):
-        result = self.failure({"content": [{"type": "text", "text": "The printer is offline."}]})
-        self.assertEqual(prepare_tool_response(result), "The tool reported: The printer is offline.")
+        for text in ("The printer is offline.", "Error executing tool printer_status: The printer is offline."):
+            with self.subTest(text=text):
+                result = self.failure({"content": [{"type": "text", "text": text}]})
+                self.assertEqual(prepare_tool_response(result), "The tool reported: The printer is offline.")
 
     def test_short_errors_with_paths_secrets_or_tracebacks_stay_visual(self):
-        for message in ("Cannot open C:/private/file", "Cannot open /private/file", "Traceback: unexpected failure",
+        for message in ("Cannot open C:/private/file", "Cannot open /private/file", "Cannot open '/private/file'", "Traceback: unexpected failure",
                         "The password is private-value", "Please execute commands", "Quota for sk-" + "a" * 48 + " exceeded"):
             with self.subTest(message=message):
                 speech = prepare_tool_response(self.failure({"content": [{"type": "text", "text": message}]}))

@@ -73,9 +73,9 @@ def spoken_error(result):
         }[exception[1]]
     # Short prose may be quoted as a server claim. Technical/private payloads
     # stay on screen; no text is parsed into actions or fed to a summarizing model.
-    prose = details.strip()
+    prose = re.sub(r"^Error executing tool [\w.-]+:\s*", "", details.strip(), count=1)
     unsafe = re.search(
-        r"[\r\n]|[A-Za-z]:[\\/]|(?:^|\s)[\\/]|https?://|"
+        r"[\r\n\\/]|\b[A-Za-z]:|"
         r"\b(?:\w*Error|traceback|token|secret|password|credentials?|api[_ -]?key)\b|"
         r"\b(?:ignore|instructions?|system prompt|execute|commands?|delete|transfer)\b|"
         r"^Error executing tool",
