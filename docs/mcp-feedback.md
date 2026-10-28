@@ -48,6 +48,11 @@ independent diagnosis. Arbitrary/unknown exceptions get an honest spoken
 fallback and detailed visual feedback. Coda never follows instructions in an
 error payload or replays the action to obtain a better error.
 
+File-read results additionally recognize `file_not_found`, `is_a_directory`,
+`invalid_encoding` and `file_too_large`. These receive fixed explanations without
+speaking supplied filenames, paths or arbitrary server prose. Unclassified OS
+failures retain the honest unknown-cause fallback and detailed visual feedback.
+
 Short plain-language errors can be quoted as a server report (for example,
 "The tool reported: The printer is offline."). Messages containing paths,
 tracebacks, credential terms, recognized secrets or instruction-like wording
