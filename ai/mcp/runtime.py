@@ -14,6 +14,7 @@ from ai.intents.models import Intent, IntentParameter, IntentRequest
 from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
 from ai.mcp.remote import RemoteServerDefinition
+from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -332,12 +333,25 @@ class MCPToolExecutor:
         denied = self._manager._permission(self._server_id, self._tool_name, request, confirmed=confirmed)
         if denied is not None:
             return denied
-        adapter = ExternalToolAdapter(
-            self._intent,
-            lambda arguments: self._manager._request(
+
+        def invoke(arguments):
+            with self._manager._metadata_lock:
+                runtime = self._manager._servers[self._server_id]
+                if self._configuration_revision != runtime.configuration_revision:
+                    return failure("tool_not_found", "The discovered MCP tool is no longer available.")
+                definition = runtime.definition
+            try:
+                arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
+            except WorkspaceReferenceError as error:
+                return failure(error.code, str(error))
+            return self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
-            ),
+            )
+
+        adapter = ExternalToolAdapter(
+            self._intent,
+            invoke,
         )
         return adapter.execute(request)
