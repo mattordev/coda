@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from collections import deque
 from copy import deepcopy
 from dataclasses import replace
@@ -431,6 +432,17 @@ def call_provider(
     )
 
 
+def _interpretation_error(error):
+    """Keep actionable failure categories without logging provider payloads."""
+    text = str(error).casefold()
+    if 'timed out' in text or 'timeout' in text:
+        return "Interpretation provider timed out."
+    status = re.search(r'\b([45]\d\d)\s+(?:client|server)\s+error\b', text)
+    if status:
+        return f"Interpretation provider failed (HTTP {status[1]})."
+    return "Interpretation provider failed."
+
+
 def call_with_messages(provider_name, messages, *, cancel_event=None):
     """Stateless generation for bounded host-prepared input; never mutate dialogue."""
     if cancel_event is not None and cancel_event.is_set():
@@ -447,14 +459,14 @@ def call_with_messages(provider_name, messages, *, cancel_event=None):
         if cancel_event is not None and cancel_event.is_set():
             response, error = None, "Request cancelled."
         elif error:
-            response, error = None, "Interpretation provider failed."
+            response, error = None, _interpretation_error(error)
         elif response is not None and not isinstance(response, str):
             response, error = None, "Interpretation provider returned an invalid response."
         if isinstance(result, ProviderCallResult):
             return replace(result, response=response, error=error)
         return response, error
-    except Exception:
-        return None, "Interpretation provider failed."
+    except Exception as exc:
+        return None, _interpretation_error(exc)
 
 
 def get_provider_type(provider_name):

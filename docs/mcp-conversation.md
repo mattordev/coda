@@ -80,6 +80,18 @@ cancellation signals the internal provider request. Failed/empty interpretation
 returns an honest explanation and instructions for inspecting retained output.
 It does not label an already successful tool action as failed or repeat it.
 
+Slower local models can need more time than these defaults. Set both
+`CODA_LLM_TIMEOUT=120` and `CODA_MCP_INTERPRET_TIMEOUT_SECONDS=120` in your private
+`.env` when needed, then restart CODA. The first also controls ordinary provider
+calls, including the local intent classifier; the second bounds the complete
+interpretation step. Raising only one can leave the other deadline active.
+
+Debug output reports the interpretation privacy level, cloud action and eligible
+provider order without source contents. Provider errors retain safe timeout/HTTP
+status categories, rather than logging arbitrary error bodies. An intent-classifier
+failure is reported as a routing failure with no action run; it does not fall
+through to conversational generation that could invent tool-call text.
+
 Generation is stateless: synthetic prompts, whole file bodies and failed provider
 attempts are not appended as user conversation turns. The final answer and one
 bounded untrusted source excerpt are recorded with the real user request. Provider
@@ -112,8 +124,10 @@ manager or recursive agent. Existing provider generation settings apply; charact
 and wall-clock budgets bound this step, rather than promising a model-specific
 token quota or measured speedup.
 
-Two host-controlled system instructions separate tool observations from authority,
-including when an operator customizes the main prompt. Tool content is in a user
+One leading system message combines the bounded host prompt and mandatory
+interpretation instructions, supporting local chat templates that reject multiple
+system messages. The mandatory instructions remain outside the configurable prompt
+cap. Tool content is in a user
 data payload, never a system instruction. The interpreter exposes no tools and
 cannot execute model-proposed actions. These controls prevent automatic instruction
 execution; they are not a formal guarantee that a probabilistic model will never

@@ -86,6 +86,18 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         catalog = json.loads(self.generate.call_args.args[0][1]["content"])["available_intents"]
         self.assertIn("input_schema", catalog[0])
 
+    def test_classifier_timeout_does_not_fall_through_to_chat_or_execute_a_tool(self):
+        self.configure()
+        self.generate.return_value = (None, 'llama.cpp timed out after 45.0 seconds.')
+        with patch.object(runtime, '_llm_fallback_enabled', return_value=True), patch('builtins.print') as output:
+            result = runtime.on_command('please echo hello', {})
+        self.assertTrue(result.handled)
+        self.assertIn('intent routing failed', result.response_text)
+        self.assertIn('No action was run', result.response_text)
+        self.assertEqual(self.calls, [])
+        self.fallback.assert_not_called()
+        output.assert_called_once_with(f'CODA: {result.response_text}')
+
     def test_explicit_json_works_without_argument_model(self):
         self.configure()
         self.generate.return_value = ('{"intent":null,"confidence":0}', None)
