@@ -1,5 +1,6 @@
 {
   "read": {
+    "workspace_roots": [],
     "allowed_roots": [],
     "blocked_paths": ["**/.env", "**/.ssh", "**/credentials.json"]
   },
