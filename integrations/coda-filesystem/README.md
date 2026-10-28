@@ -12,7 +12,7 @@ so Coda can explain them without speaking private paths.
    `read.allowed_roots`. An empty list grants no access. Configure
    `read.blocked_paths` as needed; the example blocks common sensitive names.
 2. Copy `mcp_servers/filesystem.json.example` to
-   `mcp_servers/filesystem.json`. Explicitly set `trusted` to `true` and
+   `mcp_servers/filesystem.json`. Explicitly set `enabled` and `trusted` to `true` and
    `allowed_tools` to `["list_directory"]` when ready to permit that action.
 3. Start Coda normally, then use manual mode, for example:
    `mcp.filesystem.list_directory {"path":"D:/Projects"}`.
@@ -29,8 +29,11 @@ definitions continue to work; bundled definitions cannot mix those launch fields
 For an existing local definition, replace `command` and `args` with
 `"bundled_server": "filesystem"`. Preserve your trust, allowlist, confirmation,
 environment and session choices. User definitions and filesystem permissions
-are Git-ignored; commit only examples. Back up private configuration before
-upgrading; broader bundle/update lifecycle work is tracked separately in #166.
+are Git-ignored; commit only examples. Existing bundled definitions must add
+`"enabled": true` to opt in after upgrading. No private file is migrated automatically.
+Supported archive updates preserve private definitions and `*.config.json` files
+beside installed servers. See [bundled MCP lifecycle](../../docs/mcp-bundled.md)
+for settings, inspection and update/rollback behavior.
 
 For other MCP clients, run this script with an interpreter containing the
 project's locked MCP SDK. Optional `--config /absolute/permissions.json` selects

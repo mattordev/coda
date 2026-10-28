@@ -17,6 +17,10 @@ classifier decision. There is only one classification attempt per routed request
 
 ## Configuration and trust
 
+First-party bundles add explicit opt-in, manifest settings and update preservation;
+see [bundled MCP lifecycle](mcp-bundled.md). Ordinary local/remote definitions below
+retain their existing behavior.
+
 The default directory is `mcp_servers` at the repository root. Override it with
 `CODA_MCP_CONFIG_DIR` or pass a directory to `LocalMCPManager.from_directory()`.
 Each server has one independent `.json` file; no index is required. A missing
