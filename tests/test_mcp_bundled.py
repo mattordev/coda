@@ -18,6 +18,54 @@ from ai.mcp.transport import SDKStdioTransport
 
 
 class BundledMCPTests(unittest.TestCase):
+    def test_new_read_tool_requires_explicit_grant_and_reads_through_real_server(self):
+        from ai.intents import IntentRequest
+        from ai.mcp.runtime import LocalMCPManager
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            source.write_text("Python 3.11 and 3.12", encoding="utf-8")
+            permissions = root / "permissions.json"
+            permissions.write_text(json.dumps({"read": {
+                "allowed_roots": [str(root)], "blocked_paths": ["**/.env"],
+            }}), encoding="utf-8")
+            configs = root / "servers"
+            configs.mkdir()
+            (configs / "files.json").write_text(json.dumps({
+                "id": "files", "bundled_server": "filesystem", "enabled": True,
+                "trusted": True, "allowed_tools": ["list_directory"],
+                "settings": {"config_file": str(permissions)},
+            }), encoding="utf-8")
+            definition = discover_definitions(configs).servers[0]
+            manager = LocalMCPManager([definition])
+            self.addCleanup(manager.close)
+            discovered = manager.discover("files")
+            self.assertTrue(discovered.success, discovered.error)
+            self.assertEqual({item.name for item in discovered.data}, {
+                "mcp.files.list_directory", "mcp.files.read_file",
+            })
+            intent = next(item for item in discovered.data if item.name == "mcp.files.read_file")
+            request = IntentRequest(intent, "Read README", 1, arguments={"path": str(source)})
+            self.assertEqual(manager.executor(intent.name).execute(request).error.code, "permission_denied")
+            self.assertTrue(manager.replace_definition(replace(
+                definition, allowed_tools=frozenset({"list_directory", "read_file"}),
+            )).success)
+            discovered = manager.discover("files")
+            self.assertTrue(discovered.success, discovered.error)
+            intent = next(item for item in discovered.data if item.name == "mcp.files.read_file")
+            request = IntentRequest(intent, "Read README", 1, arguments={"path": str(source)})
+            result = manager.executor(intent.name).execute(request)
+            self.assertTrue(result.success, result.error)
+            self.assertEqual(result.data["content"][0]["text"], "Python 3.11 and 3.12")
+            self.assertEqual(result.data["structuredContent"], {"kind": "file_contents"})
+            blocked = root / ".env"
+            blocked.write_text("private", encoding="utf-8")
+            request = IntentRequest(intent, "Read file", 1, arguments={"path": str(blocked)})
+            result = manager.executor(intent.name).execute(request)
+            self.assertFalse(result.success)
+            self.assertEqual(result.data["structuredContent"]["error"]["code"], "blocked_path")
+
     def install_manifest(self, directory):
         source = Path(__file__).resolve().parents[1] / "integrations" / "coda-filesystem" / "manifest.json"
         (directory / "manifest.json").write_bytes(source.read_bytes())

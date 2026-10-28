@@ -44,6 +44,64 @@ def list_directory(path: str) -> CallToolResult:
         content=[TextContent(type="text", text=text or "No accessible entries were returned.")],
         structuredContent={"kind": "directory_listing", "entries": entries},
     )
+    
+@server.tool(structured_output=False)
+def read_file(path: str) -> CallToolResult:
+    """Read a specified file."""
+    
+    try:
+        if not path.strip() or not Path(path).is_absolute():
+                raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute file path.")
+        config = load_config()
+        check_if_path_is_allowed(config, path)
+        check_if_path_is_blocked(config, path)
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except PermissionError as error:
+        return error_result("permission_denied", str(error))
+    except NotADirectoryError as error:
+        return error_result("not_a_directory", str(error))
+    except FileNotFoundError as error:
+        return error_result("not_found", str(error))
+    
+    requested_path = get_full_path(path)
+    # make sure the file exists
+    is_file = requested_path.is_file()
+    
+    if is_file:
+        # do file reading
+        try: 
+            text = read_safe_file(requested_path)
+        except UnicodeDecodeError as error:
+            return error_result("invalid_encoding", f"Not the correct file type: {error}")
+        except ValueError as error:
+            return error_result("file_too_large", str(error))
+        except OSError as error:
+            return error_result("os_error", str(error))
+        return CallToolResult(
+                content=[TextContent(type="text", text=text)],
+                structuredContent={"kind": "file_contents"},
+            )
+    elif requested_path.is_dir():
+        return error_result("is_a_directory", f"{requested_path} is a directory, not a file.")
+    else:
+        return error_result("file_not_found", f"File not found at: {requested_path}")
+
+        
+
+def read_safe_file(path: Path) -> str:
+    """Bound the actual read, including files that grow after the size check."""
+    max_file_size_mib = 1
+    max_file_size_b = max_file_size_mib * 1024 * 1024   
+
+    if path.stat().st_size > max_file_size_b:
+        raise ValueError(f"{path.name} is too big to be read, please open it manually.")
+    with path.open("rb") as source:
+        data = source.read(max_file_size_b + 1)
+    if len(data) > max_file_size_b:
+        raise ValueError(f"{path.name} is too big to be read, please open it manually.")
+    # Match read_text's universal newline handling without an unbounded text read.
+    return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def error_result(code, message):
@@ -60,7 +118,7 @@ def directory_entries(path: str) -> list[dict[str, str | float]]:
     config = load_config()
     check_if_path_is_allowed(config, path)
     check_if_path_is_blocked(config, path)
-    requested_path = Path(path).resolve()
+    requested_path = get_full_path(path)
     if not requested_path.is_dir():
         if not requested_path.exists():
             raise FileNotFoundError(f"Directory not found: {path}")
@@ -149,6 +207,9 @@ def load_config() -> dict:
             "configuration_error", "Filesystem configuration is missing or invalid. Check filesystem.config.json."
         ) from error
     return config
+
+def get_full_path(incomplete_path: str) -> Path:
+    return Path(incomplete_path).resolve()
 
 
 if __name__ == "__main__":

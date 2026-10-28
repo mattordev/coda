@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -111,3 +112,91 @@ class FilesystemMCPTests(unittest.TestCase):
         self.assertEqual(self.code(link), "outside_allowed_roots")
         self.assertEqual(self.code(self.root / "alias"), "blocked_path")
         self.assertEqual(filesystem.list_directory(str(self.root)).structured_content["entries"], [])
+
+    def read_code(self, path):
+        result = filesystem.read_file(str(path))
+        self.assertTrue(result.is_error)
+        return result.structured_content["error"]["code"]
+
+    def test_file_read_preserves_utf8_and_universal_newlines(self):
+        source = self.root / "notes.txt"
+        source.write_bytes("Python 3.11 / 3.12 — café\r\nnext\rlast\n".encode("utf-8"))
+        result = filesystem.read_file(str(source))
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.content[0].text, "Python 3.11 / 3.12 — café\nnext\nlast\n")
+        self.assertEqual(result.structured_content, {"kind": "file_contents"})
+        source.write_bytes(b"")
+        self.assertEqual(filesystem.read_file(str(source)).content[0].text, "")
+
+    def test_file_read_limit_is_bytes_and_accepts_exact_limit(self):
+        source = self.root / "large.txt"
+        source.write_bytes(b"x" * (1024 * 1024))
+        result = filesystem.read_file(str(source))
+        self.assertFalse(result.is_error)
+        self.assertEqual(len(result.content[0].text), 1024 * 1024)
+        source.write_bytes(b"x" * (1024 * 1024 + 1))
+        self.assertEqual(self.read_code(source), "file_too_large")
+        source.write_bytes("é".encode("utf-8") * (600 * 1024))
+        self.assertEqual(self.read_code(source), "file_too_large")
+
+    def test_file_growth_after_stat_cannot_bypass_bounded_read(self):
+        source = self.root / "growing.txt"
+        source.write_bytes(b"x" * (1024 * 1024 + 1))
+        # Simulate a small stat result followed by growth before the actual read.
+        with patch.object(Path, "stat", return_value=SimpleNamespace(st_size=1)):
+            with self.assertRaisesRegex(ValueError, "too big"):
+                filesystem.read_safe_file(source)
+
+    def test_file_read_distinguishes_invalid_encoding_missing_and_directory(self):
+        source = self.root / "binary.bin"
+        source.write_bytes(b"\xff\xfe")
+        self.assertEqual(self.read_code(source), "invalid_encoding")
+        self.assertEqual(self.read_code(self.root / "missing.txt"), "file_not_found")
+        self.assertEqual(self.read_code(self.root), "is_a_directory")
+        for path in ("", "relative.txt", "../outside.txt"):
+            self.assertEqual(self.read_code(path), "invalid_arguments")
+
+    def test_file_read_respects_roots_blocked_ancestors_and_revocation(self):
+        outside = self.base / "outside.txt"
+        outside.write_text("outside", encoding="utf-8")
+        self.assertEqual(self.read_code(outside), "outside_allowed_roots")
+        blocked = self.root / ".ssh-test"
+        blocked.mkdir()
+        source = blocked / "nested.txt"
+        source.write_text("private", encoding="utf-8")
+        self.assertEqual(self.read_code(source), "blocked_path")
+        source = self.root / "allowed.txt"
+        source.write_text("allowed", encoding="utf-8")
+        self.assertFalse(filesystem.read_file(str(source)).is_error)
+        self.configure(allowed_roots=[])
+        self.assertEqual(self.read_code(source), "outside_allowed_roots")
+
+    def test_file_read_missing_and_malformed_config_fail_closed(self):
+        source = self.root / "notes.txt"
+        source.write_text("private", encoding="utf-8")
+        self.config_path.unlink()
+        self.assertEqual(self.read_code(source), "configuration_error")
+        for text in ("{", "null", '{"read": {}}'):
+            self.config_path.write_text(text, encoding="utf-8")
+            self.assertEqual(self.read_code(source), "configuration_error")
+
+    def test_file_read_open_failure_returns_error_without_partial_data(self):
+        source = self.root / "notes.txt"
+        source.write_text("private", encoding="utf-8")
+        with patch.object(filesystem, "read_safe_file", side_effect=PermissionError("unavailable")):
+            self.assertEqual(self.read_code(source), "os_error")
+
+    def test_file_read_links_cannot_escape_or_hide_blocked_names(self):
+        outside = self.base / "outside.txt"
+        outside.write_text("outside", encoding="utf-8")
+        link = self.root / "alias.txt"
+        try:
+            link.symlink_to(outside)
+        except OSError:
+            self.skipTest("Symbolic links unavailable")
+        self.assertEqual(self.read_code(link), "outside_allowed_roots")
+        link.unlink()
+        inside = self.root / "inside.txt"
+        inside.write_text("inside", encoding="utf-8")
+        (self.root / ".env").symlink_to(inside)
+        self.assertEqual(self.read_code(self.root / ".env"), "blocked_path")

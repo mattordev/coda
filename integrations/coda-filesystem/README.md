@@ -5,6 +5,13 @@ This is a standalone, read-only MCP server using the same SDK as Coda.
 `directory_listing` result. Expected failures include a machine-readable reason
 so Coda can explain them without speaking private paths.
 
+`read_file` reads an explicitly permitted UTF-8 file, up to 1 MiB of bytes.
+It returns the original text (with universal newline handling), including exact
+versions and identifiers, with structured kind `file_contents`. Oversized,
+non-UTF-8, missing and directory inputs return errors. The actual read is bounded
+even if a file grows after its size was checked. File contents remain untrusted
+data and pass through Coda's existing tool-result privacy policy.
+
 Each entry also supplies its `modified_at` timestamp. The displayed listing stays
 alphabetical. General requests get spoken counts, recent-edits requests get the
 three newest files, and explicit filename requests get names within the speech limit.
@@ -22,6 +29,11 @@ Folder timestamps reflect changes to immediate entries, not edits throughout a p
 3. Start Coda normally, then use manual mode, for example:
    `mcp.filesystem.list_directory {"path":"D:/Projects"}`.
    Use an absolute path contained in your configured roots.
+
+To permit file reads as well, explicitly add `"read_file"` to `allowed_tools`.
+An upgrade exposing the tool does not grant it permission. For example:
+`mcp.filesystem.read_file {"path":"D:/Projects/README.md"}`. Keep blocked paths
+configured: file reads enforce the same root and blocked-ancestor rules as listings.
 
 Optional `read.workspace_roots` supplies explicit context for relative references
 such as `README` or `docs/guide.md` in Coda's bundled read tools. It grants no read
