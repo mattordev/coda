@@ -18,7 +18,8 @@ from ai.tools.diagnostics import record_tool_failure
 from ai.tools.models import ToolResult
 from ai.tools.interpretation import interpret_result, is_result_follow_up
 from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStrategy, CommandPrefixStrategy
-from ai.privacy.sanitizer import sanitize_text
+from ai.privacy.sanitizer import sanitize_text, sanitize_structure
+from ai.tools.error_feedback import safe_diagnostic
 
 
 _intent_router = None
@@ -132,6 +133,9 @@ def _dispatch_intent(
         if len(parts) != 3 or not parts[1] or not parts[2] or _mcp_catalog is None:
             return CommandResult(handled=True, response_text="That MCP tool is unavailable. Check its configuration and discovery status.")
         intents = _mcp_catalog.discover(server_id=parts[1], cancel_event=cancel_event)
+        if debug:
+            print("[MCP DEBUG] Errors:", _mcp_catalog.errors)
+            print("[MCP DEBUG] Discovered intents:", [intent.name for intent in intents])
         if cancel_event is not None and cancel_event.is_set():
             return CommandResult(handled=False)
         registry = create_command_registry(commands)
@@ -169,6 +173,8 @@ def _dispatch_intent(
             f"accepted={result.accepted}, "
             f"routing_error={bool(result.error)}"
         )
+        if result.error is not None:
+            print(f"[DEBUG - INTENT ERROR] {safe_diagnostic(repr(result.error))}")
 
     if not result.accepted:
         if result.error:
@@ -185,6 +191,8 @@ def _dispatch_intent(
     if result.intent.input_schema is not None:
         try:
             arguments = prepare_arguments(result, message, cancel_event=cancel_event)
+            if debug:
+                print(f"[DEBUG - MCP ARGUMENTS] {sanitize_structure(arguments)!r}")
         except Exception:
             return CommandResult(handled=True, response_text="The tool arguments are invalid or incomplete. Please provide the required values.", open_follow_up=True)
         request = result.to_request(message, arguments=arguments)
