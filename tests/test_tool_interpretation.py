@@ -215,8 +215,9 @@ class ToolInterpretationTests(InterpretationTestCase):
     def test_console_response_equals_command_result_and_details_are_opt_in(self):
         request = IntentRequest(Intent('mcp.filesystem.read_file', 'Read a file', source='mcp'), 'Read the README', 1)
         result = document()
-        with patch('builtins.print') as output:
-            command_result = command._tool_outcome(request, result)
+        with patch.object(command, '_dispatch_intent', side_effect=lambda *_args, **_kwargs: command._tool_outcome(request, result)), \
+             patch('builtins.print') as output:
+            command_result = command.on_command(request.message, {})
         output.assert_called_once_with(f'CODA: {command_result.response_text}')
         self.assertIs(command_result.tool_result, result)
         self.assertIn('CODA is a local-first', command_result.display_text)
@@ -251,7 +252,7 @@ class ToolInterpretationTests(InterpretationTestCase):
         result = document('Content. ' * 2000 + ' person@example.com')
         history.record_tool_exchange('Read README', result, 'Overview.')
         with patch('builtins.print') as output:
-            reply = command._retained_tool_reply('show full tool output')
+            reply = command.on_command('show full tool output', {})
         self.generate.assert_not_called()
         self.assertNotIn('person@example.com', reply.display_text)
         self.assertGreater(len(reply.display_text), 12000)
@@ -294,6 +295,13 @@ class StatelessProviderTests(unittest.TestCase):
 
 
 class AdditionalInterpretationTests(InterpretationTestCase):
+    def test_pre_tool_clarification_and_confirmation_are_printed_once_as_queued_response(self):
+        for text in ('The tool arguments are invalid or incomplete.', 'Confirm the action mcp.test.echo? Say confirm or cancel.'):
+            with self.subTest(text=text), patch.object(command, '_dispatch_intent', return_value=command.CommandResult(True, response_text=text)), \
+                 patch('builtins.print') as output:
+                reply = command.on_command('Run the requested action', {})
+            output.assert_called_once_with(f'CODA: {reply.response_text}')
+
     def test_natural_language_real_mcp_document_then_follow_up_does_not_read_again(self):
         from pathlib import Path
         import sys
@@ -430,7 +438,7 @@ server.run(transport="stdio")
             queues, stop = RuntimeQueues(), Event()
             request = RuntimeRequest('Read README', source)
             with self.subTest(source=source), patch.object(coda_runtime, 'runtime_queues', queues), \
-                 patch.object(coda_runtime.command, 'run', side_effect=lambda *_args, **_kwargs: command._tool_outcome(request_intent, document())), \
+                 patch.object(command, '_dispatch_intent', side_effect=lambda *_args, **_kwargs: command._tool_outcome(request_intent, document())), \
                  patch.object(coda_runtime.dashboard_state, 'record_ai_response') as dashboard, \
                  patch('builtins.print') as output:
                 worker = Thread(target=coda_runtime._execution_loop, args=(stop,))
