@@ -55,6 +55,10 @@ The active roadmap is maintained in the
 - [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
+- [v1.5.1 - Bundled First-Party MCP Servers](https://github.com/mattordev/coda/milestone/12)
+
+See the [v1.5.1 release notes](docs/release-notes-v1.5.1.md) for setup changes,
+validation and limitations.
 
 ### Future Milestones
 
