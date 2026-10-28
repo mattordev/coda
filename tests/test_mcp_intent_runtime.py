@@ -30,6 +30,16 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         log = patch.object(history, "conversation_log", [])
         log.start()
         self.addCleanup(log.stop)
+        interpretation = patch.object(history, "call_with_messages", return_value=("The tool returned the requested data.", None))
+        interpretation.start()
+        self.addCleanup(interpretation.stop)
+        for name, options in (
+            ("should_skip_provider", {"return_value": False}),
+            ("log_attempt", {}), ("log_failure", {}), ("record_attempt", {}),
+        ):
+            telemetry = patch("ai.llm_router.core.logger." + name, **options)
+            telemetry.start()
+            self.addCleanup(telemetry.stop)
         self.generate = Mock(return_value=(json.dumps({
             "intent": "mcp.test.echo", "confidence": 0.95, "arguments": {"message": "hello"},
         }), None))
@@ -76,6 +86,18 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         catalog = json.loads(self.generate.call_args.args[0][1]["content"])["available_intents"]
         self.assertIn("input_schema", catalog[0])
 
+    def test_classifier_timeout_does_not_fall_through_to_chat_or_execute_a_tool(self):
+        self.configure()
+        self.generate.return_value = (None, 'llama.cpp timed out after 45.0 seconds.')
+        with patch.object(runtime, '_llm_fallback_enabled', return_value=True), patch('builtins.print') as output:
+            result = runtime.on_command('please echo hello', {})
+        self.assertTrue(result.handled)
+        self.assertIn('intent routing failed', result.response_text)
+        self.assertIn('No action was run', result.response_text)
+        self.assertEqual(self.calls, [])
+        self.fallback.assert_not_called()
+        output.assert_called_once_with(f'CODA: {result.response_text}')
+
     def test_explicit_json_works_without_argument_model(self):
         self.configure()
         self.generate.return_value = ('{"intent":null,"confidence":0}', None)
@@ -97,7 +119,7 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertIs(result.tool_result, self.outcome)
         self.assertIn("/private/location", history.conversation_log[-1]["content"])
         log.assert_called_once_with("mcp.test.echo", result.display_text)
-        output.assert_called_once_with(f"CODA: {result.display_text}")
+        output.assert_called_once_with(f"CODA: {result.response_text}")
         self.fallback.assert_not_called()
 
     def test_large_listing_keeps_visual_result_and_question_specific_speech(self):

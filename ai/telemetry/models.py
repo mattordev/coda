@@ -24,6 +24,7 @@ class WorkloadPurpose(str, Enum):
 
     CONVERSATION = "conversation"
     INTENT_CLASSIFICATION = "intent_classification"
+    TOOL_INTERPRETATION = "tool_interpretation"
 
 
 class ProviderLocality(str, Enum):

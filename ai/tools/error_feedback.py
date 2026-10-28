@@ -83,7 +83,7 @@ def spoken_error(result):
     )
     if 2 <= len(prose.split()) <= 35 and len(prose) <= 220 and not unsafe and safe_diagnostic(prose) == prose:
         return "The tool reported: " + prose
-    return "The tool reported a failure. I couldn't determine the reason. Details are available on screen."
+    return "The tool reported a failure. I couldn't determine the reason. Say show tool output for details."
 
 
 def error_display(result):

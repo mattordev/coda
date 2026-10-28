@@ -30,7 +30,17 @@ def prepare_tool_context(
             if action == policy.ACTION_SUMMARIZE:
                 text = "The tool succeeded." if result.success else "The tool failed."
             elif action == policy.ACTION_SANITIZE:
-                text = json.dumps(sanitize_structure(envelope), ensure_ascii=False, allow_nan=False)
+                sanitized = json.dumps(sanitize_structure(envelope), ensure_ascii=False, allow_nan=False)
+                if sanitized == text:
+                    # Sensitive context without identifiable redactable spans is
+                    # not safe to send unchanged merely because sanitize was selected.
+                    return None
+                text = sanitized
     except (TypeError, ValueError, RecursionError):
         return None
-    return text[:max_chars]
+    if len(text) <= max_chars:
+        return text
+    marker = "\n[Tool context excerpt; remaining data omitted.]"
+    if max_chars <= len(marker):
+        return marker[:max_chars]
+    return text[:max_chars - len(marker)] + marker

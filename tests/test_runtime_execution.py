@@ -20,7 +20,7 @@ from ai.tools.models import ToolResult
 
 class RuntimeExecutionTests(unittest.TestCase):
 
-    def test_runtime_displays_details_queues_summary_and_retains_full_result(self):
+    def test_runtime_displays_and_queues_same_summary_and_retains_full_result(self):
         queues = RuntimeQueues()
         stop_event = threading.Event()
         request = RuntimeRequest("list directory", InputSource.MANUAL)
@@ -44,7 +44,8 @@ class RuntimeExecutionTests(unittest.TestCase):
                 worker.join(timeout=3)
         self.assertIs(result.tool_result, raw)
         self.assertEqual(task.text, command_result.response_text)
-        display.assert_called_once_with(command_result.display_text, source="tts")
+        display.assert_called_once_with(command_result.response_text, source="tts")
+        self.assertEqual(result.display_text, command_result.display_text)
         self.assertFalse(worker.is_alive())
 
     def test_detailed_display_and_speech_survive_execution_conversion(self):

@@ -19,7 +19,8 @@ bounded by result count and the existing per-server output limit.
 The SDK error envelope already survives in `ToolResult.data`. Coda keeps the
 normalized `ToolError.code` (tool failure, connection failure, protocol error,
 timeout, cancellation, etc.) rather than guessing a transport cause from server
-text. Terminal/dashboard feedback includes sanitized server details. Local
+text. The conversational console/dashboard reply matches speech; sanitized server
+details are available through `show tool output` or debug output. Local
 diagnostics are stored in `logs/mcp/failures.log`, rotating at 256 KB with two
 backups. Logging failure does not prevent feedback. Known secrets and terminal
 control sequences are removed; these local logs can still contain resource
@@ -53,7 +54,7 @@ tracebacks, credential terms, recognized secrets or instruction-like wording
 remain visual only. This is a conservative deterministic filter, not a semantic
 verification of a server's claims.
 
-If speech cannot explain a failure, inspect terminal/dashboard output and the
+If speech cannot explain a failure, request `show tool output` and inspect the
 local log. Missing server details remain unknown; check the server's own
 configuration and diagnostics. Raw SDK exception strings, subprocess stderr and
 stack traces are not automatically enabled or forwarded.
@@ -66,9 +67,12 @@ operation still uses only the normal timeout.
 
 ## Successful results
 
-Terminal and dashboard receive detailed sanitized output (up to 12,000
-characters); speech has its own 1,200-character budget. Truncation is marked
-with an ellipsis and never changes the retained raw result.
+Console `CODA:`, dashboard response and queued speech share one finalized reply
+(up to 1,200 characters). Detailed sanitized output (up to 12,000 characters)
+remains on the execution result and is printed under `[MCP OUTPUT]` in debug mode
+or when requested with `show tool output`. `show full tool output` exposes the
+redacted normalized JSON envelope without readable-renderer depth/item limits,
+subject to an explicit 8 MiB console cap. Truncation never changes retained data.
 
 For interoperable directory summaries a server can return
 `structuredContent: {"kind": "directory_listing", "entries": [{"name":
@@ -106,13 +110,13 @@ bounded project scan is implemented.
 Requests for counts, files/folders, all names or a named entry influence speech; large exact-name
 requests still point to visual output when they exceed the speech budget.
 
-Generic large arrays get item counts, and long unrecognized text is signposted
-on screen rather than read in full. Short natural text passes through. Missing
+Short natural text passes through. Missing
 content keeps the neutral completion fallback, separate from a known empty
 listing. Arbitrary entry values are quoted data, never instructions or actions.
 
-Summarization is deterministic and makes no LLM calls, so it adds no model cost,
-network latency or new cloud exposure. Optional LLM summarization was considered
-and deferred: predictable structures cover the current need. Any future opt-in
-summarizer must have bounded latency/cost, preserve original-question grounding,
-apply local/cloud privacy policy and fall back safely without replaying tools.
+Known directory summaries remain deterministic and make no LLM calls. Automatic
+interpretation of long/complex or explicitly requested explanations uses the
+existing privacy-aware provider router with bounded, stateless input and a safe
+fallback. Set `CODA_MCP_INTERPRETATION=direct` for deterministic presentation only.
+See [conversational interpretation](mcp-conversation.md) for policy, timeouts,
+partial excerpts, follow-up, inspection commands and limitations.

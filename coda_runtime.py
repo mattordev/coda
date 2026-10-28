@@ -429,7 +429,7 @@ def _execution_loop(stop_event):
                     and not execution_result.cancelled
                 ):
                     dashboard_state.record_ai_response(
-                        execution_result.display_text or execution_result.response_text,
+                        execution_result.response_text,
                         source="tts",
                     )
                     runtime_queues.speech.put(
