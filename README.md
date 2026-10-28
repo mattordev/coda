@@ -432,6 +432,7 @@ Commands are self-registering modules that own their intent metadata and
 - [MCP display, speech and failure feedback](docs/mcp-feedback.md)
 - [Conversational MCP interpretation and follow-up](docs/mcp-conversation.md)
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
+- [Safe filesystem workspace references](docs/mcp-workspaces.md)
 - [Bundled MCP catalog, settings and update lifecycle](docs/mcp-bundled.md)
 - [Optional model pre-warming](docs/model-prewarming.md)
 

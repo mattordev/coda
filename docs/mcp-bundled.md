@@ -31,6 +31,11 @@ selects another permissions file using its existing `--config` argument. Omissio
 uses `filesystem.config.json` beside the server. Credentials still use `env` variable
 references, resolved only at connection. Do not put credentials in settings or args.
 
+The filesystem permissions file also accepts optional `read.workspace_roots` for
+[bounded relative references](mcp-workspaces.md). These are explicit resolution
+context, independent of `read.allowed_roots`; omitted/empty workspaces grant no
+relative resolution and never inherit the current working directory.
+
 ## Manifest contract
 
 Each installed `integrations/<directory>/manifest.json` describes one bundle.

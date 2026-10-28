@@ -23,6 +23,11 @@ Folder timestamps reflect changes to immediate entries, not edits throughout a p
    `mcp.filesystem.list_directory {"path":"D:/Projects"}`.
    Use an absolute path contained in your configured roots.
 
+Optional `read.workspace_roots` supplies explicit context for relative references
+such as `README` or `docs/guide.md` in Coda's bundled read tools. It grants no read
+permission and defaults to an empty list. See [workspace references](../../docs/mcp-workspaces.md)
+for configuration, bounded matching, clarification and link restrictions.
+
 The bundled definition selects `"bundled_server": "filesystem"`. Coda uses
 its active Python interpreter and resolves the fixed server entrypoint from
 its installation directory. No `G:/GitRepos/coda` path or PATH-dependent
