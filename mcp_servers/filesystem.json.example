@@ -2,6 +2,7 @@
   "id": "filesystem",
   "transport": "stdio",
   "bundled_server": "filesystem",
+  "enabled": false,
   "trusted": false,
   "allowed_tools": [],
   "session_mode": "operation",

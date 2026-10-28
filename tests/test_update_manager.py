@@ -78,6 +78,87 @@ class UpdateManagerTests(unittest.TestCase):
         attempt = next(p for p in self.root.glob(".coda-update-*") if p.is_dir())
         self.assertEqual((attempt / updater.BACKUP_DIR / "main.py").read_text(), "old code")
 
+    def add_mcp_configuration(self):
+        configs = self.root / "mcp_servers"
+        configs.mkdir()
+        definition = configs / "private.json"
+        definition.write_text(json.dumps({
+            "id": "files", "bundled_server": "filesystem", "enabled": True,
+            "trusted": True, "allowed_tools": ["list_directory"],
+            "env": {"API_KEY": "PRIVATE_KEY"}, "settings": {"label": "private"},
+        }), encoding="utf-8")
+        integration = self.root / "integrations" / "coda-filesystem"
+        integration.mkdir(parents=True)
+        permissions = integration / "filesystem.config.json"
+        permissions.write_text('{"read":{"allowed_roots":["/private"],"blocked_paths":[]}}', encoding="utf-8")
+        (integration / "server.py").write_text("old server", encoding="utf-8")
+        return {path.relative_to(self.root): path.read_bytes() for path in (definition, permissions)}
+
+    def test_archive_upgrade_and_rollback_preserve_mcp_permissions_exactly(self):
+        originals = self.add_mcp_configuration()
+        original_download = self.download
+
+        def download(workspace, release, progress=None):
+            original_download(workspace, release, progress)
+            with zipfile.ZipFile(workspace / updater.ZIP_NAME, "a") as archive:
+                archive.writestr(f"{release.archive_root}/integrations/coda-filesystem/server.py", "new server")
+                archive.writestr(f"{release.archive_root}/mcp_servers/new.json.example", "{}")
+
+        for fail in (True, False):
+            with self.subTest(rollback=fail):
+                self.readiness.side_effect = TimeoutError("startup failed") if fail else None
+                with patch.object(updater, "update_program", side_effect=download):
+                    self.assertEqual(updater.main(self.root), not fail)
+                for relative, data in originals.items():
+                    self.assertEqual((self.root / relative).read_bytes(), data)
+                self.assertFalse((self.root / "mcp_servers" / "new.json").exists())
+                expected = "old server" if fail else "new server"
+                self.assertEqual((self.root / "integrations/coda-filesystem/server.py").read_text(), expected)
+
+    def test_active_definitions_in_archive_rejected_before_dependencies(self):
+        original_download = self.download
+
+        def download(workspace, release, progress=None):
+            original_download(workspace, release, progress)
+            with zipfile.ZipFile(workspace / updater.ZIP_NAME, "a") as archive:
+                archive.writestr(f"{release.archive_root}/mcp_servers/active.json", "{}")
+
+        with patch.object(updater, "update_program", side_effect=download):
+            self.assertFalse(updater.main(self.root))
+        self.dependencies.assert_not_called()
+
+    def test_permission_revocation_during_dependency_preparation_prevents_stale_activation(self):
+        self.add_mcp_configuration()
+        with patch.object(updater, "update_program", side_effect=self.download):
+            prepared = updater.prepare_update(self.root)
+        self.assertIsNotNone(prepared)
+        definition = self.root / 'mcp_servers/private.json'
+        definition.write_text('{"id":"files","enabled":false}', encoding='utf-8')
+        with patch.object(updater, 'activate_updated_program') as activate:
+            self.assertIsNone(updater.complete_update(prepared))
+        activate.assert_not_called()
+        self.assertEqual(definition.read_text(), '{"id":"files","enabled":false}')
+        self.assertEqual((self.root / 'main.py').read_text(), 'old code')
+
+    def test_linked_private_mcp_file_is_not_copied(self):
+        configs = self.root / "mcp_servers"
+        configs.mkdir()
+        try:
+            (configs / "linked.json").symlink_to(self.root / ".env")
+        except OSError:
+            self.skipTest("Symbolic links require OS privileges")
+        self.assertFalse(self.run_update())
+        self.dependencies.assert_not_called()
+
+    def test_private_files_cannot_overwrite_shipped_bundle_assets(self):
+        self.add_mcp_configuration()
+        staged = self.root / "staged"
+        destination = staged / "integrations/coda-filesystem"
+        destination.mkdir(parents=True)
+        (destination / "filesystem.config.json").write_text("shipped", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            updater.preserve_mcp_files(self.root, staged)
+
     def test_download_failure_never_activates_stale_backup(self):
         stale = self.root / updater.BACKUP_DIR
         stale.mkdir()

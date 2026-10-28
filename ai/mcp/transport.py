@@ -141,6 +141,10 @@ class SDKStdioTransport:
     ) -> ToolResult:
         if operation not in {"discover", "invoke"}:
             return failure("invalid_request", "The MCP operation is not supported.")
+        if not getattr(definition, "enabled", True):
+            return failure("server_disabled", "The bundled MCP server is disabled; enable it explicitly.")
+        if getattr(definition, "bundle_error", None):
+            return failure("configuration_error", definition.bundle_error)
         if not definition.trusted:
             return failure("permission_denied", "The MCP process is not trusted.")
         if operation == "invoke" and tool_name not in definition.allowed_tools:

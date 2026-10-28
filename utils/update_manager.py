@@ -1,4 +1,5 @@
 import json
+import hashlib
 from dataclasses import dataclass
 import platform
 import shutil
@@ -105,6 +106,59 @@ def preserve_local_files(root, workspace):
             if not src.is_file():
                 raise ValueError(f"Expected a local configuration file: {src}")
             shutil.copy2(src, dst)
+    preserve_mcp_files(root, workspace / NEW_VERSION_DIR)
+
+
+def preserve_mcp_files(root, staged):
+    """Preserve only private JSON, never overlay local code on shipped assets."""
+    destination = _safe_child(staged, "mcp_servers")
+    if destination.exists():
+        _validate_tree(destination)
+        if list(destination.glob("*.json")):
+            raise ValueError("Updates must not ship active MCP definitions; use .json.example")
+    sources = _private_mcp_sources(root)
+    for source, relative in sources:
+        if not source.is_file():
+            raise ValueError("Expected a private MCP configuration file")
+        parent = staged
+        for part in relative.parts[:-1]:
+            parent = _safe_child(parent, part)
+            parent.mkdir(exist_ok=True)
+        target = _safe_child(parent, relative.name)
+        if target.exists():
+            raise ValueError("Update conflicts with private MCP configuration; ship examples instead")
+        shutil.copy2(source, target)
+
+
+def _private_mcp_sources(root):
+    """Enumerate the explicit preservation surface, checking every source parent."""
+    configs = _safe_child(root, "mcp_servers")
+    sources = []
+    if configs.exists():
+        if not configs.is_dir():
+            raise ValueError("MCP configuration directory must be a directory")
+        for path in configs.glob("*.json"):
+            sources.append((_safe_child(configs, path.name), Path("mcp_servers") / path.name))
+    integrations = _safe_child(root, "integrations")
+    if integrations.exists():
+        if not integrations.is_dir():
+            raise ValueError("Integrations must be a directory")
+        for directory in integrations.iterdir():
+            _reject_links(directory)
+            if directory.is_dir():
+                for path in directory.glob("*.config.json"):
+                    sources.append((_safe_child(directory, path.name), Path("integrations") / directory.name / path.name))
+    return sources
+
+
+def _configuration_snapshot(root):
+    sources = _private_mcp_sources(root)
+    for name in PRESERVED_FILES:
+        path = _safe_child(root, name)
+        if path.exists():
+            sources.append((path, Path(name)))
+    return tuple(sorted((relative.as_posix(), hashlib.sha256(path.read_bytes()).hexdigest())
+                        for path, relative in sources))
 
 
 def validate_new_version(workspace, release):
@@ -210,6 +264,7 @@ class PreparedUpdate:
     workspace: Path
     python: Path
     arguments: tuple[str, ...]
+    configuration_snapshot: tuple[tuple[str, str], ...] | None = None
 
 
 def _validate_install_root(root):
@@ -248,7 +303,13 @@ def prepare_update(install_root=None, arguments=None, release=None):
             extract_download(workspace)
             setup_updated_program(workspace, release)
             validate_new_version(workspace, release)
+            configuration_snapshot = _configuration_snapshot(root)
             preserve_local_files(root, workspace)
+            if _configuration_snapshot(root) != configuration_snapshot or any(
+                hashlib.sha256((workspace / NEW_VERSION_DIR / relative).read_bytes()).hexdigest() != digest
+                for relative, digest in configuration_snapshot
+            ):
+                raise ValueError("Local configuration changed during staging; prepare the update again")
         staged = workspace / NEW_VERSION_DIR
         # Older releases cannot participate in the supervised startup handshake.
         if not (staged / "utils" / "update_bootstrap.py").is_file():
@@ -263,6 +324,7 @@ def prepare_update(install_root=None, arguments=None, release=None):
     return PreparedUpdate(
         root, workspace, python,
         tuple(sys.argv[1:] if arguments is None else arguments),
+        configuration_snapshot,
     )
 
 
@@ -349,6 +411,8 @@ def complete_update(update):
         # Staging can take minutes: repeat the development-checkout guard at
         # the activation boundary, and bind recovery to this exact attempt.
         _validate_install_root(root)
+        if update.configuration_snapshot is not None and _configuration_snapshot(root) != update.configuration_snapshot:
+            raise ValueError("Local configuration changed after staging; prepare the update again to preserve the latest permissions")
         if _safe_child(root, workspace.name) != workspace:
             raise ValueError("Prepared workspace is outside the installation")
         marker = _safe_child(root, ACTIVE_ENVIRONMENT)
