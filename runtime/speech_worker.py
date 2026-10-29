@@ -139,16 +139,39 @@ class SpeechTaskProcessor:
         stream = task.stream
         try:
             providers = self._resolve_providers()
-            provider = next((item for item in providers if item.is_available()), None)
+            consumed = False
+            def speech_chunks():
+                nonlocal consumed
+                consumed = True
+                for chunk in stream:
+                    yield self._normalise_text(chunk)
+            chunks = speech_chunks()
+            provider = None
+            session = None
+            for candidate in providers:
+                if task.cancel_event.is_set():
+                    return self._event(task, WorkerEventType.CANCELLED)
+                try:
+                    if not candidate.is_available():
+                        continue
+                    create_stream = getattr(candidate, "create_stream_session", None)
+                    if callable(create_stream):
+                        parameters = inspect.signature(create_stream).parameters
+                        kwargs = {"metrics": task.metrics} if 'metrics' in parameters else {}
+                        session = create_stream(chunks, **kwargs)
+                    provider = candidate
+                    break
+                except Exception:
+                    if consumed:
+                        raise
+                    # Preparation has not touched the iterator or audio. The
+                    # next configured provider can safely use the same stream.
+                    continue
             if provider is None:
                 raise RuntimeError("No TTS provider is available.")
-            chunks = (self._normalise_text(chunk) for chunk in stream)
-            create_stream = getattr(provider, "create_stream_session", None)
-            if callable(create_stream):
-                parameters = inspect.signature(create_stream).parameters
-                kwargs = {"metrics": task.metrics} if 'metrics' in parameters else {}
+            if session is not None:
                 played = self._playback_controller.play_session(
-                    create_stream(chunks, **kwargs), task.cancel_event,
+                    session, task.cancel_event,
                 )
                 if not played and not task.cancel_event.is_set():
                     raise RuntimeError("Incremental playback did not complete.")
