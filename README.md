@@ -22,6 +22,8 @@ eventually revived as the assistant it is today.
 - Prefer local Whisper speech recognition with Google as a fallback.
 - Speak through local neural Pocket TTS, optional ElevenLabs, and a final
   `pyttsx3` fallback.
+- Begin speaking ordinary LLM answers before generation completes, with
+  bounded buffering and shared cancellation.
 - Load self-registering commands from the `commands` directory.
 - Discover and invoke trusted MCP tools over local stdio or remote Streamable HTTP.
 - Reuse optional persistent MCP sessions with idle retirement and explicit cleanup.
@@ -56,9 +58,13 @@ The active roadmap is maintained in the
 
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
 - [v1.5.1 - Bundled First-Party MCP Servers](https://github.com/mattordev/coda/milestone/12)
+- [v1.5.2 - LLM Workload Optimisation](https://github.com/mattordev/coda/milestone/13)
+- [v1.5.3 - Incremental Voice Pipeline](https://github.com/mattordev/coda/milestone/14)
 
 See the [v1.5.1 release notes](docs/release-notes-v1.5.1.md) for setup changes,
 validation and limitations.
+See [incremental speech](docs/incremental-speech.md) for streaming controls,
+cancellation policy, latency definitions and compatibility boundaries.
 
 ### Future Milestones
 
