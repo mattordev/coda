@@ -7,9 +7,6 @@ import re
 from ai.privacy.sanitizer import sanitize_text
 
 
-_SPOKEN_EXTENSIONS = {"md": "markdown", "json": "jay son"}
-
-
 def _payload(data):
     if isinstance(data, dict) and data.get("structuredContent") is not None:
         return data["structuredContent"]
@@ -42,16 +39,12 @@ def _directory_entries(data, text):
 
 
 def _names(entries, limit):
-    # Redact before transforming punctuation so secrets remain recognizable.
-    # Filename dots must be words for TTS, rather than sentence-ending pauses.
+    # Keep semantic filenames exact; pronunciation belongs to the TTS copy.
     names = []
     for entry in entries[:limit]:
         original = sanitize_text(entry["name"])
         name = original[:80].replace("\n", " ")
-        stem, dot, extension = name.rpartition(".")
-        if stem and entry["type"] == "file" and len(original) <= 80:
-            name = stem + dot + _SPOKEN_EXTENSIONS.get(extension.casefold(), extension)
-        name = re.sub(r"\s+", " ", name.replace(".", " dot ")).strip()
+        name = re.sub(r"\s+", " ", name).strip()
         names.append('"' + name + '"')
     return ", ".join(names)
 

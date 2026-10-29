@@ -84,6 +84,11 @@ _NUMBER_PATTERN = re.compile(
     r"(?![\w/\\:\-?&=#%@,]|\.\w)"
 )
 
+_QUOTED_FILENAME_PATTERN = re.compile(
+    r'''(?P<quote>["'])(?P<filename>(?:[\w -]+\.)+[a-zA-Z][\w-]*|\.[a-zA-Z][\w.-]*)(?P=quote)'''
+)
+_SPOKEN_EXTENSIONS = {"md": "markdown", "json": "jay son"}
+
 
 def _normalise_currency(match: re.Match[str]) -> str:
     amount = match.group("amount").replace(",", "")
@@ -114,12 +119,12 @@ def _normalise_measurement(match: re.Match[str]) -> str:
     value = match.group("value").replace(",", "")
     singular, plural = _UNITS[match.group("unit")]
     unit = singular if Decimal(value) == 1 else plural
-    return f"{num2words(value, lang='en')} {unit}"
+    return f"{_speak_number(value)} {unit}"
 
 
 def _normalise_percentage(match: re.Match[str]) -> str:
     value = match.group("value").replace(",", "")
-    return f"{num2words(value, lang='en')} percent"
+    return f"{_speak_number(value)} percent"
 
 
 def _normalise_time(match: re.Match[str]) -> str:
@@ -159,16 +164,32 @@ def _normalise_date(match: re.Match[str]) -> str:
     return f"the {spoken_day} of {month}, {spoken_year}"
 
 
+def _speak_number(value: str) -> str:
+    whole, dot, fraction = value.partition('.')
+    spoken = num2words(int(whole), lang='en')
+    if dot:
+        spoken += ' point ' + ' '.join(num2words(int(digit), lang='en') for digit in fraction)
+    return spoken
+
+
 def _normalise_number(match: re.Match[str]) -> str:
-    return num2words(match.group().replace(",", ""), lang="en")
+    return _speak_number(match.group().replace(",", ""))
 
 
 def _normalise_version(match: re.Match[str]) -> str:
-    spoken_parts = (
-        num2words(int(part), lang="en")
-        for part in match.group("version").split(".")
-    )
+    parts = match.group("version").split(".")
+    spoken_parts = [num2words(int(parts[0]), lang='en')] + [
+        ' '.join(num2words(int(digit), lang='en') for digit in part) for part in parts[1:]
+    ]
     return f"version {' point '.join(spoken_parts)}"
+
+
+def _normalise_filename(match: re.Match[str]) -> str:
+    name = match.group('filename')
+    stem, dot, extension = name.rpartition('.')
+    name = stem + dot + _SPOKEN_EXTENSIONS.get(extension.casefold(), extension)
+    name = re.sub(r'\s+', ' ', name.replace('.', ' dot ')).strip()
+    return match.group('quote') + name + match.group('quote')
 
 
 def _normalise_initialism(match: re.Match[str]) -> str:
@@ -194,6 +215,7 @@ def normalise_spoken_text(text: str) -> str:
         text,
     )
     transformations = (
+        (_QUOTED_FILENAME_PATTERN, _normalise_filename),
         (_DATE_PATTERN, _normalise_date),
         (_TIME_PATTERN, _normalise_time),
         (_VERSION_PATTERN, _normalise_version),
