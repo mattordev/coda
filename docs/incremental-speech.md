@@ -93,6 +93,9 @@ timings. It uses public fixture text and never executes a tool. The first LLM
 request may still incur cold loading; distinguish it from warm comparisons.
 The harness does not unload the server model automatically.
 
+See the [measured comparison](incremental-speech-benchmark.md) for live and
+synthetic results, cold/warm separation and limitations.
+
 Output streaming does not establish acoustic full duplex. The microphone's
 playback-echo filter and explicit stop exception remain. Echo cancellation,
 voice activity/turn taking and genuine barge-in are separately tracked in

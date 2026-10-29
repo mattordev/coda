@@ -25,6 +25,13 @@ using the existing privacy routing and request cancellation.
 commands, legacy providers and MCP's validated/sanitized interpretation path
 remain compatible. See [configuration and architecture](docs/incremental-speech.md).
 
+The live warm Qwen/PocketTTS comparison measured first PCM entering playback at
+1.55 s versus 3.93 s waiting for the complete answer (two paired warm trials).
+All six live requests returned identical semantic text. This is a playback
+pipe-write proxy, not acoustic loopback; the cold-start row is excluded.
+See the [benchmark report](docs/incremental-speech-benchmark.md) for raw results,
+backpressure effects and limitations.
+
 Output streaming does not solve acoustic full duplex or echo-free barge-in;
 that discovery is tracked separately in #206. Existing provider deadlines still
 include backpressure waits, and a late stream error may leave an incomplete
