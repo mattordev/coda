@@ -16,8 +16,13 @@ class IncrementalSpeechTests(unittest.TestCase):
     def test_previous_playback_does_not_expire_the_next_clause_wait(self):
         now = [0.0]
         cancel = Event()
+        resumed = Event()
+        class ObservedAccumulator(SpeakableChunks):
+            def resume(self):
+                super().resume()
+                resumed.set()
         stream = IncrementalSpeech('request', cancel, lambda _: None,
-            accumulator_factory=lambda: SpeakableChunks(clock=lambda: now[0]))
+            accumulator_factory=lambda: ObservedAccumulator(clock=lambda: now[0]))
         clause = 'This following clause is long enough for a natural boundary,'
         stream.feed('First sentence. ' + clause + ' and the sentence continues')
         chunks = iter(stream)
@@ -33,6 +38,9 @@ class IncrementalSpeechTests(unittest.TestCase):
         worker = Thread(target=consume)
         worker.start()
         try:
+            # Advance fake time only after the consumer has resumed, even on
+            # slow CI machines. Scheduling delay must not expire the test.
+            self.assertTrue(resumed.wait(1))
             self.assertFalse(ready.wait(.15), 'playback must not count as waiting for text')
             now[0] = 6.1  # A genuine idle-text timeout may now yield the clause.
             self.assertTrue(ready.wait(1))
