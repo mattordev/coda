@@ -19,6 +19,22 @@ import utils.llm_service as history
 
 
 class MCPIntentRuntimeTests(unittest.TestCase):
+    def test_incomplete_standalone_extraction_never_executes_or_falls_back(self):
+        from types import SimpleNamespace
+        from ai.providers.completion import OUTPUT_LIMIT_ERROR
+        self.configure()
+        self.generate.return_value = (json.dumps({'intent': 'mcp.test.echo', 'confidence': 1,
+                                                 'arguments': None}), None)
+        extraction = Mock(return_value=('{"message":"hello"}', OUTPUT_LIMIT_ERROR))
+        with patch('ai.tools.arguments._get_local_classifier_provider', return_value=(
+            'llamacpp', SimpleNamespace(generate_with_metadata=extraction),
+        )):
+            result = runtime.on_command('please echo hello', {})
+        self.assertIn('invalid or incomplete', result.response_text)
+        self.assertEqual(self.calls, [])
+        self.fallback.assert_not_called()
+        extraction.assert_called_once()
+
     def setUp(self):
         for name in ("_mcp_catalog", "_pending_confirmation", "_intent_router", "_intent_registry"):
             guard = patch.object(runtime, name, None)

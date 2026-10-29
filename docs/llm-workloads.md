@@ -83,6 +83,14 @@ rejects the result; CODA never executes an incomplete selection. Raising the
 classification setting above extraction never reduces it. Argument/schema and
 permission validation still happen before dispatch.
 
+When a selected MCP tool needs a separate argument-extraction call, that call
+also uses the extraction thinking policy and cap, the active cancellation event
+and the shared trace ID. It remains local-only. Already supplied arguments,
+explicit canonical JSON and native commands keep their deterministic paths.
+Extraction attempts have their own `argument_extraction` telemetry purpose;
+their prompts and argument values are never included in telemetry. A failed or
+incomplete extraction cannot dispatch a tool or fall through to conversation.
+
 OpenAI and xAI use `max_completion_tokens`; OpenRouter and Gemini's compatible chat
 adapters use `max_tokens`; llama.cpp uses `max_tokens`; Ollama uses
 `options.num_predict`. No provider is retried merely to discover parameter
