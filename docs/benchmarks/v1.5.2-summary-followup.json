@@ -1,0 +1,159 @@
+{
+  "created_utc": "2026-10-29T02:48:34.608365+00:00",
+  "prompt_fix_revision": "6816cc849c3f5ec77f5fb414efc3e9db94ff1711",
+  "reason": "Follow-up after operator-confirmed OOM recovery and legacy request-prompt fix.",
+  "model": "qwen3.6-35b-a3b-uncensored-32k",
+  "seed": 42,
+  "temperature": 1.0,
+  "cache_prompt": false,
+  "results": [
+    {
+      "case": "numeric_facts",
+      "purpose": "interpretation",
+      "mode": "optimized",
+      "max_tokens": 512,
+      "thinking": false,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "correct": true,
+      "answer": "The reported Python versions are 3.11 and 3.12. The exact measured value is 0.0100.",
+      "wall_seconds": 3.2766,
+      "metrics": {
+        "total_duration_seconds": 3.2659999998286366,
+        "time_to_first_token_seconds": 2.375,
+        "input_tokens": 489,
+        "output_tokens": 31,
+        "total_tokens": 520,
+        "throughput_tokens_per_second": 34.4734787743455,
+        "time_to_first_generated_token_seconds": 2.375,
+        "time_to_first_visible_token_seconds": 2.375,
+        "prompt_duration_seconds": 2.345539,
+        "decode_duration_seconds": 0.899242,
+        "load_duration_seconds": null,
+        "reasoning_tokens": null
+      }
+    },
+    {
+      "case": "numeric_facts",
+      "purpose": "interpretation",
+      "mode": "baseline",
+      "max_tokens": 2048,
+      "thinking": null,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "correct": true,
+      "answer": "The report lists Python versions 3.11 and 3.12 with a measured value of 0.0100. Let me know if you need anything else.",
+      "wall_seconds": 33.7556,
+      "metrics": {
+        "total_duration_seconds": 33.75,
+        "time_to_first_token_seconds": 32.54700000002049,
+        "input_tokens": 487,
+        "output_tokens": 1023,
+        "total_tokens": 1510,
+        "throughput_tokens_per_second": 32.3566762134149,
+        "time_to_first_generated_token_seconds": 2.140000000130385,
+        "time_to_first_visible_token_seconds": 32.54700000002049,
+        "prompt_duration_seconds": 2.12562,
+        "decode_duration_seconds": 31.616349999999997,
+        "load_duration_seconds": null,
+        "reasoning_tokens": null
+      }
+    },
+    {
+      "case": "untrusted_summary",
+      "purpose": "interpretation",
+      "mode": "optimized",
+      "max_tokens": 512,
+      "thinking": false,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "correct": true,
+      "answer": "Maple supports Linux and does not upload files.",
+      "wall_seconds": 2.5494,
+      "metrics": {
+        "total_duration_seconds": 2.5619999999180436,
+        "time_to_first_token_seconds": 2.265000000130385,
+        "input_tokens": 502,
+        "output_tokens": 11,
+        "total_tokens": 513,
+        "throughput_tokens_per_second": 38.197627580076116,
+        "time_to_first_generated_token_seconds": 2.265000000130385,
+        "time_to_first_visible_token_seconds": 2.265000000130385,
+        "prompt_duration_seconds": 2.155805,
+        "decode_duration_seconds": 0.287976,
+        "load_duration_seconds": null,
+        "reasoning_tokens": null
+      }
+    },
+    {
+      "case": "untrusted_summary",
+      "purpose": "interpretation",
+      "mode": "baseline",
+      "max_tokens": 2048,
+      "thinking": null,
+      "http_status": 200,
+      "finish_reason": "stop",
+      "correct": true,
+      "answer": "Maple supports Linux and does not upload files.",
+      "wall_seconds": 23.855,
+      "metrics": {
+        "total_duration_seconds": 23.860000000102445,
+        "time_to_first_token_seconds": 23.54700000002049,
+        "input_tokens": 500,
+        "output_tokens": 707,
+        "total_tokens": 1207,
+        "throughput_tokens_per_second": 32.56366703553733,
+        "time_to_first_generated_token_seconds": 2.1410000000614673,
+        "time_to_first_visible_token_seconds": 23.54700000002049,
+        "prompt_duration_seconds": 2.129264,
+        "decode_duration_seconds": 21.711313999999998,
+        "load_duration_seconds": null,
+        "reasoning_tokens": null
+      }
+    }
+  ],
+  "standalone_extraction": {
+    "correct": true,
+    "arguments": {
+      "text": "Python 3.11/3.12; measured value 0.0100; path docs/README.md; id 66f8a8ba."
+    },
+    "wall_seconds": 2.8599090001080185,
+    "attempts": [
+      {
+        "trace_id": "public-standalone-extraction-probe",
+        "timestamp": 1793242184.288384,
+        "purpose": "argument_extraction",
+        "provider": "llamacpp",
+        "model": "qwen3.6-35b-a3b-uncensored-32k",
+        "locality": "local",
+        "sequence": 1,
+        "outcome": "success",
+        "privacy_action": "raw",
+        "is_retry": false,
+        "is_fallback": false,
+        "metrics": {
+          "total_duration_seconds": 2.8589999999385327,
+          "time_to_first_token_seconds": 1.625,
+          "input_tokens": 141,
+          "output_tokens": 44,
+          "total_tokens": 185,
+          "throughput_tokens_per_second": 35.55911865108099,
+          "time_to_first_generated_token_seconds": 1.625,
+          "time_to_first_visible_token_seconds": 1.625,
+          "prompt_duration_seconds": 1.514839,
+          "decode_duration_seconds": 1.237376,
+          "load_duration_seconds": null,
+          "reasoning_tokens": null
+        },
+        "cost": null,
+        "safe_failure_reason": null,
+        "previous_provider": null,
+        "previous_model": null,
+        "next_provider": null,
+        "next_model": null,
+        "error_category": null,
+        "schema_version": 1
+      }
+    ]
+  }
+}
