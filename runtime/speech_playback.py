@@ -1,4 +1,5 @@
 from threading import Event, Lock
+import inspect
 from typing import Protocol
 
 
@@ -41,12 +42,19 @@ class SpeechPlaybackController:
         self._active_session: SpeechSession | None = None
         self._active_cancel_event: Event | None = None
         
-    def play(self, provider:SpeechProvider, text: str, cancel_event: Event) -> bool:
+    def play(self, provider:SpeechProvider, text: str, cancel_event: Event, *, metrics=None) -> bool:
         if cancel_event.is_set():
             return False
         
         
-        session = provider.create_session(text)
+        kwargs = {}
+        if metrics is not None and 'metrics' in inspect.signature(provider.create_session).parameters:
+            kwargs['metrics'] = metrics
+        session = provider.create_session(text, **kwargs)
+        return self.play_session(session, cancel_event)
+
+    def play_session(self, session: SpeechSession, cancel_event: Event) -> bool:
+        """Register an already prepared complete or incremental session."""
         
         with self._lock:
             if self._active_session is not None:

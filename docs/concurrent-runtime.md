@@ -33,6 +33,16 @@ There is one execution worker and one speech worker, which preserves request
 and conversation ordering without requiring the provider and audio libraries
 to become asynchronous.
 
+From v1.5.3, ordinary LLM conversation can enqueue one request-owned incremental
+speech task on its first visible delta. Its bounded channel bridges the
+execution/provider and speech threads, so the speech worker can segment and
+play PCM while generation continues. Final semantic history/dashboard updates
+still occur once after successful generation; they do not contain fragments.
+See [incremental speech](incremental-speech.md) for queue bounds, completion and
+cancellation policy, optional terminal previews and audio timing definitions.
+Native commands, MCP interpretation and non-streaming adapters retain the
+complete-response path described below.
+
 ## Runtime Ownership
 
 `coda_runtime.py` coordinates lifecycle and shared runtime state. It starts the

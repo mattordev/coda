@@ -11,6 +11,8 @@ from uuid import uuid4
 class RequestContext:
     trace_id: str
     cancel_event: Event | None = None
+    speech_stream: object | None = None
+    display_stream: object | None = None
 
 
 _current = ContextVar('coda_request_context', default=None)
@@ -31,12 +33,14 @@ def cancellation_event():
 
 
 @contextmanager
-def request_context(request_id=None, cancel_event=None):
+def request_context(request_id=None, cancel_event=None, *, speech_stream=None, display_stream=None):
     """Nested callers inherit identity; finally always restores the caller."""
     previous = current_request()
     context = RequestContext(
         request_id or (previous.trace_id if previous else str(uuid4())),
         cancel_event if cancel_event is not None else (previous.cancel_event if previous else None),
+        speech_stream if speech_stream is not None else (previous.speech_stream if previous else None),
+        display_stream if display_stream is not None else (previous.display_stream if previous else None),
     )
     token = _current.set(context)
     try:
