@@ -3,7 +3,8 @@
 OUTPUT_LIMIT_ERROR = "The AI response reached its output limit. Please narrow the request or increase its token budget."
 INCOMPLETE_STREAM_ERROR = "The AI response ended before completion. Please try again."
 UNSUPPORTED_COMPLETION_ERROR = "The AI response did not finish with a usable text answer."
-COMPLETION_ERRORS = (OUTPUT_LIMIT_ERROR, INCOMPLETE_STREAM_ERROR, UNSUPPORTED_COMPLETION_ERROR)
+PARTIAL_STREAM_ERROR = "The AI response was interrupted after output started. Please try again."
+COMPLETION_ERRORS = (OUTPUT_LIMIT_ERROR, INCOMPLETE_STREAM_ERROR, UNSUPPORTED_COMPLETION_ERROR, PARTIAL_STREAM_ERROR)
 
 
 def _field(value, name, default=None):
@@ -14,7 +15,9 @@ class CompletionState:
     """Never accept length-terminated JSON merely because it happens to parse."""
 
     def __init__(self, options=None):
-        self.required = options is not None and options.max_tokens is not None
+        self.required = options is not None and (
+            options.max_tokens is not None or options.on_visible_text is not None
+        )
         self.terminal = False
         self.error = None
 

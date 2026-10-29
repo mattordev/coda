@@ -3,6 +3,7 @@ import os
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
 from ai.providers.completion import CompletionState
+from ai.providers.generation import emit_visible_text
 
 try:
     import openai
@@ -86,6 +87,7 @@ def _generate_stream(
                 if collector is not None:
                     collector.observe_content(content)
                 response_parts.append(content)
+                emit_visible_text(options, content, cancel_event)
 
     finally:
         if callable(close_stream):
