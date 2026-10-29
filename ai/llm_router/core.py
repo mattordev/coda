@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
+from ai.providers.completion import COMPLETION_ERRORS
 from ai.providers.workloads import conversation_options
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
@@ -151,7 +152,8 @@ def _try_providers(
             return None, error
 
         if error or not response:
-            logger.log_failure(provider)
+            if error not in COMPLETION_ERRORS:
+                logger.log_failure(provider)
             _debug_print(f"[ROUTER] {provider} failed: {error}")
             last_error = error
             continue
@@ -365,7 +367,7 @@ def route_request(
         if response:
             return response, None
 
-        if error == "Request cancelled.":
+        if error == "Request cancelled." or error in COMPLETION_ERRORS:
             return None, error
 
         return _high_risk_unavailable_message(), None
@@ -390,7 +392,7 @@ def route_request(
         if response:
             return response, None
 
-        if error == "Request cancelled.":
+        if error == "Request cancelled." or error in COMPLETION_ERRORS:
             return None, error
 
         _debug_print("[ROUTER] All providers failed -> giving up")
@@ -416,7 +418,7 @@ def route_request(
     if response:
         return response, None
 
-    if error == "Request cancelled.":
+    if error == "Request cancelled." or error in COMPLETION_ERRORS:
         return None, error
 
     _debug_print("[ROUTER] All providers failed -> giving up")

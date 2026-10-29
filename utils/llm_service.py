@@ -440,6 +440,9 @@ def call_provider(
 
 def _interpretation_error(error):
     """Keep actionable failure categories without logging provider payloads."""
+    from ai.providers.completion import COMPLETION_ERRORS
+    if str(error) in COMPLETION_ERRORS:
+        return str(error)
     text = str(error).casefold()
     if 'timed out' in text or 'timeout' in text:
         return "Interpretation provider timed out."

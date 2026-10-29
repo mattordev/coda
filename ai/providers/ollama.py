@@ -6,6 +6,7 @@ from requests.exceptions import Timeout
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
+from ai.providers.completion import CompletionState
 
 _model_cache = None
 _model_generation = 0
@@ -173,6 +174,7 @@ def _generate_stream(
     collector=None,
     options=None,
 ):
+    completion = CompletionState(options)
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Request cancelled.")
     payload = {"model": model, "messages": messages, "stream": True}
@@ -182,6 +184,8 @@ def _generate_stream(
         payload["think"] = options.thinking
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Request cancelled.")
+    if options is not None and options.max_tokens is not None:
+        payload["options"] = {"num_predict": options.max_tokens}
     with http_client.post(
         f"{base_url}/api/chat",
         json=payload,
@@ -201,6 +205,7 @@ def _generate_stream(
                     continue
 
                 response_json = json.loads(line)
+                completion.observe_ollama(response_json)
                 if collector is not None:
                     collector.observe_ollama_chunk(response_json)
 
@@ -221,6 +226,7 @@ def _generate_stream(
                 if response_json.get("done"):
                     break
 
+            completion.validate()
             return "".join(response_parts), None
         finally:
             close_response()
