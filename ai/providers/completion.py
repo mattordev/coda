@@ -15,7 +15,9 @@ class CompletionState:
     """Never accept length-terminated JSON merely because it happens to parse."""
 
     def __init__(self, options=None):
-        self.required = options is not None and options.max_tokens is not None
+        self.required = options is not None and (
+            options.max_tokens is not None or options.on_visible_text is not None
+        )
         self.terminal = False
         self.error = None
 

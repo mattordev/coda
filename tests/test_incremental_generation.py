@@ -1,5 +1,4 @@
 """Visible events precede completion without exposing reasoning or replaying output."""
-from dataclasses import replace
 import json
 from threading import Event
 from types import SimpleNamespace as NS
@@ -8,12 +7,16 @@ from unittest.mock import MagicMock, patch
 
 from ai.providers import openai, gemini, grok, openrouter, llamacpp, ollama
 from ai.providers.cancellable import CancellationScope
-from ai.providers.completion import PARTIAL_STREAM_ERROR
+from ai.providers.completion import CompletionState, PARTIAL_STREAM_ERROR
 from ai.providers.generation import GenerationOptions, call_generation
 from ai.llm_router import core as router
 
 
 class IncrementalGenerationTests(unittest.TestCase):
+    def test_visible_stream_requires_terminal_marker_even_without_token_cap(self):
+        with self.assertRaisesRegex(ValueError, "before completion"):
+            CompletionState(GenerationOptions(on_visible_text=lambda text: None)).validate()
+
     def test_sdk_adapters_emit_only_visible_deltas_before_completion(self):
         for adapter in (openai, gemini, grok, openrouter):
             with self.subTest(adapter=adapter.__name__):
