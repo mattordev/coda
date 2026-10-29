@@ -80,7 +80,9 @@ def classification_correct(answer, case, catalogue):
             return isinstance(parsed.arguments, dict) and {
                 key: value.strip() if isinstance(value, str) else value for key, value in parsed.arguments.items()
             } == {key: value.strip() if isinstance(value, str) else value for key, value in expected.items()}
-        return parsed.arguments is None
+        # Native handlers parse the original message and ignore model arguments.
+        # Score action selection as runtime does; report format compliance apart.
+        return parsed.intent is None or parsed.intent.input_schema is None
     except (ValueError, TypeError, AttributeError):
         return False
 
@@ -163,6 +165,15 @@ def run_case(case, mode, catalogue, base_url, model, timeout):
         result = collector.finish(response=answer, error=error)
         row['correct'] = not error and (classification_correct(answer, case, catalogue) if purpose == 'classification'
                                        else summary_correct(answer, case))
+        if purpose == 'classification' and not error:
+            try:
+                parsed = _parse_classifier_response(answer, catalogue)
+                row['selected_intent'] = parsed.intent.name if parsed.intent else None
+                row['confidence'] = parsed.confidence
+                if parsed.intent and parsed.intent.input_schema is None:
+                    row['native_arguments_null'] = parsed.arguments is None
+            except (ValueError, TypeError):
+                row['invalid_response'] = True
         if purpose != 'classification' and not error:
             row['answer'] = answer  # Only public synthetic answers; never reasoning or prompts.
     except Exception as exc:

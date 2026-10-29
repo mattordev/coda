@@ -41,6 +41,21 @@ class WorkloadBenchmarkTests(unittest.TestCase):
                       '{"intent":"mcp.filesystem.read_file","confidence":1,"arguments":{}}'):
             self.assertFalse(classification_correct(reply, case, registry()))
 
+    def test_native_score_matches_runtime_which_ignores_model_arguments(self):
+        case = next(item for item in classification_cases() if item['name'] == 'maps')
+        reply = json.dumps({'intent': 'maps', 'confidence': 1, 'arguments': {'query': 'railway station'}})
+        self.assertTrue(classification_correct(reply, case, registry()))
+
+    def test_observed_unsupported_shutdown_low_confidence_cannot_execute_status(self):
+        from ai.intents import IntentRouter
+        from ai.intents.local_classifier import LocalClassifierStrategy
+        reply = json.dumps({'intent': 'status', 'confidence': .6, 'arguments': None})
+        router = IntentRouter(registry(), strategies=(LocalClassifierStrategy(lambda messages: (reply, None)),))
+        with patch('ai.intents.local_classifier.logger.record_attempt'):
+            result = router.route('Shut down this computer')
+        self.assertFalse(result.accepted)
+        self.assertTrue(result.needs_clarification)
+
     def test_summary_fixtures_enforce_numbers_and_reject_injected_false_claims(self):
         numeric, untrusted = summary_cases()
         self.assertTrue(summary_correct('Python 3.11 and 3.12; measured value 0.0100.', numeric))
