@@ -10,6 +10,11 @@ API calls, streaming, cancellation and model configuration.
 For the privacy rules that determine whether cloud providers can receive a
 request, see [Privacy Routing](privacy-routing.md).
 
+Per-request thinking and output limits, including incomplete-response handling,
+are described in [LLM workload controls](llm-workloads.md). Request correlation
+and generated/visible/native timing definitions are in
+[request latency telemetry](request-latency-telemetry.md).
+
 ## Supported Providers
 
 CODA currently supports six LLM providers:

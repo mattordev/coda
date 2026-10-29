@@ -11,6 +11,9 @@ from ai.privacy import policy
 from ai.privacy.detector import analyze_privacy
 from ai.privacy.sanitizer import sanitize_structure, sanitize_text
 from ai.providers.cancellable import run_cancellable
+from ai.providers.completion import COMPLETION_ERRORS
+from ai.providers.generation import Workload
+from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
@@ -182,10 +185,12 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
         # Some local chat templates only accept one leading system message.
         # Keep the mandatory data boundary outside the configurable prompt cap.
         messages = [
-            {'role': 'system', 'content': llm_service._get_system_prompt()[:4000] + '\n\n' + INSTRUCTIONS},
+            {'role': 'system', 'content': llm_service._get_system_prompt(max_chars=4000) + '\n\n' + INSTRUCTIONS},
             {'role': 'user', 'content': payload_text},
         ]
-        return llm_service.call_with_messages(name, messages, cancel_event=cancel_event)
+        workload = Workload.REASONING if explicit_reasoning_request(question) else Workload.INTERPRETATION
+        return llm_service.call_with_messages(name, messages, cancel_event=cancel_event,
+                                              options=options_for(workload))
 
     try:
         response, error = run_cancellable(
@@ -198,6 +203,8 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
         response, error = None, 'Tool interpretation unavailable.'
     if cancel_event is not None and cancel_event.is_set():
         return Interpretation(None)
+    if error in COMPLETION_ERRORS:
+        return Interpretation('The tool completed, but its answer is incomplete. ' + error)
     if error or not isinstance(response, str) or not response.strip():
         return Interpretation(UNAVAILABLE)
     # Redact generated content too. A provider cannot inject terminal control codes.

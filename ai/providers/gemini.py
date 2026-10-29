@@ -2,6 +2,7 @@ import os
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
+from ai.providers.completion import CompletionState
 
 try:
     import openai
@@ -45,12 +46,18 @@ def _generate_stream(
     cancel_event,
     scope,
     collector=None,
+    options=None,
 ):
+    completion = CompletionState(options)
+    controls = {"max_tokens": options.max_tokens} if options is not None and options.max_tokens is not None else {}
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Request cancelled.")
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
         stream=True,
         stream_options={"include_usage": True},
+        **controls,
         reasoning_effort="none",
     )
 
@@ -66,6 +73,7 @@ def _generate_stream(
             if cancel_event is not None and cancel_event.is_set():
                 raise InterruptedError("Request cancelled.")
 
+            completion.observe_openai(chunk)
             if collector is not None:
                 collector.observe_openai_chunk(chunk)
 
@@ -83,10 +91,11 @@ def _generate_stream(
         if callable(close_stream):
             close_stream()
 
+    completion.validate()
     return "".join(response_parts)
 
 
-def generate_with_metadata(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None, *, options=None):
     api_key = get_api_key()
     model = get_model()
     collector = ProviderMetricsCollector(model)
@@ -119,6 +128,7 @@ def generate_with_metadata(messages, cancel_event=None):
                     cancel_event,
                     scope,
                     collector,
+                    options,
                 ),
                 cancel_event,
                 _get_timeout_seconds(),
@@ -139,6 +149,6 @@ def generate_with_metadata(messages, cancel_event=None):
     return collector.finish(response=(assistant_message or "").strip())
 
 
-def generate(messages, cancel_event=None):
-    result = generate_with_metadata(messages, cancel_event=cancel_event)
+def generate(messages, cancel_event=None, *, options=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event, options=options)
     return result.response, result.error

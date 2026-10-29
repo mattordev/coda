@@ -6,9 +6,11 @@ from requests.exceptions import Timeout
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
+from ai.providers.completion import CompletionState
 
 _model_cache = None
 _model_generation = 0
+_thinking_cache = None
 _preferred_models = (
     "nemotron-3-nano:4b",
 )
@@ -42,10 +44,37 @@ def get_cold_start_timeout_seconds():
 
 
 def reload_config():
-    global _model_cache, _model_generation
+    global _model_cache, _model_generation, _thinking_cache
     _model_generation += 1
 
     _model_cache = None
+    _thinking_cache = None
+
+
+def _thinking_values(http_client, model, base_url=None):
+    """Cache only this server/model's advertised controls, including unknown."""
+    global _thinking_cache
+    generation = _model_generation
+    key = (base_url or get_base_url(), model, generation)
+    if _thinking_cache is not None and _thinking_cache[0] == key:
+        return _thinking_cache[1]
+    values = ()
+    try:
+        response = http_client.post(f"{key[0]}/api/show", json={"model": model},
+                                    timeout=min(get_timeout_seconds(), 5))
+        try:
+            response.raise_for_status()
+            metadata = response.json().get("thinking", {})
+            advertised = metadata.get("values", [])
+            if isinstance(advertised, list):
+                values = tuple(value for value in advertised if type(value) is bool)
+        finally:
+            response.close()
+    except (requests.RequestException, ValueError, TypeError, AttributeError):
+        pass
+    if generation == _model_generation:
+        _thinking_cache = (key, values)
+    return values
 
 
 def get_model(http_client=requests):
@@ -143,14 +172,23 @@ def _generate_stream(
     cancel_event,
     scope,
     collector=None,
+    options=None,
 ):
+    completion = CompletionState(options)
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Request cancelled.")
+    payload = {"model": model, "messages": messages, "stream": True}
+    if options is not None and options.thinking is not None and any(
+        value is options.thinking for value in _thinking_values(http_client, model, base_url)
+    ):
+        payload["think"] = options.thinking
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Request cancelled.")
+    if options is not None and options.max_tokens is not None:
+        payload["options"] = {"num_predict": options.max_tokens}
     with http_client.post(
         f"{base_url}/api/chat",
-        json={
-            "model": model,
-            "messages": messages,
-            "stream": True,
-        },
+        json=payload,
         timeout=timeout_seconds,
         stream=True,
     ) as response:
@@ -159,7 +197,7 @@ def _generate_stream(
         response_parts = []
 
         try:
-            for line in response.iter_lines(decode_unicode=True):
+            for line in response.iter_lines(decode_unicode=True, chunk_size=1):
                 if cancel_event is not None and cancel_event.is_set():
                     raise InterruptedError("Request cancelled.")
 
@@ -167,6 +205,7 @@ def _generate_stream(
                     continue
 
                 response_json = json.loads(line)
+                completion.observe_ollama(response_json)
                 if collector is not None:
                     collector.observe_ollama_chunk(response_json)
 
@@ -187,12 +226,13 @@ def _generate_stream(
                 if response_json.get("done"):
                     break
 
+            completion.validate()
             return "".join(response_parts), None
         finally:
             close_response()
 
 
-def _generate_request(messages, cancel_event, http_client, scope, collector=None):
+def _generate_request(messages, cancel_event, http_client, scope, collector=None, options=None):
     model, error = get_model(http_client)
     if error:
         return None, error
@@ -229,6 +269,7 @@ def _generate_request(messages, cancel_event, http_client, scope, collector=None
             cancel_event,
             scope,
             collector,
+            options,
         )
     except InterruptedError:
         return None, "Request cancelled."
@@ -244,7 +285,7 @@ def _generate_request(messages, cancel_event, http_client, scope, collector=None
     return (assistant_message or "").strip(), None
 
 
-def generate_with_metadata(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None, *, options=None):
     from runtime.model_warmup import wait_for_llm
     if not wait_for_llm('ollama', cancel_event):
         return ProviderMetricsCollector().finish(error="Request cancelled.")
@@ -268,6 +309,7 @@ def generate_with_metadata(messages, cancel_event=None):
                 session,
                 scope,
                 collector,
+                options,
             ),
             cancel_event,
             timeout_seconds,
@@ -283,8 +325,8 @@ def generate_with_metadata(messages, cancel_event=None):
         close_session()
 
 
-def generate(messages, cancel_event=None):
-    result = generate_with_metadata(messages, cancel_event=cancel_event)
+def generate(messages, cancel_event=None, *, options=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event, options=options)
     return result.response, result.error
 
 

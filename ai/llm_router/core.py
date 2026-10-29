@@ -2,9 +2,12 @@ import os
 import time
 from threading import Event
 from uuid import uuid4
+from ai.request_context import trace_id as request_trace_id
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
+from ai.providers.completion import COMPLETION_ERRORS
+from ai.providers.workloads import conversation_options
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
 from ai.telemetry import logger
@@ -96,7 +99,7 @@ def _try_providers(
     risk: float,
     privacy_result=None,
     cancel_event: Event | None = None,
-    *, provider_call=None, purpose=WorkloadPurpose.CONVERSATION,
+    *, provider_call=None, purpose=WorkloadPurpose.CONVERSATION, options=None,
 ):
     """
     Attempt providers in order and return the first successful response.
@@ -106,7 +109,7 @@ def _try_providers(
     """
     last_error = None
 
-    trace_id = str(uuid4())
+    trace_id = request_trace_id()
     attempted_providers = set()
 
     for sequence, provider in enumerate(providers, start=1):
@@ -132,6 +135,7 @@ def _try_providers(
                 and provider not in attempted_providers
             ),
             **({"provider_call": provider_call, "purpose": purpose} if provider_call is not None else {}),
+            **({"options": options} if options is not None else {}),
         )
         attempted_providers.add(provider)
 
@@ -149,7 +153,8 @@ def _try_providers(
             return None, error
 
         if error or not response:
-            logger.log_failure(provider)
+            if error not in COMPLETION_ERRORS:
+                logger.log_failure(provider)
             _debug_print(f"[ROUTER] {provider} failed: {error}")
             last_error = error
             continue
@@ -173,6 +178,7 @@ def _call_provider_with_health(
     is_fallback: bool = False,
     provider_call=None,
     purpose=WorkloadPurpose.CONVERSATION,
+    options=None,
 ):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.
@@ -206,6 +212,7 @@ def _call_provider_with_health(
             risk=risk,
             privacy_result=privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
         response, error = result
     except Exception:
@@ -317,6 +324,7 @@ def get_provider_order(privacy_result):
 def route_request(
     prompt: str,
     cancel_event: Event | None = None,
+    *, options=None,
 ):
     """
     Analyse privacy, choose provider order, and return the first good response.
@@ -324,6 +332,11 @@ def route_request(
     Routing decides whether cloud providers are allowed, while llm_service
     decides what cloud-safe content those providers actually receive.
     """
+    if options is None:
+        requested = conversation_options(prompt)
+        # Inherited conversation behavior needs no override on a legacy call.
+        if requested.thinking is not None or requested.max_tokens is not None:
+            options = requested
     privacy_result = analyze_privacy(prompt)
     risk = privacy_result["risk"]
 
@@ -349,12 +362,13 @@ def route_request(
             risk,
             privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
 
         if response:
             return response, None
 
-        if error == "Request cancelled.":
+        if error == "Request cancelled." or error in COMPLETION_ERRORS:
             return None, error
 
         return _high_risk_unavailable_message(), None
@@ -373,12 +387,13 @@ def route_request(
             risk,
             privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
 
         if response:
             return response, None
 
-        if error == "Request cancelled.":
+        if error == "Request cancelled." or error in COMPLETION_ERRORS:
             return None, error
 
         _debug_print("[ROUTER] All providers failed -> giving up")
@@ -398,12 +413,13 @@ def route_request(
         risk,
         privacy_result,
         cancel_event=cancel_event,
+        **({"options": options} if options is not None else {}),
     )
 
     if response:
         return response, None
 
-    if error == "Request cancelled.":
+    if error == "Request cancelled." or error in COMPLETION_ERRORS:
         return None, error
 
     _debug_print("[ROUTER] All providers failed -> giving up")

@@ -15,6 +15,15 @@ from ai.telemetry.models import (
 )
 
 
+_ADDITIONAL_METRIC_FIELDS = (
+    "time_to_first_generated_token_seconds",
+    "time_to_first_visible_token_seconds",
+    "prompt_duration_seconds",
+    "decode_duration_seconds",
+    "load_duration_seconds",
+    "reasoning_tokens",
+)
+
 _METRIC_FIELDS = (
     "total_duration_seconds",
     "time_to_first_token_seconds",
@@ -22,7 +31,7 @@ _METRIC_FIELDS = (
     "output_tokens",
     "total_tokens",
     "throughput_tokens_per_second",
-)
+) + _ADDITIONAL_METRIC_FIELDS
 
 
 def _known_number(value):
@@ -255,6 +264,7 @@ def build_snapshot(attempts, generated_at=None):
                 metrics["throughput_tokens_per_second"]
             ),
             costs=_cost_aggregates(group),
+            **{name: _metric(metrics[name]) for name in _ADDITIONAL_METRIC_FIELDS},
         ))
 
     return TelemetrySnapshot(
