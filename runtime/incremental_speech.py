@@ -14,7 +14,7 @@ class IncrementalSpeech:
     Both ends poll the request cancellation event, including a blocked producer.
     """
     def __init__(self, request_id, cancel_event, start, *, capacity=8,
-                 accumulator_factory=SpeakableChunks, clock=time.monotonic):
+                 accumulator_factory=SpeakableChunks, clock=time.monotonic, metrics=None):
         self.request_id = request_id
         self.cancel_event = cancel_event
         self._start = start
@@ -25,6 +25,7 @@ class IncrementalSpeech:
         self._start_lock = Lock()
         self._accumulator_factory = accumulator_factory
         self.clock = clock
+        self.metrics = metrics
         self.started = False
         self.succeeded = False
 
@@ -32,6 +33,9 @@ class IncrementalSpeech:
         if not text:
             return
         self._check_open()
+        if self.metrics is not None:
+            self.metrics.mode = 'incremental'
+            self.metrics.mark('first_visible')
         with self._start_lock:
             self._check_open()
             if not self.started:
@@ -80,6 +84,8 @@ class IncrementalSpeech:
                     for chunk in accumulator.finish():
                         if self.cancel_event.is_set() or self._aborted.is_set():
                             return
+                        if self.metrics is not None:
+                            self.metrics.mark('first_chunk')
                         yield chunk
                     return
                 chunks = accumulator.poll()
@@ -88,5 +94,7 @@ class IncrementalSpeech:
             for chunk in chunks:
                 if self.cancel_event.is_set() or self._aborted.is_set():
                     return
+                if self.metrics is not None:
+                    self.metrics.mark('first_chunk')
                 yield chunk
         self._discard()

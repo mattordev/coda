@@ -7,6 +7,7 @@ from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 from runtime.incremental_speech import IncrementalSpeech
 from runtime.incremental_display import IncrementalDisplay
+from runtime.speech_metrics import SpeechMetrics
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
 from ai.request_context import request_context
@@ -413,13 +414,14 @@ def _execution_loop(stop_event):
         display = None
         if os.getenv("CODA_STREAM_DISPLAY", "false").strip().lower() in ("true", "1", "yes", "on"):
             display = IncrementalDisplay(request.cancel_event)
+        metrics = SpeechMetrics(request.request_id, request.accepted_at)
         if os.getenv("CODA_STREAM_SPEECH", "true").strip().lower() in ("true", "1", "yes", "on"):
             def start_stream(channel, voice_request=request.source == InputSource.VOICE):
                 runtime_queues.speech.put(SpeechTask(
                     request_id=channel.request_id, text="", cancel_event=channel.cancel_event,
-                    open_follow_up=voice_request, stream=channel,
+                    open_follow_up=voice_request, stream=channel, metrics=channel.metrics,
                 ))
-            stream = IncrementalSpeech(request.request_id, request.cancel_event, start_stream)
+            stream = IncrementalSpeech(request.request_id, request.cancel_event, start_stream, metrics=metrics)
         
         try:
             if request.cancel_event.is_set():
@@ -441,6 +443,9 @@ def _execution_loop(stop_event):
                     request,
                     command_result,
                 )
+                if execution_result.response_text and (stream is None or not stream.started):
+                    metrics.mark('first_visible')
+                metrics.mark('generation_complete')
                 if stream is not None:
                     stream.finish(bool(execution_result.response_text) and not execution_result.cancelled
                                   and execution_result.error is None)
@@ -459,6 +464,7 @@ def _execution_loop(stop_event):
                                 text=execution_result.response_text,
                                 cancel_event=request.cancel_event,
                                 open_follow_up=execution_result.open_follow_up,
+                                metrics=metrics,
                             )
                         )
         except Exception as error:
@@ -473,6 +479,9 @@ def _execution_loop(stop_event):
             if display is not None:
                 display.finish(bool(execution_result.response_text) and not execution_result.cancelled
                                and execution_result.error is None)
+            metrics.mark('generation_complete')
+            if (stream is None or not stream.started) and not execution_result.response_text:
+                metrics.finish('cancelled' if request.cancel_event.is_set() else 'no_speech')
             active_request_state.clear(request.request_id)
             runtime_queues.requests.task_done()
             
