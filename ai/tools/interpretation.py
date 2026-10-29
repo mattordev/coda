@@ -11,6 +11,8 @@ from ai.privacy import policy
 from ai.privacy.detector import analyze_privacy
 from ai.privacy.sanitizer import sanitize_structure, sanitize_text
 from ai.providers.cancellable import run_cancellable
+from ai.providers.generation import Workload
+from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
@@ -185,7 +187,9 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
             {'role': 'system', 'content': llm_service._get_system_prompt()[:4000] + '\n\n' + INSTRUCTIONS},
             {'role': 'user', 'content': payload_text},
         ]
-        return llm_service.call_with_messages(name, messages, cancel_event=cancel_event)
+        workload = Workload.REASONING if explicit_reasoning_request(question) else Workload.INTERPRETATION
+        return llm_service.call_with_messages(name, messages, cancel_event=cancel_event,
+                                              options=options_for(workload))
 
     try:
         response, error = run_cancellable(

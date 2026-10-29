@@ -101,15 +101,21 @@ def _generate_stream(
     cancel_event,
     scope,
     collector=None,
+    options=None,
 ):
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Request cancelled.")
+    payload = {
+        "model": model, "messages": messages, "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    if options is not None and options.thinking is not None and os.getenv(
+        "CODA_LLAMACPP_THINKING_CONTROL", "true",
+    ).strip().lower() in ("true", "1", "yes", "on"):
+        payload["chat_template_kwargs"] = {"enable_thinking": options.thinking}
     with http_client.post(
         f"{base_url}/v1/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        },
+        json=payload,
         timeout=timeout_seconds,
         stream=True,
     ) as response:
@@ -154,7 +160,7 @@ def _generate_stream(
             close_response()
 
 
-def _generate_request(messages, cancel_event, http_client, scope, collector=None):
+def _generate_request(messages, cancel_event, http_client, scope, collector=None, options=None):
     model, error = get_model(http_client)
 
     if error:
@@ -175,6 +181,7 @@ def _generate_request(messages, cancel_event, http_client, scope, collector=None
             cancel_event,
             scope,
             collector,
+            options,
         )
     except InterruptedError:
         return None, "Request cancelled."
@@ -212,6 +219,7 @@ def generate_with_metadata(messages, cancel_event=None, *, options=None):
                 session,
                 scope,
                 collector,
+                options,
             ),
             cancel_event,
             timeout_seconds,

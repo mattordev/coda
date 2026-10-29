@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
+from ai.providers.workloads import conversation_options
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
 from ai.telemetry import logger
@@ -328,6 +329,11 @@ def route_request(
     Routing decides whether cloud providers are allowed, while llm_service
     decides what cloud-safe content those providers actually receive.
     """
+    if options is None:
+        requested = conversation_options(prompt)
+        # Inherited conversation behavior needs no override on a legacy call.
+        if requested.thinking is not None or requested.max_tokens is not None:
+            options = requested
     privacy_result = analyze_privacy(prompt)
     risk = privacy_result["risk"]
 
