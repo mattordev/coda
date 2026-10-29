@@ -6,6 +6,7 @@ from runtime.active_request import ActiveRequestState
 from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 from runtime.incremental_speech import IncrementalSpeech
+from runtime.incremental_display import IncrementalDisplay
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
 from ai.request_context import request_context
@@ -409,6 +410,9 @@ def _execution_loop(stop_event):
 
         print(processing_message, flush=True)
         stream = None
+        display = None
+        if os.getenv("CODA_STREAM_DISPLAY", "false").strip().lower() in ("true", "1", "yes", "on"):
+            display = IncrementalDisplay(request.cancel_event)
         if os.getenv("CODA_STREAM_SPEECH", "true").strip().lower() in ("true", "1", "yes", "on"):
             def start_stream(channel, voice_request=request.source == InputSource.VOICE):
                 runtime_queues.speech.put(SpeechTask(
@@ -425,7 +429,8 @@ def _execution_loop(stop_event):
                     cancelled=True,
                 )
             else:
-                with request_context(request.request_id, request.cancel_event, speech_stream=stream):
+                with request_context(request.request_id, request.cancel_event,
+                                     speech_stream=stream, display_stream=display):
                     command_result = command.run(
                         request.message,
                         commands,
@@ -465,6 +470,9 @@ def _execution_loop(stop_event):
                 error=str(error),
             )
         finally:
+            if display is not None:
+                display.finish(bool(execution_result.response_text) and not execution_result.cancelled
+                               and execution_result.error is None)
             active_request_state.clear(request.request_id)
             runtime_queues.requests.task_done()
             
