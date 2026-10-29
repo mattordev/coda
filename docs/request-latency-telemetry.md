@@ -33,6 +33,9 @@ arrival, not a server-side timestamp for each token. If reasoning is hidden,
 first generated arrival is only the earliest exposed text; it cannot reveal
 earlier unseen work. An empty answer can have reasoning arrival but no visible
 arrival. No hidden reasoning text is retained, printed or sent to TTS.
+Native HTTP streams read lines without waiting for a 512-byte client buffer,
+so short deltas become observable promptly; network/server buffering can still
+affect arrival time.
 
 llama.cpp's top-level `timings.prompt_ms`/`predicted_ms` supply prompt/decode
 durations. Prompt cache reuse means native prompt processing can cover only
