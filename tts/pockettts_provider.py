@@ -167,6 +167,12 @@ class PocketTTSProvider:
             ffplay_path=self._ffplay_path,
         )
 
+    def create_stream_session(self, chunks):
+        """Reuse the warm runtime and one ffplay process across answer chunks."""
+        if self._ffplay_path is None:
+            raise RuntimeError("ffplay is not available.")
+        return PocketTTSSession("", self._get_runtime(), self._ffplay_path, chunks=chunks)
+
     def close(self) -> None:
         """Release retained model and failed-startup state."""
         with self._state_lock:
@@ -222,8 +228,10 @@ class PocketTTSSession:
         text: str,
         runtime: PocketTTSRuntime,
         ffplay_path: str,
+        *, chunks=None,
     ) -> None:
         self._text = text
+        self._chunks = chunks
         self._runtime = runtime
         self._ffplay_path = ffplay_path
         self._stop_event = Event()
@@ -272,15 +280,15 @@ class PocketTTSSession:
                 cancelled = True
                 self._terminate_process(process)
 
-            for pcm_chunk in self._runtime.stream_pcm(self._text):
+            for pcm_chunk in self._stream_pcm(cancel_event):
                 if self._should_stop(cancel_event):
                     if not cancelled:
                         self._terminate_process(process)
                     cancelled = True
-                    continue
+                    break
 
                 if playback_error is not None:
-                    continue
+                    break
 
                 try:
                     if process.stdin is None:
@@ -329,6 +337,22 @@ class PocketTTSSession:
                 if self._process is process:
                     self._process = None
                 self._playing = False
+
+    def _stream_pcm(self, cancel_event):
+        texts = self._chunks if self._chunks is not None else (self._text,)
+        for text in texts:
+            if self._should_stop(cancel_event):
+                return
+            pcm = self._runtime.stream_pcm(text)
+            try:
+                for chunk in pcm:
+                    if self._should_stop(cancel_event):
+                        return
+                    yield chunk
+            finally:
+                close = getattr(pcm, 'close', None)
+                if callable(close):
+                    close()
 
     def stop(self) -> None:
         self._stop_event.set()
