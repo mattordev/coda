@@ -7,6 +7,7 @@ from requests.exceptions import Timeout
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
 from ai.providers.completion import CompletionState
+from ai.providers.generation import emit_visible_text
 
 _model_cache = None
 _model_generation = 0
@@ -160,6 +161,7 @@ def _generate_stream(
                     if collector is not None:
                         collector.observe_content(content)
                     response_parts.append(content)
+                    emit_visible_text(options, content, cancel_event)
 
             completion.validate()
             return "".join(response_parts), None

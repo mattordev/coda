@@ -1,8 +1,10 @@
 """Request-scoped generation controls; never change a provider's global defaults."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import inspect
+from threading import Event
+from typing import Callable
 
 
 class Workload(str, Enum):
@@ -22,8 +24,11 @@ class GenerationOptions:
     workload: Workload = Workload.CONVERSATION
     thinking: bool | None = None
     max_tokens: int | None = None
+    on_visible_text: Callable[[str], None] | None = None
 
     def __post_init__(self):
+        if self.on_visible_text is not None and not callable(self.on_visible_text):
+            raise ValueError("on_visible_text must be callable or None.")
         if not isinstance(self.workload, Workload):
             raise ValueError("workload must be a Workload.")
         if self.thinking is not None and not isinstance(self.thinking, bool):
@@ -56,4 +61,28 @@ def call_generation(generate, messages, *, cancel_event=None, options=None):
             capable = False
         if capable:
             kwargs["options"] = options
-    return generate(messages, **kwargs)
+    closed = Event()
+    if options is not None and options.on_visible_text is not None and "options" in kwargs:
+        def forward(text):
+            if closed.is_set() or (cancel_event is not None and cancel_event.is_set()):
+                raise InterruptedError("Request cancelled.")
+            options.on_visible_text(text)
+        kwargs["options"] = replace(options, on_visible_text=forward)
+    try:
+        return generate(messages, **kwargs)
+    finally:
+        # Timed-out adapters may have an abandoning worker. It must not emit
+        # late text into a subsequent runtime request.
+        closed.set()
+
+
+def emit_visible_text(options, text, cancel_event=None):
+    """Adapters call this only for answer content, never reasoning channels.
+
+    The callback runs synchronously: consumers can apply bounded backpressure.
+    Exceptions abort this attempt; providers must never retry the callback.
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Request cancelled.")
+    if isinstance(text, str) and text and options is not None and options.on_visible_text is not None:
+        options.on_visible_text(text)

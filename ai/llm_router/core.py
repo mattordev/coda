@@ -1,12 +1,13 @@
 import os
 import time
+from dataclasses import replace
 from threading import Event
 from uuid import uuid4
 from ai.request_context import trace_id as request_trace_id
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
-from ai.providers.completion import COMPLETION_ERRORS
+from ai.providers.completion import COMPLETION_ERRORS, PARTIAL_STREAM_ERROR
 from ai.providers.workloads import conversation_options
 from ai.privacy.detector import analyze_privacy
 from ai.privacy import policy
@@ -108,6 +109,14 @@ def _try_providers(
     calls do not lose the sanitisation context from the original prompt.
     """
     last_error = None
+    output_started = False
+    if options is not None and options.on_visible_text is not None:
+        callback = options.on_visible_text
+        def forward(text):
+            nonlocal output_started
+            output_started = True
+            callback(text)
+        options = replace(options, on_visible_text=forward)
 
     trace_id = request_trace_id()
     attempted_providers = set()
@@ -153,6 +162,10 @@ def _try_providers(
             return None, error
 
         if error or not response:
+            if output_started:
+                # Replaying another answer after audible/visible output would
+                # duplicate or contradict what the user has already received.
+                return None, PARTIAL_STREAM_ERROR
             if error not in COMPLETION_ERRORS:
                 logger.log_failure(provider)
             _debug_print(f"[ROUTER] {provider} failed: {error}")
