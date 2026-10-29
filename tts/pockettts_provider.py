@@ -7,6 +7,7 @@ from threading import Event, Lock
 from typing import Protocol
 
 import utils.runtime_state as runtime_state
+from utils.model_activity import ModelActivity
 
 
 class PocketTTSRuntime(Protocol):
@@ -100,10 +101,12 @@ def _load_runtime(language: str, voice: str | None) -> PocketTTSRuntime:
     from pocket_tts import TTSModel
     from pocket_tts.default_parameters import get_default_voice_for_language
 
+    runtime_state.debug_print('[MODEL] TTS Pocket: loading weights (download if uncached)', flush=True)
     model = TTSModel.load_model(
         language=language,
         quantize=False,
     )
+    runtime_state.debug_print('[MODEL] TTS Pocket: preparing voice', flush=True)
     selected_voice = voice or get_default_voice_for_language(language)
     voice_state = model.get_state_for_audio_prompt(selected_voice)
     return _LoadedPocketTTSRuntime(model, voice_state)
@@ -202,7 +205,7 @@ class PocketTTSProvider:
                     ) from self._load_error
 
             try:
-                with _INITIALIZATION_LOCK:
+                with _INITIALIZATION_LOCK, ModelActivity('TTS Pocket', 'loading model and voice'):
                     if self._closed:
                         raise RuntimeError("Pocket TTS provider is closed.")
                     loaded = self._runtime_factory(self._language, self._voice)
