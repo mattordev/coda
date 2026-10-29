@@ -351,11 +351,15 @@ def route_request(
         if requested.thinking is not None or requested.max_tokens is not None:
             options = requested
     context = current_request()
-    if context is not None and context.speech_stream is not None:
+    if context is not None and (context.speech_stream is not None or context.display_stream is not None):
         # Only ordinary conversation enters here. Classifiers, extractors and
         # tool interpretation keep their existing validation/redaction gates.
-        options = replace(options or conversation_options(prompt),
-                          on_visible_text=context.speech_stream.feed)
+        def visible(text):
+            if context.display_stream is not None:
+                context.display_stream.feed(text)
+            if context.speech_stream is not None:
+                context.speech_stream.feed(text)
+        options = replace(options or conversation_options(prompt), on_visible_text=visible)
     privacy_result = analyze_privacy(prompt)
     risk = privacy_result["risk"]
 

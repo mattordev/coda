@@ -291,11 +291,11 @@ def _retained_tool_reply(message, *, cancel_event=None, debug=False):
 
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     """Emit the single finalized response used by every input and speech path."""
-    with request_context(cancel_event=cancel_event):
+    with request_context(cancel_event=cancel_event) as context:
         result = _on_command(msg, commands, debug=debug, cancel_event=cancel_event)
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
-    if result.response_text:
+    if result.response_text and not (context.display_stream is not None and context.display_stream.started):
         print(f"CODA: {result.response_text}")
     return result
 
