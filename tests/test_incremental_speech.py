@@ -8,10 +8,41 @@ from runtime.messages import SpeechTask, WorkerEventType
 from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor
 from tts.pockettts_provider import PocketTTSProvider
+from tts.incremental import SpeakableChunks
 from tests.test_pockettts_provider import FakeProcess
 
 
 class IncrementalSpeechTests(unittest.TestCase):
+    def test_previous_playback_does_not_expire_the_next_clause_wait(self):
+        now = [0.0]
+        cancel = Event()
+        stream = IncrementalSpeech('request', cancel, lambda _: None,
+            accumulator_factory=lambda: SpeakableChunks(clock=lambda: now[0]))
+        clause = 'This following clause is long enough for a natural boundary,'
+        stream.feed('First sentence. ' + clause + ' and the sentence continues')
+        chunks = iter(stream)
+        self.assertEqual(next(chunks), 'First sentence.')
+        now[0] = 5.0  # The speech worker spent five seconds playing that sentence.
+        ready = Event()
+        result = []
+        def consume():
+            try:
+                result.append(next(chunks))
+            finally:
+                ready.set()
+        worker = Thread(target=consume)
+        worker.start()
+        try:
+            self.assertFalse(ready.wait(.15), 'playback must not count as waiting for text')
+            now[0] = 6.1  # A genuine idle-text timeout may now yield the clause.
+            self.assertTrue(ready.wait(1))
+            self.assertEqual(result, [clause])
+        finally:
+            cancel.set()
+            worker.join(1)
+            chunks.close()
+        self.assertFalse(worker.is_alive())
+
     def test_preparation_failures_fall_back_before_consuming_text(self):
         for failure in ('availability', 'construction'):
             with self.subTest(failure=failure):

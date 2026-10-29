@@ -27,7 +27,13 @@ argument extraction never enter speech or incremental display.
 Speech prefers sentence boundaries with lookahead. Size, phrase and elapsed
 fallbacks avoid waiting indefinitely for a long sentence. The accumulator keeps
 at most 1,024 characters and targets 320-character chunks; its elapsed fallback
-starts after one second and requires at least 40 complete characters. Tokens
+starts after one second of waiting for text and requires a natural clause
+boundary (comma, semicolon or colon) after at least 40 complete characters.
+Time spent generating/playing the previous speech chunk does not count toward
+that wait, and arriving queued text is consumed before testing an idle timeout.
+Only the size bound permits an arbitrary complete-word split when no natural
+boundary is available. This avoids turning short mid-sentence fragments into
+standalone PocketTTS utterances with sentence-ending intonation. Tokens
 are not spoken one by one. Trailing lexical tokens remain buffered so partial
 decimals, versions, abbreviations and URLs are not cut into misleading values.
 Markdown links are rendered as complete label/target pairs. Fenced code and
