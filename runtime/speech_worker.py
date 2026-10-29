@@ -1,4 +1,5 @@
 from threading import Event, Thread
+import inspect
 from typing import Callable
 from tts.spoken_text import normalise_spoken_text
 from tts.segmentation import split_spoken_text
@@ -40,6 +41,17 @@ class SpeechTaskProcessor:
         self._segment_text = segment_text
         
     def process(self, task: SpeechTask) -> WorkerEvent:
+        try:
+            result = self._process(task)
+        except Exception:
+            if task.metrics is not None:
+                task.metrics.finish('failed')
+            raise
+        if task.metrics is not None:
+            task.metrics.finish(result.event_type.value)
+        return result
+
+    def _process(self, task: SpeechTask) -> WorkerEvent:
         if task.cancel_event.is_set():
             return self._event(task, WorkerEventType.CANCELLED)
 
@@ -47,6 +59,8 @@ class SpeechTaskProcessor:
             return self._process_stream(task)
 
         spoken_text = self._normalise_text(task.text)
+        if spoken_text and task.metrics is not None:
+            task.metrics.mark('first_chunk')
 
         if task.cancel_event.is_set():
             return self._event(task, WorkerEventType.CANCELLED)
@@ -77,6 +91,7 @@ class SpeechTaskProcessor:
                         provider,
                         segment,
                         task.cancel_event,
+                        **({"metrics": task.metrics} if task.metrics is not None else {}),
                     )
                 except Exception as error:
                     provider_error = f"{provider.name}: {error}"
@@ -130,8 +145,10 @@ class SpeechTaskProcessor:
             chunks = (self._normalise_text(chunk) for chunk in stream)
             create_stream = getattr(provider, "create_stream_session", None)
             if callable(create_stream):
+                parameters = inspect.signature(create_stream).parameters
+                kwargs = {"metrics": task.metrics} if 'metrics' in parameters else {}
                 played = self._playback_controller.play_session(
-                    create_stream(chunks), task.cancel_event,
+                    create_stream(chunks, **kwargs), task.cancel_event,
                 )
                 if not played and not task.cancel_event.is_set():
                     raise RuntimeError("Incremental playback did not complete.")
@@ -139,7 +156,8 @@ class SpeechTaskProcessor:
                 # Legacy TTS gets ordered sentence sessions; no retries after
                 # consuming a chunk, since it may already have become audible.
                 for chunk in chunks:
-                    if not self._playback_controller.play(provider, chunk, task.cancel_event):
+                    if not self._playback_controller.play(provider, chunk, task.cancel_event,
+                            **({"metrics": task.metrics} if task.metrics is not None else {})):
                         if not task.cancel_event.is_set():
                             raise RuntimeError("Incremental playback did not complete.")
                         break

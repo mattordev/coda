@@ -27,6 +27,7 @@ class RuntimeRequest:
         compare=False,
     )
     replace_active: bool = False
+    accepted_at: float = field(default_factory=time.monotonic)
     
 @dataclass(frozen=True)
 class ExecutionResult:
@@ -53,6 +54,7 @@ class SpeechTask:
     )
     open_follow_up: bool = False
     stream: object | None = field(default=None, repr=False, compare=False)
+    metrics: object | None = field(default=None, repr=False, compare=False)
     
 class WorkerName(str, Enum):
     VOICE_INPUT = "voice_input"
