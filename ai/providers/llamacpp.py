@@ -130,7 +130,7 @@ def _generate_stream(
         response_parts = []
 
         try:
-            for line in response.iter_lines(decode_unicode=True):
+            for line in response.iter_lines(decode_unicode=True, chunk_size=1):
                 if cancel_event is not None and cancel_event.is_set():
                     raise InterruptedError("Request cancelled.")
 

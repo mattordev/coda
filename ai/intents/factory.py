@@ -3,6 +3,7 @@ import os
 from ai.providers import registry as provider_registry
 from ai.providers.generation import call_generation
 from ai.providers.workloads import classification_options
+from ai.request_context import cancellation_event
 
 from .local_classifier import LocalClassifierStrategy
 from .router import (
@@ -51,6 +52,7 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
 
             def generate(messages):
                 return call_generation(provider.generate_with_metadata, messages,
+                                       cancel_event=cancellation_event(),
                                        options=classification_options(messages))
 
             strategies.append(

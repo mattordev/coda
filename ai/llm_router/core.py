@@ -2,6 +2,7 @@ import os
 import time
 from threading import Event
 from uuid import uuid4
+from ai.request_context import trace_id as request_trace_id
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
@@ -108,7 +109,7 @@ def _try_providers(
     """
     last_error = None
 
-    trace_id = str(uuid4())
+    trace_id = request_trace_id()
     attempted_providers = set()
 
     for sequence, provider in enumerate(providers, start=1):
