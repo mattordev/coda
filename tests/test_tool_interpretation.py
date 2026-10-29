@@ -57,6 +57,17 @@ class InterpretationTestCase(unittest.TestCase):
 
 
 class ToolInterpretationTests(InterpretationTestCase):
+    def test_exhausted_output_budget_reports_incomplete_and_never_returns_fragment(self):
+        from ai.providers.completion import OUTPUT_LIMIT_ERROR
+        self.generate.side_effect = lambda *args, **kwargs: (None, OUTPUT_LIMIT_ERROR)
+        with patch.object(core.logger, 'log_failure') as failure:
+            answer = service.interpret_result(document(), 'Summarize this')
+            failure.assert_not_called()
+        self.assertFalse(answer.used_llm)
+        self.assertIn('answer is incomplete', answer.text)
+        self.assertIn('output limit', answer.text)
+        self.assertEqual(history.conversation_log, [])
+
     def test_routine_thinking_is_off_and_explicit_user_analysis_can_opt_in(self):
         answer = service.interpret_result(document(), 'Summarize this')
         self.assertTrue(answer.used_llm)

@@ -62,7 +62,7 @@ class ThinkingPolicyTests(unittest.TestCase):
     def test_llamacpp_request_flag_is_isolated_and_reasoning_never_returns_as_answer(self):
         response = self.response([
             {"choices": [{"delta": {"reasoning_content": "PRIVATE THOUGHT"}}]},
-            {"choices": [{"delta": {"content": "Python 3.11"}}]},
+            {"choices": [{"delta": {"content": "Python 3.11"}, "finish_reason": "stop"}]},
         ])
         http = MagicMock()
         http.post.return_value = response
@@ -82,7 +82,7 @@ class ThinkingPolicyTests(unittest.TestCase):
 
     def test_llamacpp_legacy_server_opt_out_omits_template_controls(self):
         http = MagicMock()
-        http.post.return_value = self.response([])
+        http.post.return_value = self.response([{"choices": [{"delta": {}, "finish_reason": "stop"}]}])
         with patch.dict(os.environ, {"CODA_LLAMACPP_THINKING_CONTROL": "false"}):
             llamacpp._generate_stream(http, "http://local", "model", [], 5, Event(),
                                      CancellationScope(), options=options_for(Workload.CLASSIFICATION))

@@ -15,7 +15,7 @@ provider call, because the first call may already have accepted the request.
 
 Privacy routing, permission checks, cancellation and history rollback retain
 their existing ownership. Accepting an options object does not mean a provider
-supports every option. Output-budget enforcement is tracked by #186.
+supports every option. Built-in adapters enforce the output budgets below.
 
 ## Thinking policy
 
@@ -57,3 +57,57 @@ from model names or retry accepted generations to discover support. See
 Other provider adapters currently retain their own thinking defaults; they do
 not receive llama.cpp template arguments. Hardware/model and cold-start settings
 remain unchanged.
+
+## Output budgets and completion
+
+| Workload | Default maximum generated tokens | Environment setting |
+| --- | --- | --- |
+| Classification | 256 | `CODA_MAX_TOKENS_CLASSIFICATION` |
+| Long structured argument extraction | 2048 | `CODA_MAX_TOKENS_EXTRACTION` |
+| Routine tool interpretation | 512 | `CODA_MAX_TOKENS_INTERPRETATION` |
+| Conversation | inherit | `CODA_MAX_TOKENS_CONVERSATION` |
+| Deliberate reasoning | inherit | `CODA_MAX_TOKENS_REASONING` |
+
+Set a positive integer to override; blank/invalid/nonpositive settings use the
+workload default. A cap includes any internal reasoning counted by the provider;
+512 generated tokens does not guarantee 512 visible answer tokens. These are
+request limits, separate from the existing timeouts and server defaults.
+
+The combined intent/argument classifier normally uses 256. If a catalogue entry
+has a structured input schema and the JSON-escaped user message's UTF-8 byte
+length plus 128 exceeds that budget, it uses the larger extraction allowance
+(2048 by default). This conservative estimate reserves space to copy long
+arguments without assuming a tokenizer; catalogue descriptions cannot increase
+the allowance. Very long/escaped arguments can still exceed it. Validation then
+rejects the result; CODA never executes an incomplete selection. Raising the
+classification setting above extraction never reduces it. Argument/schema and
+permission validation still happen before dispatch.
+
+OpenAI and xAI use `max_completion_tokens`; OpenRouter and Gemini's compatible chat
+adapters use `max_tokens`; llama.cpp uses `max_tokens`; Ollama uses
+`options.num_predict`. No provider is retried merely to discover parameter
+support. See [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+[OpenRouter parameters](https://openrouter.ai/docs/api_reference/parameters),
+[Gemini compatibility](https://ai.google.dev/gemini-api/docs/openai),
+[xAI Chat Completions](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions), and
+[Ollama parameters](https://docs.ollama.com/modelfile#valid-parameters-and-values).
+
+Every adapter rejects explicit length termination, including syntactically valid
+JSON. Capped calls also require a terminal finish marker, llama.cpp `[DONE]`, or
+Ollama `done: true`; EOF alone is incomplete. Unsupported text completion reasons
+(including filtering or tool calls from a text-only request) are rejected. Legacy
+uncapped calls without completion metadata retain their existing behavior;
+unknown usage counts stay unknown. Provider errors and cancellation discard any
+accumulated partial answer. The service therefore cannot commit it to history or
+pass a partial classifier selection to tool execution.
+
+xAI documents its cap as visible output only, excluding reasoning and function
+calls. Other providers commonly count reasoning within the completion cap.
+Timeouts therefore remain necessary; an output cap alone cannot bound hidden
+reasoning time consistently across providers.
+
+Budget/incomplete-answer failures can fall back through the existing privacy
+order but do not mark the server unhealthy for ten minutes. Actual connection
+and timeout failures retain the existing health policy. If interpretation cannot
+obtain a complete answer it explicitly reports incompleteness; it never labels
+the generated fragment a completed summary.
