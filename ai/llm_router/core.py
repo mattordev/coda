@@ -96,7 +96,7 @@ def _try_providers(
     risk: float,
     privacy_result=None,
     cancel_event: Event | None = None,
-    *, provider_call=None, purpose=WorkloadPurpose.CONVERSATION,
+    *, provider_call=None, purpose=WorkloadPurpose.CONVERSATION, options=None,
 ):
     """
     Attempt providers in order and return the first successful response.
@@ -132,6 +132,7 @@ def _try_providers(
                 and provider not in attempted_providers
             ),
             **({"provider_call": provider_call, "purpose": purpose} if provider_call is not None else {}),
+            **({"options": options} if options is not None else {}),
         )
         attempted_providers.add(provider)
 
@@ -173,6 +174,7 @@ def _call_provider_with_health(
     is_fallback: bool = False,
     provider_call=None,
     purpose=WorkloadPurpose.CONVERSATION,
+    options=None,
 ):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.
@@ -206,6 +208,7 @@ def _call_provider_with_health(
             risk=risk,
             privacy_result=privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
         response, error = result
     except Exception:
@@ -317,6 +320,7 @@ def get_provider_order(privacy_result):
 def route_request(
     prompt: str,
     cancel_event: Event | None = None,
+    *, options=None,
 ):
     """
     Analyse privacy, choose provider order, and return the first good response.
@@ -349,6 +353,7 @@ def route_request(
             risk,
             privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
 
         if response:
@@ -373,6 +378,7 @@ def route_request(
             risk,
             privacy_result,
             cancel_event=cancel_event,
+            **({"options": options} if options is not None else {}),
         )
 
         if response:
@@ -398,6 +404,7 @@ def route_request(
         risk,
         privacy_result,
         cancel_event=cancel_event,
+        **({"options": options} if options is not None else {}),
     )
 
     if response:

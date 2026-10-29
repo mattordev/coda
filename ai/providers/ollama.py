@@ -244,7 +244,7 @@ def _generate_request(messages, cancel_event, http_client, scope, collector=None
     return (assistant_message or "").strip(), None
 
 
-def generate_with_metadata(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None, *, options=None):
     from runtime.model_warmup import wait_for_llm
     if not wait_for_llm('ollama', cancel_event):
         return ProviderMetricsCollector().finish(error="Request cancelled.")
@@ -283,8 +283,8 @@ def generate_with_metadata(messages, cancel_event=None):
         close_session()
 
 
-def generate(messages, cancel_event=None):
-    result = generate_with_metadata(messages, cancel_event=cancel_event)
+def generate(messages, cancel_event=None, *, options=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event, options=options)
     return result.response, result.error
 
 
