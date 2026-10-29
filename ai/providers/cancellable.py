@@ -1,6 +1,7 @@
 """Run blocking provider work without trapping CODA's execution worker."""
 
 from queue import Empty, Queue
+from contextvars import copy_context
 from threading import Event, Lock, Thread
 import time
 from typing import Callable, TypeVar
@@ -66,7 +67,10 @@ def run_cancellable(
         except Exception as error:  # re-raised on the calling thread
             results.put((None, error))
 
-    Thread(target=run, daemon=True).start()
+    # Context variables do not cross a new thread automatically. Each worker
+    # gets its own copy so nested provider threads retain request identity.
+    context = copy_context()
+    Thread(target=context.run, args=(run,), daemon=True).start()
     deadline = time.monotonic() + timeout_seconds
 
     while True:

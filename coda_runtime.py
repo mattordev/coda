@@ -7,6 +7,7 @@ from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
+from ai.request_context import request_context
 from runtime import model_warmup
 
 import os
@@ -414,12 +415,13 @@ def _execution_loop(stop_event):
                     cancelled=True,
                 )
             else:
-                command_result = command.run(
-                    request.message,
-                    commands,
-                    debug=debug_enabled,
-                    cancel_event=request.cancel_event,
-                )
+                with request_context(request.request_id, request.cancel_event):
+                    command_result = command.run(
+                        request.message,
+                        commands,
+                        debug=debug_enabled,
+                        cancel_event=request.cancel_event,
+                    )
                 execution_result = _create_execution_result(
                     request,
                     command_result,

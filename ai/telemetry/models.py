@@ -78,6 +78,12 @@ class UsageMetrics:
     output_tokens: int | None = None
     total_tokens: int | None = None
     throughput_tokens_per_second: float | None = None
+    time_to_first_generated_token_seconds: float | None = None
+    time_to_first_visible_token_seconds: float | None = None
+    prompt_duration_seconds: float | None = None
+    decode_duration_seconds: float | None = None
+    load_duration_seconds: float | None = None
+    reasoning_tokens: int | None = None
 
     def __post_init__(self) -> None:
         """Validate supplied measurements without inventing unknown values."""
@@ -85,6 +91,11 @@ class UsageMetrics:
             "total_duration_seconds",
             "time_to_first_token_seconds",
             "throughput_tokens_per_second",
+            "time_to_first_generated_token_seconds",
+            "time_to_first_visible_token_seconds",
+            "prompt_duration_seconds",
+            "decode_duration_seconds",
+            "load_duration_seconds",
         ):
             value = getattr(self, field_name)
 
@@ -105,6 +116,7 @@ class UsageMetrics:
             "input_tokens",
             "output_tokens",
             "total_tokens",
+            "reasoning_tokens",
         ):
             value = getattr(self, field_name)
 
@@ -492,6 +504,12 @@ class ProviderTelemetryAggregate:
     total_tokens: MetricAggregate
     throughput_tokens_per_second: MetricAggregate
     costs: tuple[CostAggregate, ...] = ()
+    time_to_first_generated_token_seconds: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
+    time_to_first_visible_token_seconds: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
+    prompt_duration_seconds: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
+    decode_duration_seconds: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
+    load_duration_seconds: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
+    reasoning_tokens: MetricAggregate = field(default_factory=lambda: MetricAggregate(0, None, None))
 
     def __post_init__(self) -> None:
         """Validate aggregate identity, counters and reliability rate."""

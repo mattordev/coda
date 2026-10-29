@@ -1,7 +1,7 @@
 import json
 import time
 from collections.abc import Callable
-from uuid import uuid4
+from ai.request_context import trace_id
 
 from ai.providers.telemetry import ProviderCallResult
 from ai.telemetry import logger
@@ -199,7 +199,7 @@ class LocalClassifierStrategy:
         )
         is_failure = outcome is AttemptOutcome.FAILURE
         logger.record_attempt(ProviderAttempt(
-            trace_id=str(uuid4()),
+            trace_id=trace_id(),
             timestamp=time.time(),
             purpose=WorkloadPurpose.INTENT_CLASSIFICATION,
             provider=self._provider,
@@ -240,7 +240,8 @@ class LocalClassifierStrategy:
         response, error = result
 
         if error:
-            self._record_attempt(AttemptOutcome.FAILURE, result)
+            self._record_attempt(AttemptOutcome.CANCELLED if error == 'Request cancelled.'
+                                 else AttemptOutcome.FAILURE, result)
             raise RuntimeError(
                 f"Local classifier provider failed: {error}"
             )
