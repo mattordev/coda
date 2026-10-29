@@ -16,7 +16,7 @@ class IncrementalDisplayTests(unittest.TestCase):
         display = IncrementalDisplay(Event(), write=output.append)
         display.feed('First ')
         self.assertEqual(''.join(output), 'CODA: First ')
-        display.feed('answer.\x1b\x00\x7f')
+        display.feed('answer.\x1b\x00\x7f\x9b')
         display.finish(True)
         display.finish(True)
         self.assertEqual(''.join(output), 'CODA: First answer.\n')

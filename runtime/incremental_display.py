@@ -20,8 +20,8 @@ class IncrementalDisplay:
                 raise InterruptedError('Request cancelled.')
             # Escape/control bytes must never reach a terminal, even across
             # delta boundaries. Visible Unicode and normal line breaks survive.
-            text = ''.join(char for char in text if char in '\n\t' or ord(char) >= 32)
-            text = text.replace('\x7f', '')
+            text = ''.join(char for char in text
+                           if char in '\n\t' or (ord(char) >= 32 and not 127 <= ord(char) <= 159))
             if not text or (not self.started and not text.strip()):
                 return
             if not self.started:
