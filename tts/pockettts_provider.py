@@ -157,7 +157,7 @@ class PocketTTSProvider:
             )
             return False
 
-    def create_session(self, text: str):
+    def create_session(self, text: str, *, metrics=None):
         if self._ffplay_path is None:
             raise RuntimeError("ffplay is not available.")
 
@@ -165,13 +165,14 @@ class PocketTTSProvider:
             text=text,
             runtime=self._get_runtime(),
             ffplay_path=self._ffplay_path,
+            metrics=metrics,
         )
 
-    def create_stream_session(self, chunks):
+    def create_stream_session(self, chunks, *, metrics=None):
         """Reuse the warm runtime and one ffplay process across answer chunks."""
         if self._ffplay_path is None:
             raise RuntimeError("ffplay is not available.")
-        return PocketTTSSession("", self._get_runtime(), self._ffplay_path, chunks=chunks)
+        return PocketTTSSession("", self._get_runtime(), self._ffplay_path, chunks=chunks, metrics=metrics)
 
     def close(self) -> None:
         """Release retained model and failed-startup state."""
@@ -228,10 +229,11 @@ class PocketTTSSession:
         text: str,
         runtime: PocketTTSRuntime,
         ffplay_path: str,
-        *, chunks=None,
+        *, chunks=None, metrics=None,
     ) -> None:
         self._text = text
         self._chunks = chunks
+        self._metrics = metrics
         self._runtime = runtime
         self._ffplay_path = ffplay_path
         self._stop_event = Event()
@@ -281,6 +283,8 @@ class PocketTTSSession:
                 self._terminate_process(process)
 
             for pcm_chunk in self._stream_pcm(cancel_event):
+                if pcm_chunk and self._metrics is not None:
+                    self._metrics.mark('first_pcm')
                 if self._should_stop(cancel_event):
                     if not cancelled:
                         self._terminate_process(process)
@@ -295,6 +299,8 @@ class PocketTTSSession:
                         raise RuntimeError("ffplay input pipe is unavailable.")
                     process.stdin.write(pcm_chunk)
                     process.stdin.flush()
+                    if pcm_chunk and self._metrics is not None:
+                        self._metrics.mark('playback_start')
                 except (BrokenPipeError, OSError) as error:
                     if self._should_stop(cancel_event):
                         cancelled = True
