@@ -5,6 +5,7 @@ import requests
 from requests.exceptions import Timeout
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
+from utils.model_activity import ModelActivity
 from ai.providers.telemetry import ProviderMetricsCollector
 from ai.providers.completion import CompletionState
 from ai.providers.generation import emit_visible_text
@@ -187,7 +188,10 @@ def _generate_stream(
         raise InterruptedError("Request cancelled.")
     if options is not None and options.max_tokens is not None:
         payload["options"] = {"num_predict": options.max_tokens}
-    with http_client.post(
+    with ModelActivity(
+        'LLM Ollama', 'waiting for server (may include model loading and prompt processing)',
+        cancel_event=cancel_event,
+    ) as activity, http_client.post(
         f"{base_url}/api/chat",
         json=payload,
         timeout=timeout_seconds,
@@ -207,6 +211,7 @@ def _generate_stream(
 
                 response_json = json.loads(line)
                 completion.observe_ollama(response_json)
+                activity.finish('first server event received')
                 if collector is not None:
                     collector.observe_ollama_chunk(response_json)
 

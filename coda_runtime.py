@@ -23,7 +23,7 @@ import utils.stt_service as stt_service
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.dashboard_state as dashboard_state
-from utils.console import configure_stdout_encoding
+from utils.console import configure_stdout_encoding, print_line as print
 from colorama import Fore, init
 
 import keyboard

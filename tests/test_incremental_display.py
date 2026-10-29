@@ -53,6 +53,7 @@ class IncrementalDisplayTests(unittest.TestCase):
 
     def test_on_command_does_not_print_final_answer_twice(self):
         display = IncrementalDisplay(Event(), write=lambda text: None)
+        self.addCleanup(display.finish, False)
         def run(*args, **kwargs):
             display.feed('Answer.')
             return command.CommandResult(True, response_text='Answer.')

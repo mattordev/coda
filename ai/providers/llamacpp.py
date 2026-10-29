@@ -8,6 +8,7 @@ from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
 from ai.providers.completion import CompletionState
 from ai.providers.generation import emit_visible_text
+from utils.model_activity import ModelActivity
 
 _model_cache = None
 _model_generation = 0
@@ -118,7 +119,10 @@ def _generate_stream(
         payload["chat_template_kwargs"] = {"enable_thinking": options.thinking}
     if options is not None and options.max_tokens is not None:
         payload["max_tokens"] = options.max_tokens
-    with http_client.post(
+    with ModelActivity(
+        'LLM llama.cpp', 'waiting for server (may include model loading and prompt processing)',
+        cancel_event=cancel_event,
+    ) as activity, http_client.post(
         f"{base_url}/v1/chat/completions",
         json=payload,
         timeout=timeout_seconds,
@@ -147,6 +151,7 @@ def _generate_stream(
 
                 response_json = json.loads(line)
                 completion.observe_openai(response_json)
+                activity.finish('first server event received')
                 if collector is not None:
                     collector.observe_openai_chunk(response_json)
 
