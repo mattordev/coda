@@ -185,7 +185,7 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
         # Some local chat templates only accept one leading system message.
         # Keep the mandatory data boundary outside the configurable prompt cap.
         messages = [
-            {'role': 'system', 'content': llm_service._get_system_prompt()[:4000] + '\n\n' + INSTRUCTIONS},
+            {'role': 'system', 'content': llm_service._get_system_prompt(max_chars=4000) + '\n\n' + INSTRUCTIONS},
             {'role': 'user', 'content': payload_text},
         ]
         workload = Workload.REASONING if explicit_reasoning_request(question) else Workload.INTERPRETATION

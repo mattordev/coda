@@ -63,9 +63,9 @@ class FilesystemMCPTests(unittest.TestCase):
         self.assertEqual(result.content[0].text.splitlines()[0], "[FILE] a-old.py")
         speech = prepare_tool_response(ToolResult(True, result.model_dump(mode="json", by_alias=True)),
                                        question="What have I edited recently?")
-        self.assertNotIn("a-old dot py", speech)
-        self.assertLess(speech.index("b-new dot py"), speech.index("c-next dot py"))
-        self.assertLess(speech.index("c-next dot py"), speech.index("d-third dot py"))
+        self.assertNotIn("a-old.py", speech)
+        self.assertLess(speech.index("b-new.py"), speech.index("c-next.py"))
+        self.assertLess(speech.index("c-next.py"), speech.index("d-third.py"))
 
     def test_requested_and_ancestor_blocked_paths_are_denied(self):
         blocked = self.root / ".ssh-test"

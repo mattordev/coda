@@ -11,6 +11,7 @@ from tts.elevenlabs_provider import ElevenLabsProvider
 from tts.pockettts_provider import PocketTTSProvider
 from tts.pyttsx3_provider import Pyttsx3Provider
 from tts import registry as tts_registry
+from tts.spoken_text import normalise_spoken_text
 from typing import Callable
 
 try:
@@ -239,7 +240,7 @@ def speak_response(response):
             if not provider.is_available():
                 continue
 
-            session = provider.create_session(response)
+            session = provider.create_session(normalise_spoken_text(response))
             if session.play(cancel_event):
                 return True
 

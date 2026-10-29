@@ -1,6 +1,7 @@
 """Speech answers the question without replacing detailed tool data."""
 
 from copy import deepcopy
+from tts.spoken_text import normalise_spoken_text
 import unittest
 
 from ai.tools.models import ToolResult
@@ -48,10 +49,10 @@ class ToolResultSummaryTests(unittest.TestCase):
         self.assertEqual(prepare_tool_response(result, question="What's in this folder?"),
                          "The listing contains 1 directory and 2 files.")
         recent = prepare_tool_response(result, question="Show the latest files")
-        self.assertLess(recent.index("b-new dot py"), recent.index("a-old dot py"))
+        self.assertLess(recent.index("b-new.py"), recent.index("a-old.py"))
         self.assertNotIn('"project"', recent)
         names = prepare_tool_response(result, question="Read out all filenames")
-        self.assertLess(names.index("a-old dot py"), names.index("b-new dot py"))
+        self.assertLess(names.index("a-old.py"), names.index("b-new.py"))
         self.assertEqual(result.data, original)
 
     def test_text_only_listing_cannot_claim_recent_edit_information(self):
@@ -113,13 +114,12 @@ class ToolResultSummaryTests(unittest.TestCase):
         self.assertIn("5 files", count)
         self.assertNotIn('"file0.py"', count)
         exact = prepare_tool_response(result, question="Read all filenames")
-        self.assertIn('"file4 dot py"', exact)
+        self.assertIn('"file4.py"', exact)
         self.assertNotIn('"tests"', exact)
         specific = prepare_tool_response(result, question="Does it contain file4.py?")
-        self.assertEqual(specific, 'The listing includes "file4 dot py".')
+        self.assertEqual(specific, 'The listing includes "file4.py".')
 
     def test_filename_dots_are_spoken_while_display_and_raw_names_stay_exact(self):
-        from tts.spoken_text import normalise_spoken_text
         for name, spoken in (("dashboard_state.json", "dashboard_state dot jay son"),
                              ("archive.tar.gz", "archive dot tar dot gz"),
                              (".gitignore", "dot gitignore")):
@@ -128,7 +128,7 @@ class ToolResultSummaryTests(unittest.TestCase):
                 original = deepcopy(result.data)
                 for question in ("Read all filenames", "What did I edit recently?", f"Does it contain {name}?"):
                     speech = prepare_tool_response(result, question=question)
-                    self.assertIn('"' + spoken + '"', speech)
+                    self.assertIn('"' + name + '"', speech)
                     self.assertIn(spoken, normalise_spoken_text(speech))
                 self.assertIn(name, prepare_tool_display(result))
                 self.assertEqual(result.data, original)
@@ -140,12 +140,13 @@ class ToolResultSummaryTests(unittest.TestCase):
             ("settings.JSON", "file", "settings dot jay son"),
             ("notes.backup.md", "file", "notes dot backup dot markdown"),
             ("unknown.xyz", "file", "unknown dot xyz"),
-            ("project.md", "directory", "project dot md"),
+            ("project.md", "directory", "project dot markdown"),
         ):
             with self.subTest(name=name, kind=kind):
                 result = self.listing([{"name": name, "type": kind}])
                 speech = prepare_tool_response(result, question="Read all names")
-                self.assertIn('"' + spoken + '"', speech)
+                self.assertIn('"' + name + '"', speech)
+                self.assertIn(spoken, normalise_spoken_text(speech))
                 self.assertIn(name, prepare_tool_display(result))
                 self.assertEqual(result.data["structuredContent"]["entries"][0]["name"], name)
 
