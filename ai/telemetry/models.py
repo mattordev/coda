@@ -24,6 +24,7 @@ class WorkloadPurpose(str, Enum):
 
     CONVERSATION = "conversation"
     INTENT_CLASSIFICATION = "intent_classification"
+    ARGUMENT_EXTRACTION = "argument_extraction"
     TOOL_INTERPRETATION = "tool_interpretation"
 
 
