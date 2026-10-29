@@ -140,7 +140,9 @@ class ProbeHTTP:
     def post(self, url, *, json, **kwargs):
         # Request-only controls make prompt-cache conditions and sampling explicit.
         payload = dict(json, seed=42, temperature=1.0, cache_prompt=False)
-        return ProbeResponse(self.session.post(url, json=payload, **kwargs), self.row)
+        response = self.session.post(url, json=payload, **kwargs)
+        self.row['http_status'] = response.status_code
+        return ProbeResponse(response, self.row)
 
 
 def run_case(case, mode, catalogue, base_url, model, timeout):
