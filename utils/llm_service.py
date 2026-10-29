@@ -7,6 +7,7 @@ from dataclasses import replace
 from threading import Event
 
 from ai.providers import registry
+from ai.providers.generation import call_generation
 from ai.providers.telemetry import ProviderCallResult
 from ai.privacy.sanitizer import sanitize_text
 from ai.privacy import policy
@@ -300,6 +301,7 @@ def _generate_provider_response(
     risk=0.0,
     privacy_result=None,
     cancel_event: Event | None = None,
+    *, options=None,
 ):
     """
     Add the user message, call the provider, then store the assistant reply.
@@ -333,9 +335,11 @@ def _generate_provider_response(
     if not callable(generate):
         generate = provider_module.generate
 
-    provider_result = generate(
+    provider_result = call_generation(
+        generate,
         messages,
         cancel_event=cancel_event,
+        options=options,
     )
     response, error = provider_result
 
@@ -414,6 +418,7 @@ def call_provider(
     risk=0.0,
     privacy_result=None,
     cancel_event: Event | None = None,
+    *, options=None,
 ):
     provider_name = registry.normalize_provider_name(provider_name)
     provider_module = registry.get_provider_module(provider_name)
@@ -429,6 +434,7 @@ def call_provider(
         risk=risk,
         privacy_result=privacy_result,
         cancel_event=cancel_event,
+        options=options,
     )
 
 
@@ -443,7 +449,7 @@ def _interpretation_error(error):
     return "Interpretation provider failed."
 
 
-def call_with_messages(provider_name, messages, *, cancel_event=None):
+def call_with_messages(provider_name, messages, *, cancel_event=None, options=None):
     """Stateless generation for bounded host-prepared input; never mutate dialogue."""
     if cancel_event is not None and cancel_event.is_set():
         return None, "Request cancelled."
@@ -454,7 +460,7 @@ def call_with_messages(provider_name, messages, *, cancel_event=None):
     if not callable(generate):
         generate = provider.generate
     try:
-        result = generate(messages, cancel_event=cancel_event)
+        result = call_generation(generate, messages, cancel_event=cancel_event, options=options)
         response, error = result
         if cancel_event is not None and cancel_event.is_set():
             response, error = None, "Request cancelled."

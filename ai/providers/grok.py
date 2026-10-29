@@ -91,7 +91,7 @@ def _generate_stream(
     return "".join(response_parts)
 
 
-def generate_with_metadata(messages, cancel_event=None):
+def generate_with_metadata(messages, cancel_event=None, *, options=None):
     api_key = get_api_key()
     model = get_model()
     collector = ProviderMetricsCollector(model)
@@ -144,6 +144,6 @@ def generate_with_metadata(messages, cancel_event=None):
     return collector.finish(response=(assistant_message or "").strip())
 
 
-def generate(messages, cancel_event=None):
-    result = generate_with_metadata(messages, cancel_event=cancel_event)
+def generate(messages, cancel_event=None, *, options=None):
+    result = generate_with_metadata(messages, cancel_event=cancel_event, options=options)
     return result.response, result.error
