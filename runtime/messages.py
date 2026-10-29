@@ -52,6 +52,7 @@ class SpeechTask:
         compare=False,
     )
     open_follow_up: bool = False
+    stream: object | None = field(default=None, repr=False, compare=False)
     
 class WorkerName(str, Enum):
     VOICE_INPUT = "voice_input"

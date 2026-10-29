@@ -47,6 +47,10 @@ class SpeechPlaybackController:
         
         
         session = provider.create_session(text)
+        return self.play_session(session, cancel_event)
+
+    def play_session(self, session: SpeechSession, cancel_event: Event) -> bool:
+        """Register an already prepared complete or incremental session."""
         
         with self._lock:
             if self._active_session is not None:
