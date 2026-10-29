@@ -18,6 +18,19 @@ SEMANTIC = 'Python 3.11 and 3.12; version 1.5.1; value 0.0100; file "README.md".
 
 
 class SemanticFidelityTests(unittest.TestCase):
+    def test_legacy_number_expansion_is_replaced_in_request_without_editing_custom_setting(self):
+        legacy = ('Expand numbers, abbreviations, dates, times, measurements, URLs, and technical terms '
+                  'into forms that text-to-speech can pronounce clearly.')
+        configured = 'Be warm. ' + legacy + ' Keep replies short.'
+        with patch.dict(os.environ, {'CODA_SYSTEM_PROMPT': configured}):
+            for limit in (None, 4000):
+                prompt = history._get_system_prompt(max_chars=limit)
+                self.assertNotIn(legacy, prompt)
+                self.assertIn('Be warm.', prompt)
+                self.assertIn('Keep replies short.', prompt)
+                self.assertIn('Keep factual values literal', prompt)
+            self.assertEqual(os.environ['CODA_SYSTEM_PROMPT'], configured)
+
     def test_conflicting_custom_speech_prompt_keeps_mandatory_factual_rule_last(self):
         custom = 'Expand numbers and versions into words for speech. '
         with patch.dict(os.environ, {'CODA_SYSTEM_PROMPT': custom * 200}):

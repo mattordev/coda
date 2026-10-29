@@ -45,6 +45,15 @@ SEMANTIC_FIDELITY_POLICY = (
     "Deterministic text-to-speech processing handles pronunciation separately."
 )
 
+# Older voice configurations contain this exact style rule. Keeping it in a
+# rendered request contradicts semantic fidelity even if a later rule overrides
+# it. Replace the known legacy clause at the request boundary, not in .env.
+_LEGACY_PRONUNCIATION_RULE = re.compile(
+    r"\bExpand\s+numbers,\s*abbreviations,\s*dates,\s*times,\s*measurements,\s*URLs,\s*"
+    r"and\s+technical\s+terms\s+into\s+forms\s+that\s+text-to-speech\s+can\s+pronounce\s+clearly\.?",
+    re.IGNORECASE,
+)
+
 conversation_log = []
 _tool_results = deque(maxlen=8)
 _tool_focus = None
@@ -65,6 +74,9 @@ def _get_float_env(name, default):
 def _get_system_prompt(*, max_chars=None):
     configured_prompt = os.getenv("CODA_SYSTEM_PROMPT", "").strip()
     custom = configured_prompt or DEFAULT_SYSTEM_PROMPT
+    custom = _LEGACY_PRONUNCIATION_RULE.sub(
+        'Keep factual values literal; text-to-speech handles pronunciation separately.', custom,
+    )
     mandatory = TOOL_DATA_POLICY + " " + SEMANTIC_FIDELITY_POLICY
     if max_chars is not None:
         custom = custom[:max(0, max_chars - len(mandatory) - 1)]

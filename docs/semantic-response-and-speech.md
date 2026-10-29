@@ -28,7 +28,11 @@ extension pronunciation. Unquoted filenames and URLs remain literal to avoid
 rewriting ordinary technical prose. The existing bounded summaries, ordering,
 redaction and complete retained tool results are preserved.
 
-Custom `CODA_SYSTEM_PROMPT` values remain operator-owned. Existing configurations
-that ask for numbers to be expanded remain stored unchanged, with the mandatory
-factual rule taking precedence in actual requests. No new environment settings
-are required for this separation.
+Custom `CODA_SYSTEM_PROMPT` values remain operator-owned. The known legacy
+sentence beginning “Expand numbers, abbreviations, dates, times, measurements,
+URLs, and technical terms” is replaced with a literal-value rule in rendered
+requests. Leaving that sentence beside a later override still caused numeric
+pronunciation in live evaluation. Stored configuration remains unchanged;
+surrounding tone/style instructions are preserved. Other custom instructions
+remain subject to the appended mandatory fidelity rule. No new environment
+settings are required for this separation.
