@@ -27,7 +27,7 @@ class RuntimeRequest:
         compare=False,
     )
     replace_active: bool = False
-    accepted_at: float = field(default_factory=time.monotonic)
+    accepted_at: float = field(default_factory=time.perf_counter)
     
 @dataclass(frozen=True)
 class ExecutionResult:

@@ -26,7 +26,7 @@ def record_metrics(record):
 
 
 class SpeechMetrics:
-    def __init__(self, request_id, accepted_at, *, mode='full_answer', clock=time.monotonic,
+    def __init__(self, request_id, accepted_at, *, mode='full_answer', clock=time.perf_counter,
                  record=record_metrics):
         self.request_id = request_id
         self.accepted_at = accepted_at
