@@ -1,8 +1,8 @@
 import os
 
 from ai.providers import registry as provider_registry
-from ai.providers.generation import Workload, call_generation
-from ai.providers.workloads import options_for
+from ai.providers.generation import call_generation
+from ai.providers.workloads import classification_options
 
 from .local_classifier import LocalClassifierStrategy
 from .router import (
@@ -51,7 +51,7 @@ def create_router(registry: IntentRegistry) -> IntentRouter:
 
             def generate(messages):
                 return call_generation(provider.generate_with_metadata, messages,
-                                       options=options_for(Workload.CLASSIFICATION))
+                                       options=classification_options(messages))
 
             strategies.append(
                 LocalClassifierStrategy(

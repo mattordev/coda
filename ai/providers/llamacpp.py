@@ -6,6 +6,7 @@ from requests.exceptions import Timeout
 
 from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
+from ai.providers.completion import CompletionState
 
 _model_cache = None
 _model_generation = 0
@@ -103,6 +104,7 @@ def _generate_stream(
     collector=None,
     options=None,
 ):
+    completion = CompletionState(options)
     if cancel_event is not None and cancel_event.is_set():
         raise InterruptedError("Request cancelled.")
     payload = {
@@ -113,6 +115,8 @@ def _generate_stream(
         "CODA_LLAMACPP_THINKING_CONTROL", "true",
     ).strip().lower() in ("true", "1", "yes", "on"):
         payload["chat_template_kwargs"] = {"enable_thinking": options.thinking}
+    if options is not None and options.max_tokens is not None:
+        payload["max_tokens"] = options.max_tokens
     with http_client.post(
         f"{base_url}/v1/chat/completions",
         json=payload,
@@ -137,9 +141,11 @@ def _generate_stream(
                     line = line[6:]
 
                 if line == "[DONE]":
+                    completion.terminal = True
                     break
 
                 response_json = json.loads(line)
+                completion.observe_openai(response_json)
                 if collector is not None:
                     collector.observe_openai_chunk(response_json)
 
@@ -155,6 +161,7 @@ def _generate_stream(
                         collector.observe_content(content)
                     response_parts.append(content)
 
+            completion.validate()
             return "".join(response_parts), None
         finally:
             close_response()

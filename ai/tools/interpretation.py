@@ -11,6 +11,7 @@ from ai.privacy import policy
 from ai.privacy.detector import analyze_privacy
 from ai.privacy.sanitizer import sanitize_structure, sanitize_text
 from ai.providers.cancellable import run_cancellable
+from ai.providers.completion import COMPLETION_ERRORS
 from ai.providers.generation import Workload
 from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
@@ -202,6 +203,8 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
         response, error = None, 'Tool interpretation unavailable.'
     if cancel_event is not None and cancel_event.is_set():
         return Interpretation(None)
+    if error in COMPLETION_ERRORS:
+        return Interpretation('The tool completed, but its answer is incomplete. ' + error)
     if error or not isinstance(response, str) or not response.strip():
         return Interpretation(UNAVAILABLE)
     # Redact generated content too. A provider cannot inject terminal control codes.
