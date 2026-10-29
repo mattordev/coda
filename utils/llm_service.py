@@ -359,12 +359,16 @@ def _generate_provider_response(
     if not callable(generate):
         generate = provider_module.generate
 
-    provider_result = call_generation(
-        generate,
-        messages,
-        cancel_event=cancel_event,
-        options=options,
-    )
+    try:
+        provider_result = call_generation(
+            generate,
+            messages,
+            cancel_event=cancel_event,
+            options=options,
+        )
+    except Exception:
+        conversation_log[:] = original_history
+        raise
     response, error = provider_result
 
     def cancelled_result():

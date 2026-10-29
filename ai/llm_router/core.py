@@ -3,7 +3,7 @@ import time
 from dataclasses import replace
 from threading import Event
 from uuid import uuid4
-from ai.request_context import trace_id as request_trace_id
+from ai.request_context import trace_id as request_trace_id, current_request
 
 from ai.providers import registry
 from ai.providers.telemetry import ProviderCallResult
@@ -350,6 +350,12 @@ def route_request(
         # Inherited conversation behavior needs no override on a legacy call.
         if requested.thinking is not None or requested.max_tokens is not None:
             options = requested
+    context = current_request()
+    if context is not None and context.speech_stream is not None:
+        # Only ordinary conversation enters here. Classifiers, extractors and
+        # tool interpretation keep their existing validation/redaction gates.
+        options = replace(options or conversation_options(prompt),
+                          on_visible_text=context.speech_stream.feed)
     privacy_result = analyze_privacy(prompt)
     risk = privacy_result["risk"]
 

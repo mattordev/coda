@@ -38,6 +38,7 @@ class CommandResult:
     command_matches: tuple[str, ...] = ()
     tool_result: ToolResult | None = None
     display_text: str | None = None
+    error: str | None = None
 
     def __bool__(self):
         return self.handled
@@ -400,7 +401,7 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         if debug:
             print(f"[DEBUG] LLM request failed: {error}")
 
-        return CommandResult(handled=False)
+        return CommandResult(handled=False, error=error)
 
     if not response_text:
         if debug:

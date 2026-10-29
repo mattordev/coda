@@ -5,6 +5,7 @@ from runtime.follow_up import FollowUpState
 from runtime.active_request import ActiveRequestState
 from runtime.speech_playback import SpeechPlaybackController
 from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
+from runtime.incremental_speech import IncrementalSpeech
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
 from ai.request_context import request_context
@@ -368,6 +369,7 @@ def _create_execution_result(
         response_text=command_result.response_text,
         display_text=getattr(command_result, "display_text", None),
         tool_result=getattr(command_result, "tool_result", None),
+        error=getattr(command_result, "error", None),
         open_follow_up=(
             command_result.open_follow_up
             and request.source == InputSource.VOICE
@@ -406,6 +408,14 @@ def _execution_loop(stop_event):
             processing_message = "[RUNTIME] Processing request"
 
         print(processing_message, flush=True)
+        stream = None
+        if os.getenv("CODA_STREAM_SPEECH", "true").strip().lower() in ("true", "1", "yes", "on"):
+            def start_stream(channel, voice_request=request.source == InputSource.VOICE):
+                runtime_queues.speech.put(SpeechTask(
+                    request_id=channel.request_id, text="", cancel_event=channel.cancel_event,
+                    open_follow_up=voice_request, stream=channel,
+                ))
+            stream = IncrementalSpeech(request.request_id, request.cancel_event, start_stream)
         
         try:
             if request.cancel_event.is_set():
@@ -415,7 +425,7 @@ def _execution_loop(stop_event):
                     cancelled=True,
                 )
             else:
-                with request_context(request.request_id, request.cancel_event):
+                with request_context(request.request_id, request.cancel_event, speech_stream=stream):
                     command_result = command.run(
                         request.message,
                         commands,
@@ -426,6 +436,9 @@ def _execution_loop(stop_event):
                     request,
                     command_result,
                 )
+                if stream is not None:
+                    stream.finish(bool(execution_result.response_text) and not execution_result.cancelled
+                                  and execution_result.error is None)
                 if (
                     execution_result.response_text is not None
                     and not execution_result.cancelled
@@ -434,15 +447,18 @@ def _execution_loop(stop_event):
                         execution_result.response_text,
                         source="tts",
                     )
-                    runtime_queues.speech.put(
-                        SpeechTask(
-                            request_id=request.request_id,
-                            text=execution_result.response_text,
-                            cancel_event=request.cancel_event,
-                            open_follow_up=execution_result.open_follow_up,
+                    if stream is None or not stream.started:
+                        runtime_queues.speech.put(
+                            SpeechTask(
+                                request_id=request.request_id,
+                                text=execution_result.response_text,
+                                cancel_event=request.cancel_event,
+                                open_follow_up=execution_result.open_follow_up,
+                            )
                         )
-                    )
         except Exception as error:
+            if stream is not None:
+                stream.abort()
             execution_result = ExecutionResult(
                 request_id=request.request_id,
                 handled=False,
