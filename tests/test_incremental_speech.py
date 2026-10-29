@@ -12,6 +12,42 @@ from tests.test_pockettts_provider import FakeProcess
 
 
 class IncrementalSpeechTests(unittest.TestCase):
+    def test_preparation_failures_fall_back_before_consuming_text(self):
+        for failure in ('availability', 'construction'):
+            with self.subTest(failure=failure):
+                stream = IncrementalSpeech('request', Event(), lambda _: None)
+                stream.feed('An ordered answer.')
+                stream.finish()
+                first = Mock(spec=['name', 'is_available', 'create_stream_session'])
+                first.is_available.return_value = True
+                if failure == 'availability':
+                    first.is_available.side_effect = RuntimeError('unavailable')
+                else:
+                    first.create_stream_session.side_effect = RuntimeError('construction failed')
+                second = Mock(spec=['name', 'is_available', 'create_session'])
+                second.is_available.return_value = True
+                second.create_session.return_value.play.return_value = True
+                result = SpeechTaskProcessor(lambda: [first, second], SpeechPlaybackController()).process(
+                    SpeechTask('request', '', stream.cancel_event, stream=stream))
+                self.assertEqual(result.event_type, WorkerEventType.COMPLETED)
+                second.create_session.assert_called_once_with('An ordered answer.')
+
+    def test_constructor_that_consumes_text_cannot_trigger_replay(self):
+        stream = IncrementalSpeech('request', Event(), lambda _: None)
+        stream.feed('Already consumed.')
+        stream.finish()
+        first = Mock(spec=['name', 'is_available', 'create_stream_session'])
+        first.is_available.return_value = True
+        def consume_then_fail(chunks):
+            next(chunks)
+            raise RuntimeError('too late to replay')
+        first.create_stream_session.side_effect = consume_then_fail
+        second = Mock()
+        result = SpeechTaskProcessor(lambda: [first, second], SpeechPlaybackController()).process(
+            SpeechTask('request', '', stream.cancel_event, stream=stream))
+        self.assertEqual(result.event_type, WorkerEventType.FAILED)
+        second.is_available.assert_not_called()
+
     def test_pocket_reuses_one_model_and_process_across_ordered_chunks(self):
         runtime = Mock(sample_rate=24000)
         runtime.stream_pcm.side_effect = lambda text: iter([text.encode()])
