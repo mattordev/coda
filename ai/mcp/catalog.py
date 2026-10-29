@@ -23,6 +23,8 @@ class MCPRuntimeCatalog:
             servers = [
                 name for name, runtime in self.manager._servers.items()
                 if runtime.definition.trusted and name not in self._attempted
+                and getattr(runtime.definition, "enabled", True)
+                and not getattr(runtime.definition, "bundle_error", None)
                 and (server_id is None or name == server_id)
                 and (not eager_only or runtime.definition.startup_mode == "eager")
             ]

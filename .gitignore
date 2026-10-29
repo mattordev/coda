@@ -5,9 +5,11 @@ commands.json
 dashboard_state.json
 telemetry_state.json
 logs/telemetry/
+logs/mcp/
 .venv
 .coda-update-*/
 .coda-update-active.json
 .coda-release-cache.json
 .coda-release-cache-*
 mcp_servers/*.json
+integrations/*/filesystem.config.json

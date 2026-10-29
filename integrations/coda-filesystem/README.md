@@ -1,0 +1,86 @@
+# Filesystem MCP
+
+This is a standalone, read-only MCP server using the same SDK as Coda.
+`list_directory` returns readable `[FILE]`/`[DIR]` text and a structured
+`directory_listing` result. Expected failures include a machine-readable reason
+so Coda can explain them without speaking private paths.
+
+`read_file` reads an explicitly permitted UTF-8 file, up to 1 MiB of bytes.
+It returns the original text (with universal newline handling), including exact
+versions and identifiers, with structured kind `file_contents`. Oversized,
+non-UTF-8, missing and directory inputs return errors. The actual read is bounded
+even if a file grows after its size was checked. File contents remain untrusted
+data and pass through Coda's existing tool-result privacy policy.
+
+Each entry also supplies its `modified_at` timestamp. The displayed listing stays
+alphabetical. General requests get spoken counts, recent-edits requests get the
+three newest files, and explicit filename requests get names within the speech limit.
+Folder timestamps reflect changes to immediate entries, not edits throughout a project.
+
+## Enable in Coda
+
+1. Copy `filesystem.config.json.example` to `filesystem.config.json` in this
+   directory. Add only the absolute directories you want Coda to read to
+   `read.allowed_roots`. An empty list grants no access. Configure
+   `read.blocked_paths` as needed; the example blocks common sensitive names.
+2. Copy `mcp_servers/filesystem.json.example` to
+   `mcp_servers/filesystem.json`. Explicitly set `enabled` and `trusted` to `true` and
+   `allowed_tools` to `["list_directory"]` when ready to permit that action.
+3. Start Coda normally, then use manual mode, for example:
+   `mcp.filesystem.list_directory {"path":"D:/Projects"}`.
+   Use an absolute path contained in your configured roots.
+
+To permit file reads as well, explicitly add `"read_file"` to `allowed_tools`.
+An upgrade exposing the tool does not grant it permission. For example:
+`mcp.filesystem.read_file {"path":"D:/Projects/README.md"}`. Keep blocked paths
+configured: file reads enforce the same root and blocked-ancestor rules as listings.
+
+Optional `read.workspace_roots` supplies explicit context for relative references
+such as `README` or `docs/guide.md` in Coda's bundled read tools. It grants no read
+permission and defaults to an empty list. See [workspace references](../../docs/mcp-workspaces.md)
+for configuration, bounded matching, clarification and link restrictions.
+
+The bundled definition selects `"bundled_server": "filesystem"`. Coda uses
+its active Python interpreter and resolves the fixed server entrypoint from
+its installation directory. No `G:/GitRepos/coda` path or PATH-dependent
+`python` command is required. The same definition works after relocating the
+checkout and when Coda starts from another working directory. Bundle selection
+grants neither process trust nor tool permissions. Legacy explicit command/args
+definitions continue to work; bundled definitions cannot mix those launch fields.
+
+For an existing local definition, replace `command` and `args` with
+`"bundled_server": "filesystem"`. Preserve your trust, allowlist, confirmation,
+environment and session choices. User definitions and filesystem permissions
+are Git-ignored; commit only examples. Existing bundled definitions must add
+`"enabled": true` to opt in after upgrading. No private file is migrated automatically.
+Supported archive updates preserve private definitions and `*.config.json` files
+beside installed servers. See [bundled MCP lifecycle](../../docs/mcp-bundled.md)
+for settings, inspection and update/rollback behavior.
+
+For other MCP clients, run this script with an interpreter containing the
+project's locked MCP SDK. Optional `--config /absolute/permissions.json` selects
+another permissions file. By default the file is located beside `server.py`,
+independent of the client's working directory. The server imports no Coda code.
+
+## Permission and output behavior
+
+The requested path is canonicalized and checked for containment in an explicitly
+allowed root. Blocked patterns are checked against the requested path and each
+ancestor, using both the original absolute name and resolved target. Listing
+entries are checked for both containment and blocked paths, so links to targets
+outside the roots are omitted. `fnmatchcase` matches normalized, case-folded
+strings; this is not a path-aware recursive glob. A leading `**/` also checks
+the root-relative spelling to handle blocked ancestor names.
+
+Blocked entries are omitted. An empty result means no accessible entries were
+returned, which can include a directory containing only blocked entries.
+Configuration, missing paths, non-directory paths and permission denials have
+distinct structured codes. Unexpected exceptions still use the SDK failure
+path. There are no write tools; the reserved `write` configuration grants no
+write capability.
+
+This is an application permission check, not an OS sandbox. Resolving/checking
+then opening a path has a filesystem race if another process can replace links
+concurrently. Do not grant roots controlled by an adversary when that guarantee
+is required. Keep permissions narrow. See [MCP feedback](../../docs/mcp-feedback.md)
+for detailed visual output, speech, privacy and diagnostics behavior.

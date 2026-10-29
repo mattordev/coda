@@ -13,10 +13,13 @@ from ai.llm_router.core import route_request
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.tools.arguments import prepare_arguments
-from ai.tools.presentation import prepare_tool_response
+from ai.tools.presentation import prepare_tool_display, prepare_full_tool_output
+from ai.tools.diagnostics import record_tool_failure
 from ai.tools.models import ToolResult
+from ai.tools.interpretation import interpret_result, is_result_follow_up
 from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStrategy, CommandPrefixStrategy
-from ai.privacy.sanitizer import sanitize_text
+from ai.privacy.sanitizer import sanitize_text, sanitize_structure
+from ai.tools.error_feedback import safe_diagnostic
 
 
 _intent_router = None
@@ -33,6 +36,7 @@ class CommandResult:
     open_follow_up: bool = False
     command_matches: tuple[str, ...] = ()
     tool_result: ToolResult | None = None
+    display_text: str | None = None
 
     def __bool__(self):
         return self.handled
@@ -50,6 +54,7 @@ def configure_intent_router(commands, *, mcp_manager=None):
     global _pending_confirmation
 
     shutdown_tools()
+    llm_service.clear_tool_focus()
     _pending_confirmation = None
     _mcp_catalog = MCPRuntimeCatalog(mcp_manager)
 
@@ -128,6 +133,9 @@ def _dispatch_intent(
         if len(parts) != 3 or not parts[1] or not parts[2] or _mcp_catalog is None:
             return CommandResult(handled=True, response_text="That MCP tool is unavailable. Check its configuration and discovery status.")
         intents = _mcp_catalog.discover(server_id=parts[1], cancel_event=cancel_event)
+        if debug:
+            print("[MCP DEBUG] Errors:", _mcp_catalog.errors)
+            print("[MCP DEBUG] Discovered intents:", [intent.name for intent in intents])
         if cancel_event is not None and cancel_event.is_set():
             return CommandResult(handled=False)
         registry = create_command_registry(commands)
@@ -165,8 +173,15 @@ def _dispatch_intent(
             f"accepted={result.accepted}, "
             f"routing_error={bool(result.error)}"
         )
+        if result.error is not None:
+            print(f"[DEBUG - INTENT ERROR] {safe_diagnostic(repr(result.error))}")
 
     if not result.accepted:
+        if result.error:
+            return CommandResult(
+                handled=True,
+                response_text="I couldn't determine which action to run because intent routing failed. No action was run. Please try again or use an explicit command.",
+            )
         if result.needs_clarification:
             return CommandResult(handled=True, response_text="Please clarify which action you want me to perform.", open_follow_up=True)
         if message.lower().startswith("mcp."):
@@ -176,6 +191,8 @@ def _dispatch_intent(
     if result.intent.input_schema is not None:
         try:
             arguments = prepare_arguments(result, message, cancel_event=cancel_event)
+            if debug:
+                print(f"[DEBUG - MCP ARGUMENTS] {sanitize_structure(arguments)!r}")
         except Exception:
             return CommandResult(handled=True, response_text="The tool arguments are invalid or incomplete. Please provide the required values.", open_follow_up=True)
         request = result.to_request(message, arguments=arguments)
@@ -194,7 +211,7 @@ def _dispatch_intent(
                 handled=True, response_text=f"Confirm the action {request.intent.name}? Say confirm or cancel.",
                 open_follow_up=True, tool_result=outcome,
             )
-        return _tool_outcome(request, outcome, cancel_event=cancel_event)
+        return _tool_outcome(request, outcome, cancel_event=cancel_event, debug=debug)
 
     request = result.to_request(message)
     dispatcher = IntentDispatcher(commands)
@@ -215,19 +232,72 @@ def _dispatch_intent(
     )
 
 
-def _tool_outcome(request, outcome, *, cancel_event=None):
+def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
-    llm_service.record_tool_exchange(request.message, outcome)
-    response = prepare_tool_response(outcome)
-    print(f"CODA: {response}")
+    interpreted = interpret_result(outcome, request.message, cancel_event=cancel_event)
+    if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
+        return CommandResult(handled=False)
+    response = interpreted.text
+    display = prepare_tool_display(outcome)
+    if not llm_service.record_tool_exchange(request.message, outcome, response, cancel_event=cancel_event):
+        return CommandResult(handled=False)
+    if not outcome.success:
+        record_tool_failure(request.intent.name, display)
+    if debug:
+        print(f"[MCP TOOL] {request.intent.name}: {'completed' if outcome.success else 'failed'}")
+        print(f"[MCP OUTPUT]\n{display}")
     return CommandResult(
-        handled=True, response_text=response, open_follow_up=True,
-        command_matches=(request.intent.name,), tool_result=outcome,
+        handled=True, response_text=response, used_llm=interpreted.used_llm, open_follow_up=True,
+        command_matches=(request.intent.name,), tool_result=outcome, display_text=display,
     )
 
 
+def _retained_tool_reply(message, *, cancel_event=None, debug=False):
+    """Inspect retained output or answer a narrow follow-up without executing tools."""
+    if message.casefold().rstrip('.!?') in ('show tool output', 'show last tool output', 'show full tool output'):
+        result = llm_service.get_recent_tool_result()
+        response = "There is no retained tool result in this conversation."
+        display = None
+        if result is not None:
+            full = message.casefold().startswith('show full')
+            display = prepare_full_tool_output(result) if full else prepare_tool_display(result)
+            response = "Here is the retained tool output."
+            if display.endswith('\N{HORIZONTAL ELLIPSIS}'):
+                response = ("The full output exceeds the console safety limit; the complete result remains retained in memory."
+                            if full else "These details are an excerpt. Say show full tool output for the retained output.")
+            if cancel_event is not None and cancel_event.is_set():
+                return CommandResult(handled=False)
+            print(f"[MCP OUTPUT]\n{display}")
+        return CommandResult(True, response_text=response, display_text=display, tool_result=result)
+    if not is_result_follow_up(message):
+        return None
+    result = llm_service.get_tool_follow_up_context()
+    if result is None:
+        response = 'Which file or tool result do you mean? Please provide an absolute path or retrieve the result first.'
+        return CommandResult(True, response_text=response, open_follow_up=True)
+    interpreted = interpret_result(result, message, cancel_event=cancel_event, force=True)
+    if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
+        return CommandResult(handled=False)
+    if not llm_service.record_tool_follow_up(message, result, interpreted.text, cancel_event=cancel_event):
+        return CommandResult(handled=False)
+    if debug:
+        print("[MCP CONTEXT] Answering from the retained tool result; no tool call.")
+    return CommandResult(True, response_text=interpreted.text, used_llm=interpreted.used_llm,
+                         open_follow_up=True, tool_result=result, display_text=prepare_tool_display(result))
+
+
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
+    """Emit the single finalized response used by every input and speech path."""
+    result = _on_command(msg, commands, debug=debug, cancel_event=cancel_event)
+    if cancel_event is not None and cancel_event.is_set():
+        return CommandResult(handled=False)
+    if result.response_text:
+        print(f"CODA: {result.response_text}")
+    return result
+
+
+def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     global _pending_confirmation
     normalized_message = msg.strip()
 
@@ -262,7 +332,15 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         if answer in ("confirm", "yes", "approve"):
             if time.monotonic() >= expires:
                 return CommandResult(handled=True, response_text="That confirmation expired. Please request the action again.")
-            return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event)
+            return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+
+    native_match = None if _intent_registry is None else IntentRouter(_intent_registry, strategies=(
+        ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
+    )).route(normalized_message)
+    native_selected = native_match is not None and native_match.matched and native_match.intent.source == 'native'
+    retained_reply = None if native_selected else _retained_tool_reply(normalized_message, cancel_event=cancel_event, debug=debug)
+    if retained_reply is not None:
+        return retained_reply
 
     dispatch_result = _dispatch_intent(
         normalized_message,
@@ -277,8 +355,11 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         return cancelled_result
 
     if dispatch_result is not None:
+        if dispatch_result.tool_result is None or not dispatch_result.tool_result.success:
+            llm_service.clear_tool_focus()
         return dispatch_result
 
+    llm_service.clear_tool_focus()
     if debug:
         print(
             "[DEBUG] No accepted intent. "
@@ -331,8 +412,6 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             used_llm=True,
             open_follow_up=True,
         )
-
-    print(f"CODA: {response_text}")
 
     return CommandResult(
         handled=True,

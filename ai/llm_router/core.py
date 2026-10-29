@@ -63,6 +63,7 @@ def _record_conversation_attempt(
     result=None,
     is_retry: bool = False,
     is_fallback: bool = False,
+    purpose: WorkloadPurpose = WorkloadPurpose.CONVERSATION,
 ) -> None:
     structured_result = (
         result
@@ -72,7 +73,7 @@ def _record_conversation_attempt(
     logger.record_attempt(ProviderAttempt(
         trace_id=trace_id or str(uuid4()),
         timestamp=time.time(),
-        purpose=WorkloadPurpose.CONVERSATION,
+        purpose=purpose,
         provider=provider,
         model=(structured_result.model if structured_result else None),
         locality=_provider_locality(provider),
@@ -95,6 +96,7 @@ def _try_providers(
     risk: float,
     privacy_result=None,
     cancel_event: Event | None = None,
+    *, provider_call=None, purpose=WorkloadPurpose.CONVERSATION,
 ):
     """
     Attempt providers in order and return the first successful response.
@@ -129,6 +131,7 @@ def _try_providers(
                 bool(attempted_providers)
                 and provider not in attempted_providers
             ),
+            **({"provider_call": provider_call, "purpose": purpose} if provider_call is not None else {}),
         )
         attempted_providers.add(provider)
 
@@ -168,6 +171,8 @@ def _call_provider_with_health(
     sequence: int = 1,
     is_retry: bool = False,
     is_fallback: bool = False,
+    provider_call=None,
+    purpose=WorkloadPurpose.CONVERSATION,
 ):
     """
     Call one provider unless telemetry says it is temporarily unhealthy.
@@ -185,6 +190,7 @@ def _call_provider_with_health(
             outcome=AttemptOutcome.COOLDOWN_SKIPPED,
             is_retry=is_retry,
             is_fallback=is_fallback,
+            purpose=purpose,
         )
         _debug_print(
             f"[ROUTER] Skipping {provider} due to recent failure; using fallback."
@@ -192,14 +198,21 @@ def _call_provider_with_health(
         return None, f"{provider} is temporarily unavailable after a recent failure.", True
 
     logger.log_attempt(provider)
-    result = llm_service.call_provider(
-        provider,
-        prompt,
-        risk=risk,
-        privacy_result=privacy_result,
-        cancel_event=cancel_event,
-    )
-    response, error = result
+    call = provider_call or llm_service.call_provider
+    try:
+        result = call(
+            provider,
+            prompt,
+            risk=risk,
+            privacy_result=privacy_result,
+            cancel_event=cancel_event,
+        )
+        response, error = result
+    except Exception:
+        if provider_call is None:
+            raise
+        result = (None, "Tool interpretation provider failed.")
+        response, error = result
 
     if _is_cancelled(cancel_event) or error == "Request cancelled.":
         outcome = AttemptOutcome.CANCELLED
@@ -220,6 +233,7 @@ def _call_provider_with_health(
         result=result,
         is_retry=is_retry,
         is_fallback=is_fallback,
+        purpose=purpose,
     )
 
     return response, error, False

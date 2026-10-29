@@ -14,6 +14,7 @@ from ai.intents.models import Intent, IntentParameter, IntentRequest
 from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
 from ai.mcp.remote import RemoteServerDefinition
+from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -76,10 +77,26 @@ class LocalMCPManager:
         with self._metadata_lock:
             return self._servers[server_id].state
 
+    def inspect(self):
+        """Return safe status dimensions without credentials or permission paths."""
+        with self._metadata_lock:
+            return {name: {
+                "bundle": getattr(runtime.definition, "bundled_server", None),
+                "enabled": getattr(runtime.definition, "enabled", True),
+                "trusted": runtime.definition.trusted,
+                "availability": "error" if getattr(runtime.definition, "bundle_error", None) else "available",
+                "error": getattr(runtime.definition, "bundle_error", None),
+                "connection": runtime.state.value,
+            } for name, runtime in self._servers.items()}
+
     def _request(self, server_id, operation, *, cancel_event=None, configuration_revision=None, **kwargs):
         runtime = self._servers.get(server_id)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
+        if not getattr(runtime.definition, "enabled", True):
+            return failure("server_disabled", "The bundled MCP server is disabled; explicitly enable it in its definition.")
+        if getattr(runtime.definition, "bundle_error", None):
+            return failure("configuration_error", runtime.definition.bundle_error)
         if not runtime.definition.trusted:
             return failure("permission_denied", "The MCP process is not trusted.")
         with self._metadata_lock:
@@ -88,7 +105,13 @@ class LocalMCPManager:
             if runtime.retire_requests:
                 return failure("cancelled", "The MCP server is being retired.")
             generation = runtime.generation
-        deadline = time.monotonic() + runtime.definition.timeout_seconds
+            # Queued first-use callers share a cold launch. Its startup budget
+            # must not be cut short by the shorter normal-action/busy timeout.
+            startup_wait = (
+                0 if runtime.state == ServerState.CONNECTED
+                else runtime.definition.startup_timeout_seconds
+            )
+        deadline = time.monotonic() + startup_wait + runtime.definition.timeout_seconds
         while not runtime.lock.acquire(timeout=0.01):
             if cancel_event is not None and cancel_event.is_set():
                 return failure("cancelled", "The MCP operation was cancelled.")
@@ -120,8 +143,11 @@ class LocalMCPManager:
                 )
                 if not isinstance(result, ToolResult):
                     result = failure("mcp_protocol_error", "The MCP response was invalid.")
-            except Exception:
-                result = failure("connection_error", "The MCP operation could not complete.")
+            except Exception as error:
+                result = failure(
+                    "mcp_internal_error", "An unexpected error prevented the MCP operation from completing.",
+                    exception_type=type(error).__name__,
+                )
             with self._metadata_lock:
                 if runtime.retire_requests or generation != runtime.generation or (
                     cancel_event is not None and cancel_event.is_set()
@@ -205,7 +231,7 @@ class LocalMCPManager:
 
     def _permission(self, server_id, name, request, *, confirmed=False):
         definition = self._servers[server_id].definition
-        if not definition.trusted or name not in definition.allowed_tools:
+        if not getattr(definition, "enabled", True) or not definition.trusted or name not in definition.allowed_tools:
             return failure("permission_denied", "The MCP tool is not permitted.")
         if self._permission_decider is not None:
             try:
@@ -248,7 +274,8 @@ class LocalMCPManager:
         """Explicit warm-up; failures remain independent of other servers."""
         return {
             name: self.discover(name) for name, runtime in self._servers.items()
-            if runtime.definition.startup_mode == "eager"
+            if runtime.definition.startup_mode == "eager" and getattr(runtime.definition, "enabled", True)
+            and runtime.definition.trusted and not getattr(runtime.definition, "bundle_error", None)
         }
 
     def close(self, *, timeout_seconds: float = 10.0) -> dict[str, ToolResult]:
@@ -306,12 +333,25 @@ class MCPToolExecutor:
         denied = self._manager._permission(self._server_id, self._tool_name, request, confirmed=confirmed)
         if denied is not None:
             return denied
-        adapter = ExternalToolAdapter(
-            self._intent,
-            lambda arguments: self._manager._request(
+
+        def invoke(arguments):
+            with self._manager._metadata_lock:
+                runtime = self._manager._servers[self._server_id]
+                if self._configuration_revision != runtime.configuration_revision:
+                    return failure("tool_not_found", "The discovered MCP tool is no longer available.")
+                definition = runtime.definition
+            try:
+                arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
+            except WorkspaceReferenceError as error:
+                return failure(error.code, str(error))
+            return self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
-            ),
+            )
+
+        adapter = ExternalToolAdapter(
+            self._intent,
+            invoke,
         )
         return adapter.execute(request)

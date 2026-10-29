@@ -30,6 +30,16 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         log = patch.object(history, "conversation_log", [])
         log.start()
         self.addCleanup(log.stop)
+        interpretation = patch.object(history, "call_with_messages", return_value=("The tool returned the requested data.", None))
+        interpretation.start()
+        self.addCleanup(interpretation.stop)
+        for name, options in (
+            ("should_skip_provider", {"return_value": False}),
+            ("log_attempt", {}), ("log_failure", {}), ("record_attempt", {}),
+        ):
+            telemetry = patch("ai.llm_router.core.logger." + name, **options)
+            telemetry.start()
+            self.addCleanup(telemetry.stop)
         self.generate = Mock(return_value=(json.dumps({
             "intent": "mcp.test.echo", "confidence": 0.95, "arguments": {"message": "hello"},
         }), None))
@@ -76,6 +86,18 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         catalog = json.loads(self.generate.call_args.args[0][1]["content"])["available_intents"]
         self.assertIn("input_schema", catalog[0])
 
+    def test_classifier_timeout_does_not_fall_through_to_chat_or_execute_a_tool(self):
+        self.configure()
+        self.generate.return_value = (None, 'llama.cpp timed out after 45.0 seconds.')
+        with patch.object(runtime, '_llm_fallback_enabled', return_value=True), patch('builtins.print') as output:
+            result = runtime.on_command('please echo hello', {})
+        self.assertTrue(result.handled)
+        self.assertIn('intent routing failed', result.response_text)
+        self.assertIn('No action was run', result.response_text)
+        self.assertEqual(self.calls, [])
+        self.fallback.assert_not_called()
+        output.assert_called_once_with(f'CODA: {result.response_text}')
+
     def test_explicit_json_works_without_argument_model(self):
         self.configure()
         self.generate.return_value = ('{"intent":null,"confidence":0}', None)
@@ -83,6 +105,80 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertTrue(result.tool_result.success)
         self.assertEqual(self.calls[0]["arguments"], {"message": "typed"})
         self.generate.assert_not_called()
+
+    def test_server_failure_keeps_diagnostics_separate_from_speech_and_context(self):
+        self.configure()
+        self.outcome = ToolResult(False, {
+            "isError": True, "content": [{"type": "text", "text": "PermissionError: /private/location"}],
+        }, ToolError("mcp_tool_error", "The MCP tool reported a failure."))
+        with patch.object(runtime, "record_tool_failure") as log, patch("builtins.print") as output:
+            result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+        self.assertIn("permission", result.response_text)
+        self.assertNotIn("/private/location", result.response_text)
+        self.assertIn("/private/location", result.display_text)
+        self.assertIs(result.tool_result, self.outcome)
+        self.assertIn("/private/location", history.conversation_log[-1]["content"])
+        log.assert_called_once_with("mcp.test.echo", result.display_text)
+        output.assert_called_once_with(f"CODA: {result.response_text}")
+        self.fallback.assert_not_called()
+
+    def test_large_listing_keeps_visual_result_and_question_specific_speech(self):
+        self.configure()
+        text = "\n".join(f"[FILE] file{i}.py" for i in range(100))
+        self.outcome = ToolResult(True, {"content": [{"type": "text", "text": text}]})
+        result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+        self.assertIn("100 files", result.response_text)
+        self.assertIn("file99.py", result.display_text)
+        self.assertIs(result.tool_result, self.outcome)
+
+    def test_original_question_selects_directory_speech_without_changing_display(self):
+        self.configure()
+        self.outcome = ToolResult(True, {
+            "content": [{"type": "text", "text": "[FILE] a-old.py\n[FILE] b-new.py\n[DIR] project"}],
+            "structuredContent": {"kind": "directory_listing", "entries": [
+                {"name": "a-old.py", "type": "file", "modified_at": 1},
+                {"name": "b-new.py", "type": "file", "modified_at": 2},
+                {"name": "project", "type": "directory", "modified_at": 99},
+            ]},
+        })
+        overview = runtime.on_command("What's in this folder?", {})
+        recent = runtime.on_command("What have I edited recently?", {})
+        names = runtime.on_command("Read all filenames", {})
+        self.assertEqual(overview.response_text, "The listing contains 1 directory and 2 files.")
+        self.assertLess(recent.response_text.index("b-new dot py"), recent.response_text.index("a-old dot py"))
+        self.assertNotIn('"project"', recent.response_text)
+        self.assertLess(names.response_text.index("a-old dot py"), names.response_text.index("b-new dot py"))
+        self.assertEqual(overview.display_text, recent.display_text)
+        self.assertEqual(recent.display_text, names.display_text)
+        self.assertIs(names.tool_result, self.outcome)
+        self.fallback.assert_not_called()
+
+    def test_bundled_filesystem_round_trip_through_manual_entrypoint(self):
+        from ai.mcp.bundled import bundled_launch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            allowed = root / "allowed"
+            allowed.mkdir()
+            (allowed / "main.py").touch()
+            config = root / "permissions.json"
+            config.write_text(json.dumps({"read": {
+                "allowed_roots": [str(allowed)], "blocked_paths": [],
+            }}), encoding="utf-8")
+            command, args = bundled_launch("filesystem", {"config_file": str(config)})
+            manager = LocalMCPManager([LocalServerDefinition(
+                "filesystem", command, args, trusted=True,
+                allowed_tools=frozenset({"list_directory"}),
+            )])
+            runtime.configure_intent_router({}, mcp_manager=manager)
+            self.addCleanup(runtime.shutdown_tools)
+            result = runtime.on_command('mcp.filesystem.list_directory ' + json.dumps({"path": str(allowed)}), {})
+            self.assertTrue(result.tool_result.success, result.tool_result.error)
+            self.assertIn("1 file", result.response_text)
+            self.assertEqual(result.display_text, "[FILE] main.py")
+            self.assertEqual(history.get_recent_tool_result().data["structuredContent"]["entries"],
+                             [{"name": "main.py", "type": "file", "modified_at": (allowed / "main.py").stat().st_mtime}])
+            self.generate.assert_not_called()
+            self.fallback.assert_not_called()
 
     def test_first_natural_language_request_classifies_once_with_native_and_mcp_catalog(self):
         native = Mock(INTENT=Intent("say", "Speak a message."), run=Mock(return_value=True))

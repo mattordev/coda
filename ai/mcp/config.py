@@ -6,6 +6,7 @@ from math import isfinite
 import os
 from pathlib import Path
 import re
+import sys
 
 from ai.tools.models import ToolError
 
@@ -29,8 +30,14 @@ class LocalServerDefinition:
     session_mode: str = "operation"
     startup_mode: str = "lazy"
     idle_timeout_seconds: float | None = None
+    enabled: bool = True
+    bundled_server: str | None = None
+    bundle_error: str | None = None
+    settings_json: str = "{}"
 
     def __post_init__(self):
+        if not isinstance(self.enabled, bool):
+            raise ValueError("MCP enablement must be an explicit boolean.")
         if self.session_mode not in ("operation", "persistent"):
             raise ValueError("MCP session mode must be operation or persistent.")
         if self.startup_mode not in ("lazy", "eager"):
@@ -89,6 +96,8 @@ class LocalServerDefinition:
             if parent_name not in os.environ:
                 raise ValueError("A configured MCP environment variable is missing.")
             values[child_name] = os.environ[parent_name]
+        if self.bundled_server is not None:
+            values["CODA_MCP_SETTINGS"] = self.settings_json
         return values
 
 
@@ -115,11 +124,12 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         "allowed_tools", "confirm_tools", "startup_timeout_seconds", "timeout_seconds",
         "max_output_bytes", "max_tools",
         "session_mode", "startup_mode", "idle_timeout_seconds",
+        "bundled_server", "enabled", "settings",
     }
     transport = value.get("transport", "stdio")
     if transport == "streamable-http":
         from ai.mcp.remote import RemoteServerDefinition
-        remote_keys = (allowed_keys - {"command", "args", "env", "cwd"}) | {
+        remote_keys = (allowed_keys - {"command", "args", "env", "cwd", "bundled_server", "enabled", "settings"}) | {
             "url", "header_env", "max_sse_event_bytes", "reconnect_backoff_seconds",
         }
         if set(value) - remote_keys:
@@ -147,7 +157,31 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         )
     if set(value) - allowed_keys or transport != "stdio":
         raise ValueError("MCP definition has unsupported settings.")
-    args = value.get("args", [])
+    bundle_error, settings_json = None, "{}"
+    if "bundled_server" in value:
+        if set(value) & {"command", "args", "cwd"}:
+            raise ValueError("Bundled MCP definitions cannot override the launch command, args or cwd.")
+        from ai.mcp.bundled import discover_bundles, IDENTIFIER
+        identity = value["bundled_server"]
+        if not isinstance(identity, str) or not IDENTIFIER.fullmatch(identity):
+            raise ValueError("Invalid bundle identity.")
+        if not isinstance(value.get("settings", {}), dict):
+            raise ValueError("Bundle settings must be an object.")
+        bundle = discover_bundles().bundles.get(identity)
+        command, args = sys.executable or "unavailable-bundled-interpreter", []
+        if bundle is None:
+            bundle_error = "Bundle unavailable; inspect or reinstall its manifest."
+        else:
+            try:
+                command, bundled_args, settings_json = bundle.launch(value.get("settings", {}))
+                args = list(bundled_args)
+            except (ValueError, OSError):
+                bundle_error = bundle.error or "Bundle settings/assets invalid; check its manifest and permissions file."
+    else:
+        if set(value) & {"enabled", "settings"}:
+            raise ValueError("Enablement/settings require an explicit bundled server.")
+        command = value["command"]
+        args = value.get("args", [])
     env = value.get("env", {})
     tools = value.get("allowed_tools", [])
     confirmations = value.get("confirm_tools", [])
@@ -160,7 +194,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
     if any(not isinstance(tool, str) for tool in tools) or len(tools) != len(set(tools)):
         raise ValueError("MCP allowed tools must be unique strings.")
     return LocalServerDefinition(
-        name=value["id"], command=value["command"], args=tuple(args),
+        name=value["id"], command=command, args=tuple(args),
         env_refs=tuple(env.items()), cwd=value.get("cwd"),
         trusted=value.get("trusted", False), allowed_tools=frozenset(tools),
         confirm_tools=frozenset(confirmations),
@@ -171,6 +205,9 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         session_mode=value.get("session_mode", "operation"),
         startup_mode=value.get("startup_mode", "lazy"),
         idle_timeout_seconds=value.get("idle_timeout_seconds"),
+        enabled=value.get("enabled", False) if "bundled_server" in value else True,
+        bundled_server=value.get("bundled_server"), bundle_error=bundle_error,
+        settings_json=settings_json,
     )
 
 
@@ -192,9 +229,14 @@ def discover_definitions(directory: str | Path | None = None) -> ConfigurationDi
             if path.is_symlink() or path.resolve().parent != directory:
                 raise ValueError("MCP definitions must be local files in the configuration directory.")
             definition = _read_definition(path)
-            if definition.name in servers:
+            previous = servers.get(definition.name)
+            if previous is not None and not (
+                getattr(previous, "bundle_error", None) and not getattr(definition, "bundle_error", None)
+            ):
                 raise ValueError("MCP server id is duplicated.")
             servers[definition.name] = definition
+            if getattr(definition, "bundle_error", None):
+                errors[path.name] = ToolError(code="configuration_error", message=definition.bundle_error)
         except (ValueError, TypeError, KeyError, OSError):
             errors[path.name] = ToolError(
                 code="configuration_error", message="The MCP server definition is invalid."

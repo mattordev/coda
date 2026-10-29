@@ -1,0 +1,39 @@
+{
+  "id": "filesystem",
+  "version": "1.0.0",
+  "entrypoint": "server.py",
+  "dependencies": ["mcp"],
+  "settings_schema": {
+    "type": "object",
+    "properties": {"config_file": {"type": "string", "minLength": 1}},
+    "additionalProperties": false
+  },
+  "setting_arguments": {"config_file": "--config"},
+  "configuration_files": [{
+    "setting": "config_file",
+    "default": "filesystem.config.json",
+    "schema": {
+      "type": "object",
+      "required": ["read"],
+      "additionalProperties": true,
+      "properties": {
+        "read": {
+          "type": "object",
+          "required": ["allowed_roots", "blocked_paths"],
+          "additionalProperties": true,
+          "properties": {
+            "workspace_roots": {
+              "type": "array", "maxItems": 8, "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\u0000]+$"}
+            },
+            "allowed_roots": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\u0000]+$"}
+            },
+            "blocked_paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    }
+  }]
+}

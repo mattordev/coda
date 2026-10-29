@@ -8,6 +8,7 @@ from ai.providers.cancellable import CancellationScope, run_cancellable
 from ai.providers.telemetry import ProviderMetricsCollector
 
 _model_cache = None
+_model_generation = 0
 
 
 def _get_float_env(name, default):
@@ -37,12 +38,14 @@ def get_timeout_seconds():
 
 
 def reload_config():
-    global _model_cache
+    global _model_cache, _model_generation
+    _model_generation += 1
     _model_cache = None
 
 
 def get_model(http_client=requests):
     global _model_cache
+    generation = _model_generation
 
     configured_model = get_configured_model()
     if configured_model:
@@ -74,6 +77,8 @@ def get_model(http_client=requests):
     if not model:
         return None, "llama.cpp returned a model without a usable id."
 
+    if generation != _model_generation:
+        return None, "Local model configuration changed during model discovery."
     _model_cache = model
     return model, None
 
@@ -189,6 +194,9 @@ def _generate_request(messages, cancel_event, http_client, scope, collector=None
 
 
 def generate_with_metadata(messages, cancel_event=None):
+    from runtime.model_warmup import wait_for_llm
+    if not wait_for_llm('llamacpp', cancel_event):
+        return ProviderMetricsCollector().finish(error="Request cancelled.")
     session = requests.Session()
     scope = CancellationScope()
     collector = ProviderMetricsCollector()
@@ -222,3 +230,9 @@ def generate_with_metadata(messages, cancel_event=None):
 def generate(messages, cancel_event=None):
     result = generate_with_metadata(messages, cancel_event=cancel_event)
     return result.response, result.error
+
+
+def warmup(cancel_event):
+    from ai.providers.prewarm import warm_local
+    import sys
+    return warm_local(sys.modules[__name__], 'llamacpp', cancel_event)

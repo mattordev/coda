@@ -50,6 +50,38 @@ class MCPSDKBoundaryTests(unittest.TestCase):
 
 
 class MCPLifecycleTests(unittest.TestCase):
+    def test_queued_startup_uses_startup_budget_but_connected_busy_wait_does_not(self):
+        for state, expected_success in ((ServerState.STARTING, True), (ServerState.CONNECTED, False)):
+            with self.subTest(state=state):
+                transport = Mock()
+                transport.request.return_value = ToolResult(True, {"tools": []})
+                manager = LocalMCPManager([LocalServerDefinition(
+                    "test", "unused", trusted=True, timeout_seconds=0.1, startup_timeout_seconds=1,
+                )], transport=transport)
+                runtime = manager._servers["test"]
+                runtime.state = state
+                runtime.lock = Mock()
+                runtime.lock.acquire.side_effect = [False, False, True]
+                with patch("ai.mcp.runtime.time.monotonic", side_effect=[0, 0.2, 0.3, 0.4]):
+                    result = manager.discover("test")
+                self.assertEqual(result.success, expected_success)
+                if expected_success:
+                    transport.request.assert_called_once()
+                    runtime.lock.release.assert_called_once()
+                else:
+                    self.assertEqual(result.error.code, "timeout")
+                    transport.request.assert_not_called()
+                    runtime.lock.release.assert_not_called()
+
+    def test_unexpected_transport_adapter_exception_has_its_own_error_category(self):
+        transport = Mock()
+        transport.request.side_effect = RuntimeError("private-internal-token")
+        manager = LocalMCPManager([LocalServerDefinition("test", "unused", trusted=True)], transport=transport)
+        result = manager.discover("test")
+        self.assertEqual(result.error.code, "mcp_internal_error")
+        self.assertEqual(result.data["diagnostic"]["exception_type"], "RuntimeError")
+        self.assertNotIn("private-internal-token", repr(result))
+
     def test_retirement_prevents_new_work_until_cleanup_finishes(self):
         active = Event()
         cleanup_started = Event()

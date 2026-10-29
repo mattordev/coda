@@ -55,6 +55,10 @@ The active roadmap is maintained in the
 - [v1.4.5 - Provider Telemetry & Metrics](https://github.com/mattordev/coda/milestone/7)
 
 - [v1.5.0 - MCP & External Tool Integration](https://github.com/mattordev/coda/milestone/4)
+- [v1.5.1 - Bundled First-Party MCP Servers](https://github.com/mattordev/coda/milestone/12)
+
+See the [v1.5.1 release notes](docs/release-notes-v1.5.1.md) for setup changes,
+validation and limitations.
 
 ### Future Milestones
 
@@ -429,6 +433,20 @@ Commands are self-registering modules that own their intent metadata and
 - [Local Text-to-Speech](docs/local-tts.md)
 - [LLM Providers](docs/providers.md)
 - [Privacy Routing](docs/privacy-routing.md)
+- [MCP display, speech and failure feedback](docs/mcp-feedback.md)
+- [Conversational MCP interpretation and follow-up](docs/mcp-conversation.md)
+- [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
+- [Safe filesystem workspace references](docs/mcp-workspaces.md)
+- [Bundled MCP catalog, settings and update lifecycle](docs/mcp-bundled.md)
+- [Optional model pre-warming](docs/model-prewarming.md)
+
+## AI-Assisted Development
+
+Coda is developed with substantial AI assistance, particularly
+since approximately v1.2.0.
+
+For details about AI involvement, development practices,
+human oversight, and learning objectives, see [AI_USAGE.md](AI_USAGE.md).
 
 ## Licence
 

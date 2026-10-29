@@ -466,3 +466,8 @@ exact JSON requests provide a deterministic baseline.
 
 Real integrations remain the integration author's responsibility. This document
 and the disposable fixtures supply a tested framework and a reading route.
+# Bundled server follow-up
+
+See [the bundled lifecycle](mcp-bundled.md) for the data-only catalog, settings
+validation, independent enablement and archive update preservation. These extend
+the existing transport and permission flow without granting trust from metadata.

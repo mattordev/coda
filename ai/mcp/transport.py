@@ -20,8 +20,9 @@ from ai.mcp.remote import RemoteServerDefinition
 from ai.tools.models import ToolError, ToolResult
 
 
-def failure(code: str, message: str) -> ToolResult:
-    return ToolResult(success=False, error=ToolError(code=code, message=message))
+def failure(code: str, message: str, *, exception_type: str | None = None) -> ToolResult:
+    data = {"diagnostic": {"exception_type": exception_type}} if exception_type else None
+    return ToolResult(success=False, data=data, error=ToolError(code=code, message=message))
 
 
 def _is_sdk_timeout(error: BaseException) -> bool:
@@ -140,6 +141,10 @@ class SDKStdioTransport:
     ) -> ToolResult:
         if operation not in {"discover", "invoke"}:
             return failure("invalid_request", "The MCP operation is not supported.")
+        if not getattr(definition, "enabled", True):
+            return failure("server_disabled", "The bundled MCP server is disabled; enable it explicitly.")
+        if getattr(definition, "bundle_error", None):
+            return failure("configuration_error", definition.bundle_error)
         if not definition.trusted:
             return failure("permission_denied", "The MCP process is not trusted.")
         if operation == "invoke" and tool_name not in definition.allowed_tools:
@@ -244,6 +249,7 @@ class SDKStdioTransport:
                     "mcp_protocol_error" if connected else "connection_error",
                     "The MCP server returned an invalid response or disconnected."
                     if connected else "The MCP server could not be started or connected.",
+                    exception_type=type(error).__name__,
                 )
         if reason is not None:
             return failure(
