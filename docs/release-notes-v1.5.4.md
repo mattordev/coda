@@ -22,6 +22,10 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
 - Startup waits for enabled pre-warm tasks before announcing `C.O.D.A loaded in
   ... second(s)` and starting input. The load duration includes preparation;
   failed or skipped tasks retain normal fallback. Ctrl+C cancels the startup wait.
+- Spoken times respect an existing AM/PM suffix, avoiding contradictory output
+  such as "AM PM" and preserving midnight/noon meanings.
+- Debug actions accept trailing sentence punctuation from speech recognition,
+  including `Debug on.` and `Debug config reload.`.
 
 These changes were implemented in [#219](https://github.com/mattordev/coda/pull/219)
 and [#221](https://github.com/mattordev/coda/pull/221), addressing

@@ -27,7 +27,8 @@ INTENT = Intent(
 
 
 def _get_action(message: str) -> str:
-    tokens = message.lower().split()[1:]
+    # STT commonly appends sentence punctuation to an otherwise valid action.
+    tokens = message.lower().rstrip(" .!?").split()[1:]
 
     if tokens and tokens[0] == "mode":
         tokens = tokens[1:]
