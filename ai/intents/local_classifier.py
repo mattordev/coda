@@ -147,7 +147,10 @@ def _parse_classifier_response(
             "Local classifier confidence must be between 0.0 and 1.0."
         )
 
-    if intent_name is None:
+    if intent_name is None or (
+        isinstance(intent_name, str) and intent_name.strip().casefold() == 'null'
+        and registry.get(intent_name) is None
+    ):
         return IntentResult(
             intent=None,
             confidence=0.0,

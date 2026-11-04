@@ -57,6 +57,8 @@ _TIME_PATTERN = re.compile(
     r"(?<![\w/\\:?&=#%@])"
     r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
     r"(?![:\d])"
+    r"(?:\s*(?P<period>[ap](?:\.m\.?|m))(?!\w))?",
+    re.IGNORECASE,
 )
 
 _MONTHS = (
@@ -131,12 +133,22 @@ def _normalise_time(match: re.Match[str]) -> str:
     hour = int(match.group("hour"))
     minute = int(match.group("minute"))
 
+    explicit_period = match.group('period')
+    if explicit_period:
+        # An existing suffix defines a 12-hour clock. Consume it rather than
+        # appending an inferred period in front of the original AM/PM text.
+        if not 1 <= hour <= 12:
+            return match.group()
+        hour = hour % 12 + (12 if explicit_period[0].lower() == 'p' else 0)
+
     if hour == 0 and minute == 0:
         return "midnight"
     if hour == 12 and minute == 0:
         return "noon"
 
-    period = "A. M." if hour < 12 else "P. M."
+    # Dotted initials can be misread or trail off in neural TTS. Spell the
+    # letter sounds explicitly, as we already do for CPU/GPU initialisms.
+    period = "ay em" if hour < 12 else "pee em"
     spoken_hour = num2words(hour % 12 or 12, lang="en")
 
     if minute == 0:

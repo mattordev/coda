@@ -7,6 +7,7 @@ from threading import Event, Lock, Thread, current_thread
 import time
 
 import psutil
+from utils import runtime_state
 from utils.console import print_line as print
 from utils.model_activity import ModelActivity
 
@@ -110,7 +111,11 @@ class ModelWarmup:
                             memory_before=before, memory_after=after, error=error)
                 task['done'].set()
             if state == 'failed' and not self._stop.is_set():
-                print(f'[PREWARM] {name}: {error}', flush=True)
+                if runtime_state.is_debug_enabled():
+                    print(f'[PREWARM] {name}: {error}', flush=True)
+                else:
+                    print('Some components could not be prepared; normal fallbacks remain available.',
+                          flush=True)
 
     def wait(self, name, cancel_event=None):
         """Only this provider's first use waits; unrelated work is unaffected."""
