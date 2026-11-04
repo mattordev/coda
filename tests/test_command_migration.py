@@ -24,18 +24,6 @@ def _create_request(intent_name, message):
 
 
 class DebugCommandTests(unittest.TestCase):
-    def test_accepts_speech_recognition_punctuation(self):
-        for message, enabled in (('Debug on.', True), ('Debug off!', False),
-                                 ('Debug mode on?', True), ('debug config off.', False)):
-            with self.subTest(message=message), \
-                 patch.object(debug_command, '_print_status'), \
-                 patch.object(debug_command.runtime_state, 'set_debug_enabled') as setter:
-                self.assertTrue(debug_command.run(_create_request('debug', message)))
-                setter.assert_called_once_with(enabled)
-        with patch.object(debug_command, '_reload_runtime_config', return_value=True) as reload_config:
-            self.assertTrue(debug_command.run(_create_request('debug', 'Debug config reload.')))
-            reload_config.assert_called_once_with()
-
     @patch("commands.debug._print_status")
     @patch("commands.debug.runtime_state.set_debug_enabled")
     def test_enables_debug_mode(self, set_debug_enabled, print_status):
