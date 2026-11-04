@@ -33,6 +33,11 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   without waiting for phrase silence or transcribing the old audio. Follow-up
   readiness updates during idle microphone reads rather than after a timeout;
   live wakeword-stop recognition during playback is retained.
+- Known model tool-control markers in conversational answers are rejected before
+  display or speech, including markers split across streaming fragments. Recovery
+  uses the normal provider order before output starts; partial answers are not
+  replayed or stored as successful history. This never executes a generated tool
+  request. Classifier string `"null"` selections safely mean no action.
 
 These changes were implemented in [#219](https://github.com/mattordev/coda/pull/219)
 and [#221](https://github.com/mattordev/coda/pull/221), addressing
