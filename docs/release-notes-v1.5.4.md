@@ -29,6 +29,10 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   including `Debug on.` and `Debug config reload.`.
 - With debug disabled, startup uses a simple `Loading components...` banner;
   model-specific loading and preparation failure details are debug-only.
+- After playback ends, stale overlapping microphone captures are discarded
+  without waiting for phrase silence or transcribing the old audio. Follow-up
+  readiness updates during idle microphone reads rather than after a timeout;
+  live wakeword-stop recognition during playback is retained.
 
 These changes were implemented in [#219](https://github.com/mattordev/coda/pull/219)
 and [#221](https://github.com/mattordev/coda/pull/221), addressing
