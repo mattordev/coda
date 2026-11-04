@@ -51,7 +51,9 @@ is imposed; users must choose model/device settings appropriate to their hardwar
 PyTorch CUDA is already initialized, allocated VRAM before/after preparation.
 Unknown measurements are `null`. These process-wide snapshots include concurrent
 activity and do not measure external Ollama/llama.cpp memory. They are observations,
-not per-model attribution. Errors are safe and also printed when warming fails.
+not per-model attribution. With debug disabled, startup shows `Loading components...`
+and preparation failures show a generic fallback notice. Component-specific failure
+details and `[PREWARM]`/`[MODEL]` loading messages require `CODA_DEBUG=true`.
 
 With `CODA_DEBUG=true`, `[MODEL]` messages show preparation starting, completion,
 failure or cancellation, and elapsed time every five seconds while waiting.

@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from threading import Event
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import coda_runtime as runtime
 from runtime.model_warmup import ModelWarmup
@@ -14,6 +14,23 @@ class StartupComplete(Exception):
 
 
 class RuntimeStartupTests(unittest.TestCase):
+    def test_loading_banner_uses_details_only_when_debug_is_enabled(self):
+        for debug in (False, True):
+            with self.subTest(debug=debug), \
+                 patch.object(runtime.runtime_state, 'is_debug_enabled', return_value=debug):
+                manager = Mock()
+                manager.snapshot.return_value = {'tts': {'state': 'warming'}}
+                manager.wait.return_value = True
+                printed, _voice = self.startup_fixture(manager, Event())
+                with self.assertRaises(StartupComplete):
+                    runtime._run_runtime(skip_update_check=True)
+                lines = [call.args[0] for call in printed.call_args_list]
+                if debug:
+                    self.assertIn('[PREWARM] Preparing models before input starts...', lines)
+                else:
+                    self.assertIn('Loading components...', lines)
+                    self.assertFalse(any('[PREWARM]' in line or '[MODEL]' in line for line in lines))
+
     def startup_fixture(self, manager, cancel):
         stack = ExitStack()
         self.addCleanup(stack.close)

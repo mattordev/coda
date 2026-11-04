@@ -26,6 +26,8 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   such as "AM PM" and preserving midnight/noon meanings.
 - Debug actions accept trailing sentence punctuation from speech recognition,
   including `Debug on.` and `Debug config reload.`.
+- With debug disabled, startup uses a simple `Loading components...` banner;
+  model-specific loading and preparation failure details are debug-only.
 
 These changes were implemented in [#219](https://github.com/mattordev/coda/pull/219)
 and [#221](https://github.com/mattordev/coda/pull/221), addressing

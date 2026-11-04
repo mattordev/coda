@@ -790,7 +790,9 @@ def _run_runtime(skip_update_check=False):
     warmup = model_warmup.start()
     startup_models = warmup.snapshot()
     if any(task['state'] in ('queued', 'warming') for task in startup_models.values()):
-        print('[PREWARM] Preparing models before input starts...', flush=True)
+        message = ('[PREWARM] Preparing models before input starts...'
+                   if runtime_state.is_debug_enabled() else 'Loading components...')
+        print(message, flush=True)
     for name in startup_models:
         if not warmup.wait(name, shutdown_started):
             return None
