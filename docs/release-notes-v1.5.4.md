@@ -34,6 +34,8 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   as echo, including when playback ends during capture; recognition latency can
   still delay readiness. Early echo discard is limited to listeners without
   voice cancellation.
+- Wakeword-stop matching recognizes a final exact stop/cancel phrase after an
+  earlier wakeword in the same transcript, while normal overlap rejection remains.
 - Known model tool-control markers in conversational answers are rejected before
   display or speech, including markers split across streaming fragments. Recovery
   uses the normal provider order before output starts; partial answers are not
