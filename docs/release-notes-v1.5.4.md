@@ -29,10 +29,11 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   including `Debug on.` and `Debug config reload.`.
 - With debug disabled, startup uses a simple `Loading components...` banner;
   model-specific loading and preparation failure details are debug-only.
-- After playback ends, stale overlapping microphone captures are discarded
-  without waiting for phrase silence or transcribing the old audio. Follow-up
-  readiness updates during idle microphone reads rather than after a timeout;
-  live wakeword-stop recognition during playback is retained.
+- Follow-up readiness updates during idle microphone reads rather than after a
+  timeout. Stop-enabled listeners recognize overlapping audio before rejecting it
+  as echo, including when playback ends during capture; recognition latency can
+  still delay readiness. Early echo discard is limited to listeners without
+  voice cancellation.
 - Known model tool-control markers in conversational answers are rejected before
   display or speech, including markers split across streaming fragments. Recovery
   uses the normal provider order before output starts; partial answers are not
