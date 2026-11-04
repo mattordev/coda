@@ -142,11 +142,11 @@ class SpokenTextNormalisationTests(unittest.TestCase):
         cases = (
             (
                 "The check runs at 09:05 tomorrow.",
-                "The check runs at nine oh five A. M. tomorrow.",
+                "The check runs at nine oh five ay em tomorrow.",
             ),
             (
                 "The check runs at 18:30 tomorrow.",
-                "The check runs at six thirty P. M. tomorrow.",
+                "The check runs at six thirty pee em tomorrow.",
             ),
             (
                 "The day starts at 00:00 exactly.",
@@ -167,16 +167,16 @@ class SpokenTextNormalisationTests(unittest.TestCase):
 
     def test_twelve_hour_times_keep_exactly_one_explicit_period(self):
         cases = (
-            ('3:36 PM tomorrow', 'three thirty-six P. M. tomorrow'),
-            ('03:36 pm tomorrow', 'three thirty-six P. M. tomorrow'),
-            ('3:36PM tomorrow', 'three thirty-six P. M. tomorrow'),
-            ('8:05 AM tomorrow', 'eight oh five A. M. tomorrow'),
-            ('12:05 AM tomorrow', 'twelve oh five A. M. tomorrow'),
-            ('12:05 PM tomorrow', 'twelve oh five P. M. tomorrow'),
+            ('3:36 PM tomorrow', 'three thirty-six pee em tomorrow'),
+            ('03:36 pm tomorrow', 'three thirty-six pee em tomorrow'),
+            ('3:36PM tomorrow', 'three thirty-six pee em tomorrow'),
+            ('8:05 AM tomorrow', 'eight oh five ay em tomorrow'),
+            ('12:05 AM tomorrow', 'twelve oh five ay em tomorrow'),
+            ('12:05 PM tomorrow', 'twelve oh five pee em tomorrow'),
             ('12:00 AM tomorrow', 'midnight tomorrow'),
             ('12:00 PM tomorrow', 'noon tomorrow'),
-            ('3:36 p.m. tomorrow', 'three thirty-six P. M. tomorrow'),
-            ('8:05 a.m. tomorrow', 'eight oh five A. M. tomorrow'),
+            ('3:36 p.m. tomorrow', 'three thirty-six pee em tomorrow'),
+            ('8:05 a.m. tomorrow', 'eight oh five ay em tomorrow'),
         )
         for original, expected in cases:
             with self.subTest(original=original):
@@ -184,9 +184,9 @@ class SpokenTextNormalisationTests(unittest.TestCase):
 
     def test_time_command_period_is_not_duplicated_in_spoken_sentence(self):
         result = normalise_spoken_text('The time is currently 3:36 PM.')
-        self.assertIn('three thirty-six P. M.', result)
-        self.assertNotIn('A. M.', result)
-        self.assertEqual(result.count('P. M.'), 1)
+        self.assertEqual(result, 'The time is currently three thirty-six pee em.')
+        self.assertNotIn('ay em', result)
+        self.assertEqual(result.count('pee em'), 1)
 
     def test_normalises_unambiguous_english_dates(self):
         cases = (

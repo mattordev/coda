@@ -146,7 +146,9 @@ def _normalise_time(match: re.Match[str]) -> str:
     if hour == 12 and minute == 0:
         return "noon"
 
-    period = "A. M." if hour < 12 else "P. M."
+    # Dotted initials can be misread or trail off in neural TTS. Spell the
+    # letter sounds explicitly, as we already do for CPU/GPU initialisms.
+    period = "ay em" if hour < 12 else "pee em"
     spoken_hour = num2words(hour % 12 or 12, lang="en")
 
     if minute == 0:

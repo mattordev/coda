@@ -10,9 +10,28 @@ from ai.intents import (
     IntentRouter,
 )
 from commands import time as time_command
+from tts.spoken_text import normalise_spoken_text
+from tts.segmentation import split_spoken_text
 
 
 class TimeCommandTests(unittest.TestCase):
+    def test_time_suffix_reaches_tts_as_complete_letter_sounds(self):
+        for hour, suffix, spoken_suffix in ((16, 'PM', 'pee em'), (4, 'AM', 'ay em')):
+            fixed_time = datetime.datetime(2026, 11, 4, hour, 9)
+            with self.subTest(hour=hour), \
+                 patch('commands.time.datetime.datetime') as datetime_type, \
+                 patch.object(time_command.speak, 'speak_response') as speech, \
+                 patch('builtins.print') as printed:
+                datetime_type.now.return_value = fixed_time
+                self.assertTrue(time_command.run(self._request('time')))
+                printed.assert_called_once_with(f'The current time is 04:09 {suffix}.')
+                text = speech.call_args.args[0]
+                self.assertEqual(text, f'The time is currently 4:09 {suffix}.')
+                spoken = normalise_spoken_text(text)
+                self.assertEqual(split_spoken_text(spoken),
+                                 [f'The time is currently four oh nine {spoken_suffix}.'])
+                self.assertEqual(normalise_spoken_text(spoken), spoken)
+
     def test_formats_ordinal_suffixes(self):
         cases = (
             (1, "1st"),
