@@ -23,7 +23,8 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   ... second(s)` and starting input. The load duration includes preparation;
   failed or skipped tasks retain normal fallback. Ctrl+C cancels the startup wait.
 - Spoken times respect an existing AM/PM suffix, avoiding contradictory output
-  such as "AM PM" and preserving midnight/noon meanings.
+  such as "AM PM" and preserving midnight/noon meanings. Speech uses the letter
+  sounds "ay em" and "pee em" instead of dotted initials; displayed times are unchanged.
 - Debug actions accept trailing sentence punctuation from speech recognition,
   including `Debug on.` and `Debug config reload.`.
 - With debug disabled, startup uses a simple `Loading components...` banner;
