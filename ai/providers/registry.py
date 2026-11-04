@@ -1,4 +1,5 @@
 import os
+from utils.console import print_line as print
 
 from ai.providers import openai as openai_provider
 from ai.providers import gemini as gemini_provider

@@ -11,6 +11,7 @@ import utils.dashboard_state as dashboard_state
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.stt_service as stt_service
+from utils.console import print_line as print
 from runtime.messages import InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueue
 from runtime.follow_up import FollowUpState
@@ -230,6 +231,7 @@ def run(
         print(f"Microphone calibration failed: {e}")
         return
 
+    previous_status = None
     while True:
         if stop_event is not None and stop_event.is_set():
             return
@@ -243,11 +245,16 @@ def run(
         current_mode = mode or "normal"
 
         if current_mode == "normal" and follow_up_active:
-            print('Waiting for follow-up', flush=True)
+            status = 'Waiting for follow-up'
         elif current_mode == "normal":
-            print('Listener ready for voice input', flush=True)
+            status = 'Listener ready for voice input'
         elif current_mode == 'response':
-            print('Waiting for response', flush=True)
+            status = 'Waiting for response'
+        else:
+            status = None
+        if status is not None and status != previous_status:
+            print(status, flush=True)
+        previous_status = status
 
         try:
             recognizer.pause_threshold = _get_pause_threshold_seconds()

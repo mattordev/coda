@@ -62,10 +62,17 @@ class SpeakableChunks:
                     self.buffer = ""
                     self._discard_token = True
                     chunks.append("Long technical text omitted from speech.")
-            chunks.extend(self.poll())
+            # Drain already available text before considering an idle timeout.
+            # Checking elapsed time per character can split a complete queued
+            # sentence just because the preceding audio took time to play.
+            chunks.extend(self.poll(allow_timeout=False))
         return chunks
 
-    def poll(self):
+    def resume(self):
+        """Start a fresh text-wait interval after downstream speech returns."""
+        self._since = self.clock()
+
+    def poll(self, *, allow_timeout=True):
         if not self.buffer.strip():
             return []
         # Never separate Markdown link labels from their target or incomplete
@@ -83,7 +90,7 @@ class SpeakableChunks:
             if match.group().startswith('.') and preceding.isupper():
                 continue
             return self._take(match.end())
-        timed_out = self.clock() - self._since >= self.delay_seconds
+        timed_out = allow_timeout and self.clock() - self._since >= self.delay_seconds
         if len(self.buffer) < self.max_chars and not timed_out:
             return []
         # Last whitespace leaves the final token intact, including partial
@@ -96,6 +103,11 @@ class SpeakableChunks:
         phrase = list(re.finditer(r'[,;:]\s+', self.buffer[:boundary]))
         if phrase and phrase[-1].end() >= self.min_chars:
             boundary = phrase[-1].end()
+        elif len(self.buffer) < self.max_chars:
+            # PocketTTS adds terminal punctuation to word-ended fragments.
+            # Only a real size bound justifies an arbitrary word boundary;
+            # elapsed time alone must not manufacture a sentence ending.
+            return []
         prefix = self.buffer[:boundary]
         if prefix.lower().rstrip().endswith(_NON_TERMINAL_ABBREVIATIONS):
             return []

@@ -7,6 +7,8 @@ from threading import Event, Lock, Thread, current_thread
 import time
 
 import psutil
+from utils.console import print_line as print
+from utils.model_activity import ModelActivity
 
 
 def enabled(subsystem, argv=None):
@@ -59,7 +61,7 @@ class ModelWarmup:
                 done = Event()
                 if callback is None:
                     done.set()
-                self._tasks[name] = {'state': 'skipped' if callback is None else 'warming',
+                self._tasks[name] = {'state': 'skipped' if callback is None else 'queued',
                                      'duration_seconds': None, 'memory_before': None,
                                      'memory_after': None, 'error': None, 'done': done}
                 if callback is not None:
@@ -91,8 +93,12 @@ class ModelWarmup:
             if self._stop.is_set() or not self._eligible():
                 state = 'skipped'
             else:
-                if callback(self._stop) is False:
-                    state = 'skipped'
+                with self._lock:
+                    self._tasks[name]['state'] = 'warming'
+                with ModelActivity(f'{name.upper()} prewarm', 'warming', cancel_event=self._stop) as activity:
+                    if callback(self._stop) is False:
+                        state = 'skipped'
+                        activity.finish('skipped')
         except Exception:
             state, error = 'failed', 'Model preparation failed; normal provider fallback remains available.'
         finally:

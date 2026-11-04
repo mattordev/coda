@@ -44,12 +44,24 @@ is imposed; users must choose model/device settings appropriate to their hardwar
 
 ## Reuse, status and shutdown
 
-`debug status` reports warming/ready/failed/skipped and duration. The public
+`debug status` reports queued/warming/ready/failed/skipped and duration. The public
 `runtime.model_warmup.snapshot()` additionally contains process RSS and, when
 PyTorch CUDA is already initialized, allocated VRAM before/after preparation.
 Unknown measurements are `null`. These process-wide snapshots include concurrent
 activity and do not measure external Ollama/llama.cpp memory. They are observations,
 not per-model attribution. Errors are safe and also printed when warming fails.
+
+With `CODA_DEBUG=true`, `[MODEL]` messages show preparation starting, completion,
+failure or cancellation, and elapsed time every five seconds while waiting.
+PocketTTS and faster-whisper also report on-demand cache misses; cached reuse is
+silent. PocketTTS reports weight loading and voice preparation as separate stages.
+LLM requests report waiting for the server and the first server event. That wait
+may include model loading, queueing and prompt processing; it is not proof of a
+cold model. No additional server probes or inference requests are made.
+
+Elapsed time is activity feedback, not a percentage or estimated time remaining.
+The current native loaders do not provide reliable percentage callbacks. Debug
+output contains stage names rather than prompts, model paths or exception bodies.
 
 Native commands and unrelated providers continue while warming. A first request
 for the selected LLM waits on its in-flight preparation, with cancellation support.

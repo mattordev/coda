@@ -27,6 +27,28 @@ def _captured_phrase(
 
 
 class VoiceRecognizerTests(unittest.TestCase):
+    def test_listener_announces_state_changes_without_repeating_timeouts(self):
+        recognizer, microphone = MagicMock(), MagicMock()
+        recognizer.energy_threshold = 100
+        follow_up = FollowUpState()
+        attempts = 0
+        def capture(*_args, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                follow_up.open(duration_seconds=10)
+            if attempts < 3:
+                raise voice_recognizer.sr.WaitTimeoutError()
+            return None
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=microphone), \
+             patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture), \
+             patch('builtins.print') as printed:
+            voice_recognizer.run(['coda'], {}, follow_up_state=follow_up)
+        lines = [call.args[0] for call in printed.call_args_list]
+        self.assertEqual(lines.count('Listener ready for voice input'), 1)
+        self.assertEqual(lines.count('Waiting for follow-up'), 1)
+
     def test_queues_voice_runtime_request(self):
         request_queue = RuntimeQueue()
 

@@ -1,5 +1,6 @@
 """Optional terminal preview; final history/dashboard remain complete responses."""
 from threading import Lock
+from utils.console import console_output
 
 
 def _write(text):
@@ -7,9 +8,10 @@ def _write(text):
 
 
 class IncrementalDisplay:
-    def __init__(self, cancel_event, *, write=_write):
+    def __init__(self, cancel_event, *, write=_write, console=console_output):
         self.cancel_event = cancel_event
         self._write = write
+        self._console = console
         self._lock = Lock()
         self._closed = False
         self.started = False
@@ -26,8 +28,8 @@ class IncrementalDisplay:
                 return
             if not self.started:
                 self.started = True
-                self._write('CODA: ')
-            self._write(text)
+                text = 'CODA: ' + text
+            self._console.write_response(self, text, self._write)
 
     def finish(self, success):
         with self._lock:
@@ -35,5 +37,9 @@ class IncrementalDisplay:
                 return
             self._closed = True
             if self.started:
-                self._write('\n' if success and not self.cancel_event.is_set()
-                            else '\n[Response incomplete.]\n')
+                try:
+                    self._console.write_response(
+                        self, '\n' if success and not self.cancel_event.is_set()
+                        else '\n[Response incomplete.]\n', self._write)
+                finally:
+                    self._console.end_response(self)

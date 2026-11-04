@@ -97,4 +97,7 @@ class IncrementalSpeech:
                 if self.metrics is not None:
                     self.metrics.mark('first_chunk')
                 yield chunk
+                # The iterator is suspended while TTS generates/plays this
+                # chunk. That interval is not time spent waiting for LLM text.
+                accumulator.resume()
         self._discard()
