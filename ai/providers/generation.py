@@ -5,6 +5,9 @@ from enum import Enum
 import inspect
 from threading import Event
 from typing import Callable
+from ai.providers.answer_text import AnswerTextGuard, UnsupportedToolOutput
+from ai.providers.completion import UNSUPPORTED_COMPLETION_ERROR
+from ai.providers.telemetry import ProviderCallResult
 
 
 class Workload(str, Enum):
@@ -62,14 +65,55 @@ def call_generation(generate, messages, *, cancel_event=None, options=None):
         if capable:
             kwargs["options"] = options
     closed = Event()
+    guard = None
+    readable_answer = options is None or options.workload not in (
+        Workload.CLASSIFICATION, Workload.EXTRACTION,
+    )
+
+    def deliver(text):
+        if closed.is_set() or (cancel_event is not None and cancel_event.is_set()):
+            raise InterruptedError("Request cancelled.")
+        if options is not None and options.on_visible_text is not None:
+            options.on_visible_text(text)
+
+    if readable_answer:
+        guard = AnswerTextGuard(deliver)
     if options is not None and options.on_visible_text is not None and "options" in kwargs:
         def forward(text):
             if closed.is_set() or (cancel_event is not None and cancel_event.is_set()):
                 raise InterruptedError("Request cancelled.")
-            options.on_visible_text(text)
+            if guard is not None:
+                guard.feed(text)
+            else:
+                deliver(text)
         kwargs["options"] = replace(options, on_visible_text=forward)
+
+    def invalid_result(result=None):
+        if isinstance(result, ProviderCallResult):
+            return replace(result, response=None, error=UNSUPPORTED_COMPLETION_ERROR)
+        return None, UNSUPPORTED_COMPLETION_ERROR
+
     try:
-        return generate(messages, **kwargs)
+        try:
+            result = generate(messages, **kwargs)
+        except UnsupportedToolOutput:
+            return invalid_result()
+        if guard is not None:
+            response, error = result
+            try:
+                if guard.failed:
+                    return invalid_result(result)
+                if not error:
+                    guard.validate(response or '')
+                    # Validate non-streaming suffixes as well as streamed ones.
+                    if isinstance(response, str):
+                        ending = AnswerTextGuard(lambda _text: None)
+                        ending.feed(response)
+                        ending.finish()
+                    guard.finish()
+            except UnsupportedToolOutput:
+                return invalid_result(result)
+        return result
     finally:
         # Timed-out adapters may have an abandoning worker. It must not emit
         # late text into a subsequent runtime request.

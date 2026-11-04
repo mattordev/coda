@@ -119,3 +119,27 @@ order but do not mark the server unhealthy for ten minutes. Actual connection
 and timeout failures retain the existing health policy. If interpretation cannot
 obtain a complete answer it explicitly reports incompleteness; it never labels
 the generated fragment a completed summary.
+
+## Unsupported tool syntax in answer text
+
+Conversation and tool-interpretation answers reject explicit model control
+markers such as `<|tool_call_start|>` and `<tool_call>`. A small streaming guard
+holds possible marker suffixes across delta boundaries, so protocol text is not
+displayed or spoken even when a marker arrives in separate pieces. Ordinary
+function names and code examples such as `google(query=...)` are not treated as
+tool invocations. This is validation of known control markers, not a general
+detector of hallucinated claims or a new tool-execution path.
+
+Invalid answers are excluded from dialogue history. Recovery uses the existing
+privacy-filtered provider order before output starts; after any visible prefix,
+the attempt stops as incomplete without replaying another answer. Cancellation
+discards buffered text and late callbacks remain closed. Output-format failures
+do not apply a connection-failure cooldown to the provider. No search or MCP
+action is inferred from generated text; real tools retain normal dispatch,
+argument validation and permission checks.
+
+Classification and argument-extraction JSON retain their own validation and are
+not rewritten by this answer guard. A classifier's string `"null"` is accepted
+as no action when it is not the name of a registered intent; its confidence is
+reset to zero and arguments are discarded. Other unknown intent names remain
+errors, preserving the rule that uncertain or invalid selections cannot run tools.
