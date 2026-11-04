@@ -27,6 +27,7 @@ class CapturedPhrase(Generic[CaptureState]):
     audio: sr.AudioData
     started_with: CaptureState
     overlapped_capture: bool = False
+    playback_ended: bool = False
 
 
 def listen_for_phrase(
@@ -38,12 +39,17 @@ def listen_for_phrase(
     phrase_time_limit: float | None = None,
     stop_event: Event | None = None,
     blocks_capture: Callable[[CaptureState], bool] | None = None,
+    end_on_playback_end: bool = False,
+    on_waiting: Callable[[CaptureState], None] | None = None,
 ) -> CapturedPhrase[CaptureState] | None:
     """Listen using SpeechRecognition's VAD and retain accepted start state.
 
     SpeechRecognition exposes neither the start time of an accepted phrase nor
     a callback at that boundary. This mirrors its non-streaming VAD loop so the
     state snapshot can be replaced whenever a short noise candidate is rejected.
+    ``on_waiting`` observes idle microphone reads, not in-progress phrases.
+    With ``end_on_playback_end``, an overlapped capture is returned as soon as
+    playback ends, marked for disposal rather than transcription.
     """
     if source.stream is None:
         raise ValueError("The audio source must be entered before listening.")
@@ -72,6 +78,7 @@ def listen_for_phrase(
         frame_blocks = deque()
         phrase_state = None
         overlapped_capture = False
+        playback_ended = False
 
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -84,6 +91,8 @@ def listen_for_phrase(
                 )
 
             buffer_state = capture_state()
+            if on_waiting is not None:
+                on_waiting(buffer_state)
             buffer = source.stream.read(source.CHUNK)
             post_read_state = capture_state()
             if blocks_capture is not None:
@@ -139,6 +148,10 @@ def listen_for_phrase(
                 break
 
             buffer_state = capture_state()
+            if (end_on_playback_end and overlapped_capture and blocks_capture is not None
+                    and not blocks_capture(buffer_state)):
+                playback_ended = True
+                break
             if blocks_capture is not None:
                 overlapped_capture = (
                     overlapped_capture or blocks_capture(buffer_state)
@@ -150,6 +163,10 @@ def listen_for_phrase(
                 overlapped_capture = (
                     overlapped_capture or blocks_capture(post_read_state)
                 )
+                if (end_on_playback_end and overlapped_capture
+                        and not blocks_capture(post_read_state)):
+                    playback_ended = True
+                    break
             if not buffer:
                 break
 
@@ -177,7 +194,7 @@ def listen_for_phrase(
                 )
 
         phrase_count -= pause_count
-        if phrase_count >= phrase_buffer_count or not buffer:
+        if playback_ended or phrase_count >= phrase_buffer_count or not buffer:
             break
 
     for _ in range(pause_count - non_speaking_buffer_count):
@@ -195,4 +212,5 @@ def listen_for_phrase(
         audio=audio,
         started_with=phrase_state,
         overlapped_capture=overlapped_capture,
+        playback_ended=playback_ended,
     )

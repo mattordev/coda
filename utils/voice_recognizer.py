@@ -232,22 +232,21 @@ def run(
         return
 
     previous_status = None
-    while True:
-        if stop_event is not None and stop_event.is_set():
-            return
-
-        debug_enabled = runtime_state.is_debug_enabled(
-            default=_voice_command_debug_enabled()
+    def current_capture_state():
+        return VoiceCaptureState(
+            follow_up_active=active_follow_up_state.is_active(),
+            speech_playing=is_speech_playing() if is_speech_playing is not None else False,
         )
 
-        follow_up_active = active_follow_up_state.is_active()
-        
-        current_mode = mode or "normal"
-
-        if current_mode == "normal" and follow_up_active:
-            status = 'Waiting for follow-up'
-        elif current_mode == "normal":
-            status = 'Listener ready for voice input'
+    def report_waiting(state):
+        nonlocal previous_status
+        if state.speech_playing:
+            previous_status = None
+            return
+        current_mode = mode or 'normal'
+        if current_mode == 'normal':
+            status = ('Waiting for follow-up' if state.follow_up_active
+                      else 'Listener ready for voice input')
         elif current_mode == 'response':
             status = 'Waiting for response'
         else:
@@ -256,24 +255,29 @@ def run(
             print(status, flush=True)
         previous_status = status
 
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            return
+
+        debug_enabled = runtime_state.is_debug_enabled(
+            default=_voice_command_debug_enabled()
+        )
+
+        report_waiting(current_capture_state())
+
         try:
             recognizer.pause_threshold = _get_pause_threshold_seconds()
             with microphone as source:
                 captured_phrase = listen_for_phrase(
                     recognizer,
                     source,
-                    lambda: VoiceCaptureState(
-                        follow_up_active=active_follow_up_state.is_active(),
-                        speech_playing=(
-                            is_speech_playing()
-                            if is_speech_playing is not None
-                            else False
-                        ),
-                    ),
+                    current_capture_state,
                     timeout=_get_listen_timeout_seconds(),
                     phrase_time_limit=_get_phrase_time_limit_seconds(),
                     stop_event=stop_event,
                     blocks_capture=lambda state: state.speech_playing,
+                    end_on_playback_end=True,
+                    on_waiting=report_waiting,
                 )
 
             if captured_phrase is None:
@@ -284,6 +288,17 @@ def run(
 
             if stop_event is not None and stop_event.is_set():
                 return
+
+            if captured_phrase.overlapped_capture and (
+                captured_phrase.playback_ended
+                or (is_speech_playing is not None and not is_speech_playing())
+            ):
+                # This phrase is already unusable as a normal request. Once
+                # playback has ended, avoid transcribing its stale echo merely
+                # to discard it. Live wakeword-stop recognition remains below.
+                runtime_state.debug_print(
+                    '[VOICE] Discarded completed playback capture before transcription.')
+                continue
 
             speech, provider_used = stt_service.transcribe_audio(recognizer, audio)
             if not speech:

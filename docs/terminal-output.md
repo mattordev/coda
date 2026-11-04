@@ -8,6 +8,11 @@ cancellation continue while messages are deferred.
 
 The listener announces readiness or follow-up mode when its state changes,
 rather than on every capture timeout. Recognition errors still appear.
+While the microphone is idle, follow-up status updates on the next audio-buffer
+read rather than waiting for a listening timeout. After playback ends, an old
+overlapping capture is discarded without waiting for phrase silence or running
+speech recognition on it. Live wakeword-stop recognition during playback remains
+available. This does not provide acoustic echo cancellation or full duplex audio.
 
 Deferred output retains at most 100 messages of up to 8,192 characters each. If this limit
 is reached, the oldest messages are omitted with a count after the answer.
