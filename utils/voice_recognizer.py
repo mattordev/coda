@@ -276,7 +276,9 @@ def run(
                     phrase_time_limit=_get_phrase_time_limit_seconds(),
                     stop_event=stop_event,
                     blocks_capture=lambda state: state.speech_playing,
-                    end_on_playback_end=True,
+                    # Stop-enabled listeners must recognize the complete
+                    # phrase before deciding whether overlap was only echo.
+                    end_on_playback_end=cancel_active_request is None,
                     on_waiting=report_waiting,
                 )
 
@@ -289,13 +291,13 @@ def run(
             if stop_event is not None and stop_event.is_set():
                 return
 
-            if captured_phrase.overlapped_capture and (
+            if cancel_active_request is None and captured_phrase.overlapped_capture and (
                 captured_phrase.playback_ended
                 or (is_speech_playing is not None and not is_speech_playing())
             ):
-                # This phrase is already unusable as a normal request. Once
-                # playback has ended, avoid transcribing its stale echo merely
-                # to discard it. Live wakeword-stop recognition remains below.
+                # Without a stop handler this cannot be a cancellation request.
+                # With one, transcription and stop detection take precedence,
+                # even when playback ended while the phrase was being captured.
                 runtime_state.debug_print(
                     '[VOICE] Discarded completed playback capture before transcription.')
                 continue

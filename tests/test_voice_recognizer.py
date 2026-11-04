@@ -27,6 +27,42 @@ def _captured_phrase(
 
 
 class VoiceRecognizerTests(unittest.TestCase):
+    def test_wakeword_stop_is_checked_when_playback_ends_before_transcription(self):
+        stop = Event()
+        requests = RuntimeQueue()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        cancel = MagicMock(return_value='fixture-request')
+        follow_up = FollowUpState()
+        follow_up.open(10)
+        captures = 0
+        def capture(*_args, **kwargs):
+            nonlocal captures
+            captures += 1
+            if captures > 1:
+                return None
+            # A user can finish saying stop at the same time playback ends.
+            # Capture must not truncate/discard that phrase as presumed echo.
+            return CapturedPhrase(object(), VoiceCaptureState(False, True),
+                                  overlapped_capture=True,
+                                  playback_ended=kwargs['end_on_playback_end'])
+        def transcribe(*_args):
+            stop.set()
+            return 'Coda stop.', 'fixture'
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture), \
+             patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe) as stt, \
+             patch.object(voice_recognizer.dashboard_state, 'record_user_message'), \
+             patch('builtins.print'):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests,
+                                 follow_up_state=follow_up, cancel_active_request=cancel,
+                                 is_speech_playing=lambda: False)
+        stt.assert_called_once()
+        cancel.assert_called_once_with()
+        self.assertFalse(follow_up.is_active())
+        self.assertIsNone(requests.get(timeout=0.01))
+
     def test_finished_playback_echo_skips_stt_and_preserves_fresh_follow_up(self):
         follow_up, stop = FollowUpState(), Event()
         requests = RuntimeQueue()
