@@ -19,6 +19,9 @@ visibility into local model preparation. It builds on the v1.5.3 voice pipeline.
   queued tasks from active warming. Cached runtimes are reused as before.
 - Local LLM requests report server wait and the first server event. That wait can
   include loading, queueing and prompt processing; it is not a cold-load measurement.
+- Startup waits for enabled pre-warm tasks before announcing `C.O.D.A loaded in
+  ... second(s)` and starting input. The load duration includes preparation;
+  failed or skipped tasks retain normal fallback. Ctrl+C cancels the startup wait.
 
 These changes were implemented in [#219](https://github.com/mattordev/coda/pull/219)
 and [#221](https://github.com/mattordev/coda/pull/221), addressing

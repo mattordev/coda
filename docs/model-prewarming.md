@@ -1,7 +1,9 @@
 # Optional model pre-warming
 
-Pre-warming prepares configured local models in the background after command/config
-setup and the updater handshake. It is disabled by default. Set independent choices
+Pre-warming prepares configured local models after command/config setup and the
+updater handshake. At startup, CODA waits for the enabled preparation tasks before
+printing `C.O.D.A loaded in ... second(s)` or starting voice/manual input. The
+reported load duration includes this preparation. It is disabled by default. Set independent choices
 in the effective environment or `.env`:
 
 ```dotenv
@@ -63,7 +65,14 @@ Elapsed time is activity feedback, not a percentage or estimated time remaining.
 The current native loaders do not provide reliable percentage callbacks. Debug
 output contains stage names rather than prompts, model paths or exception bodies.
 
-Native commands and unrelated providers continue while warming. A first request
+Failed or skipped startup tasks finish the wait and retain normal provider fallback;
+the loaded message means startup preparation finished, not that every model succeeded.
+Ctrl+C interrupts the startup wait and runs normal cleanup. Native loaders may not
+be interruptible, so startup can otherwise wait until a loader returns. No artificial
+timeout marks an unfinished model ready.
+
+On `debug reload`, preparation remains in the background: native commands and
+unrelated providers continue while warming. A first request
 for the selected LLM waits on its in-flight preparation, with cancellation support.
 PocketTTS and Whisper first use share their normal initialization lock/cache with
 warming: no duplicate local model is constructed. Warm-up failure does not crash

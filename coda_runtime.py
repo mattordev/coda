@@ -787,7 +787,13 @@ def _run_runtime(skip_update_check=False):
     acknowledge_handoff(Path(__file__).resolve().parent)
     command.start_tools()
     stt_service.start()
-    model_warmup.start()
+    warmup = model_warmup.start()
+    startup_models = warmup.snapshot()
+    if any(task['state'] in ('queued', 'warming') for task in startup_models.values()):
+        print('[PREWARM] Preparing models before input starts...', flush=True)
+    for name in startup_models:
+        if not warmup.wait(name, shutdown_started):
+            return None
 
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")
