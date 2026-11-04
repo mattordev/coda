@@ -149,6 +149,22 @@ def is_stop_phrase(message):
     }
 
 
+def _has_wakeword_stop(message, wakewords):
+    """Match an exact final stop phrase after any complete wakeword.
+
+    Earlier assistant speech may contain the wakeword too. Only cancellation
+    gets this matching rule; ordinary commands keep their existing routing.
+    """
+    for wakeword in wakewords:
+        if not wakeword.strip():
+            continue
+        pattern = rf'\b{re.escape(wakeword)}\b'
+        for match in re.finditer(pattern, message, flags=re.IGNORECASE):
+            if is_stop_phrase(message[match.end():]):
+                return True
+    return False
+
+
 def _get_microphone():
     names = sr.Microphone.list_microphone_names()
     mic_index = os.getenv("CODA_MIC_INDEX", "").strip()
@@ -347,9 +363,8 @@ def run(
                 print(f"[VOICE] Speech provider used: {provider_used}")
                 
             if (
-                has_wakeword
-                and is_stop_phrase(wakeword_command_message)
-                and cancel_active_request is not None
+                cancel_active_request is not None
+                and _has_wakeword_stop(message, wakeword)
             ):
                 active_follow_up_state.close()
                 cancel_active_request()

@@ -27,6 +27,38 @@ def _captured_phrase(
 
 
 class VoiceRecognizerTests(unittest.TestCase):
+    def test_stop_matching_requires_complete_wakeword_and_final_exact_action(self):
+        for text, expected in (
+            ('Coda stop.', True),
+            ('CODA was speaking. Coda, cancel!', True),
+            ('Please stop.', False),
+            ('decoda stop', False),
+            ('Coda stop searching and explain it', False),
+            ('Coda explain the stop command', False),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(voice_recognizer._has_wakeword_stop(text, ['coda']), expected)
+        self.assertFalse(voice_recognizer._has_wakeword_stop('stop', ['', ' ']))
+
+    def test_stop_after_earlier_wakeword_cancels_during_playback(self):
+        stop, requests, cancel = Event(), RuntimeQueue(), MagicMock()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        def transcribe(*_args):
+            stop.set()
+            return 'Coda is still speaking. Coda stop.', 'fixture'
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch.object(voice_recognizer, 'listen_for_phrase',
+                          return_value=_captured_phrase(speech_playing=True)), \
+             patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe), \
+             patch.object(voice_recognizer.dashboard_state, 'record_user_message'), \
+             patch('builtins.print'):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests,
+                                 cancel_active_request=cancel, is_speech_playing=lambda: True)
+        cancel.assert_called_once_with()
+        self.assertIsNone(requests.get(timeout=0.01))
+
     def test_wakeword_stop_is_checked_when_playback_ends_before_transcription(self):
         stop = Event()
         requests = RuntimeQueue()
