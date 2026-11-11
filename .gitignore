@@ -14,3 +14,4 @@ logs/speech/
 .coda-release-cache-*
 mcp_servers/*.json
 integrations/*/filesystem.config.json
+integrations/*/websearch.config.json

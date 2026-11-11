@@ -1,0 +1,48 @@
+{
+	"id": "websearch",
+	"version": "1.0.0",
+	"entrypoint": "server.py",
+	"dependencies": ["mcp", "ddgs"],
+	"settings_schema": {
+		"type": "object",
+		"properties": {
+			"config_file": {
+				"type": "string",
+				"minLength": 1
+			}
+		},
+		"additionalProperties": false
+	},
+	"setting_arguments": {
+		"config_file": "--config"
+	},
+	"configuration_files": [
+		{
+			"setting": "config_file",
+			"default": "websearch.config.json",
+			"schema": {
+				"type": "object",
+				"properties": {
+					"search": {
+						"type": "object",
+						"properties": {
+							"max_results": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 10
+							},
+							"timeout": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 30
+							}
+						},
+						"additionalProperties": false
+					}
+				},
+				"required": ["search"],
+				"additionalProperties": false
+			}
+		}
+	]
+}

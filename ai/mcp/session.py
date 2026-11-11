@@ -9,6 +9,7 @@ import time
 import anyio
 
 from ai.mcp.transport import failure, _is_sdk_timeout, _private_sdk_diagnostics, _client_context, _remote_error_code
+from ai.mcp.transport import _is_sdk_invalid_arguments
 from ai.tools.models import ToolError, ToolResult
 
 
@@ -102,6 +103,8 @@ class PersistentSession:
             exception_type = type(error).__name__
             if _remote_error_code(error):
                 reason = _remote_error_code(error)
+            elif _is_sdk_invalid_arguments(error):
+                reason = "invalid_arguments"
             elif _is_sdk_timeout(error):
                 reason = "timeout"
             elif not connected and isinstance(error, ValueError):
@@ -118,6 +121,7 @@ class PersistentSession:
                     "mcp_protocol_error": "The MCP server returned an invalid response or disconnected.",
                     "authentication_error": "The remote MCP request was rejected.",
                     "output_limit": "The MCP response exceeded the configured output limit.",
+                    "invalid_arguments": "The MCP server rejected the tool arguments.",
                 }
                 active.result = failure(code, messages.get(code, "The MCP operation could not complete."), exception_type=exception_type)
                 active.done.set()

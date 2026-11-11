@@ -16,9 +16,52 @@ from runtime.messages import (
 )
 from runtime.runtime_queue import RuntimeQueues
 from runtime.follow_up import FollowUpState
-from ai.tools.models import ToolResult
+from ai.tools.models import ToolError, ToolResult
+from ai.intents import Intent, IntentRequest
+import utils.on_command as command_feedback
 
 class RuntimeExecutionTests(unittest.TestCase):
+    def test_mcp_failure_queues_only_conversational_text_for_voice_and_dashboard(self):
+        for source in (InputSource.MANUAL, InputSource.VOICE):
+            with self.subTest(source=source):
+                queues = RuntimeQueues()
+                stop_event = threading.Event()
+                request = RuntimeRequest('Search the web for bed adhesion', source)
+                raw = ToolResult(False, {'structuredContent': {'kind': 'web_search', 'error': {
+                    'code': 'unavailable', 'message': 'DDGSException: No results found.',
+                }}}, ToolError('mcp_tool_error', 'Internal failure'))
+                intent_request = IntentRequest(Intent('mcp.websearch.search_web', 'Search'), request.message, 1)
+
+                def run(_message, _commands, **options):
+                    return command_feedback._tool_outcome(intent_request, raw, cancel_event=options['cancel_event'])
+
+                with (patch.object(coda_runtime, 'runtime_queues', queues),
+                      patch.object(coda_runtime.command, 'run', side_effect=run),
+                      patch.object(command_feedback.llm_service, 'record_tool_exchange', return_value=True),
+                      patch.object(command_feedback, 'record_tool_failure') as log,
+                      patch.object(command_feedback.llm_service, 'call_with_messages') as model,
+                      patch.object(coda_runtime.dashboard_state, 'record_ai_response') as dashboard,
+                      patch('builtins.print')):
+                    worker = threading.Thread(target=coda_runtime._execution_loop, args=(stop_event,))
+                    worker.start()
+                    try:
+                        queues.requests.put(request)
+                        result = queues.events.get(timeout=3)
+                        task = queues.speech.get(timeout=3)
+                    finally:
+                        stop_event.set()
+                        worker.join(timeout=3)
+                expected = "Sorry, I couldn't get any results for that search."
+                self.assertEqual(task.text, expected)
+                self.assertEqual(result.response_text, expected)
+                self.assertEqual(result.display_text, expected)
+                self.assertIs(result.tool_result, raw)
+                self.assertFalse(result.tool_result.success)
+                dashboard.assert_called_once_with(expected, source='tts')
+                self.assertIn('DDGSException', log.call_args.args[1])
+                model.assert_not_called()
+                self.assertFalse(worker.is_alive())
+
 
     def test_runtime_displays_and_queues_same_summary_and_retains_full_result(self):
         queues = RuntimeQueues()

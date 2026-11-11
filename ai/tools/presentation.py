@@ -45,7 +45,7 @@ def prepare_tool_response(result: ToolResult, *, max_chars: int = 1200, question
     if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
         raise ValueError("Tool response limit must be a positive integer.")
     if not result.success:
-        text = spoken_error(result)
+        text = spoken_error(result, question=question)
     else:
         data = result.data
         if isinstance(data, dict) and ("content" in data or "structuredContent" in data):
