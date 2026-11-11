@@ -131,10 +131,12 @@ class MCPIntentRuntimeTests(unittest.TestCase):
             result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
         self.assertIn("permission", result.response_text)
         self.assertNotIn("/private/location", result.response_text)
-        self.assertIn("/private/location", result.display_text)
+        self.assertEqual(result.display_text, result.response_text)
         self.assertIs(result.tool_result, self.outcome)
-        self.assertIn("/private/location", history.conversation_log[-1]["content"])
-        log.assert_called_once_with("mcp.test.echo", result.display_text)
+        self.assertNotIn("/private/location", history.conversation_log[-1]["content"])
+        self.assertEqual(history.get_recent_tool_result().data, self.outcome.data)
+        log.assert_called_once()
+        self.assertIn('/private/location', log.call_args.args[1])
         output.assert_called_once_with(f"CODA: {result.response_text}")
         self.fallback.assert_not_called()
 
@@ -167,6 +169,36 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.assertEqual(overview.display_text, recent.display_text)
         self.assertEqual(recent.display_text, names.display_text)
         self.assertIs(names.tool_result, self.outcome)
+        self.fallback.assert_not_called()
+
+    def test_shared_failures_keep_normal_chat_safe_and_diagnostics_inspectable(self):
+        self.configure()
+        for code in ('connection_error', 'timeout', 'file_not_found', 'permission_denied',
+                     'invalid_arguments', 'cancelled', 'execution_error', 'mcp_tool_error'):
+            with self.subTest(code=code):
+                detail = 'Web search failed: DDGSException: No results found.'
+                self.outcome = ToolResult(False, {'content': [{'type': 'text', 'text': detail}]},
+                                          ToolError(code, 'InternalException: diagnostic only'))
+                with patch.object(runtime, 'record_tool_failure') as log, \
+                     patch.object(history, 'call_with_messages') as model, patch('builtins.print') as output:
+                    result = runtime.on_command('mcp.test.echo {"message":"typed"}', {})
+                self.assertTrue(result.handled)
+                self.assertFalse(result.tool_result.success)
+                self.assertFalse(result.used_llm)
+                self.assertEqual(result.response_text, result.display_text)
+                self.assertNotIn('DDGSException', result.response_text)
+                self.assertNotIn('InternalException', result.response_text)
+                self.assertNotIn(detail, history.conversation_log[-1]['content'])
+                self.assertNotIn(detail, history.conversation_log[-1]['cloud_content'])
+                self.assertIsNone(history.get_tool_follow_up_context())
+                self.assertIn(detail, log.call_args.args[1])
+                self.assertIn('Failure category:', log.call_args.args[1])
+                output.assert_called_once_with(f'CODA: {result.response_text}')
+                model.assert_not_called()
+                with patch('builtins.print') as inspection:
+                    inspected = runtime.on_command('show tool output', {})
+                self.assertIn(detail, inspected.display_text)
+                self.assertIn(detail, str(inspection.call_args_list))
         self.fallback.assert_not_called()
 
     def test_bundled_filesystem_round_trip_through_manual_entrypoint(self):
@@ -273,7 +305,7 @@ class MCPIntentRuntimeTests(unittest.TestCase):
         self.configure(allowed=False)
         result = runtime.on_command("echo hello", {})
         self.assertEqual(result.tool_result.error.code, "permission_denied")
-        self.assertIn("not permitted", result.response_text)
+        self.assertIn("permission", result.response_text)
         self.assertEqual(self.calls, [])
         self.fallback.assert_not_called()
 
