@@ -61,6 +61,8 @@ The active roadmap is maintained in the
 - [v1.5.2 - LLM Workload Optimisation](https://github.com/mattordev/coda/milestone/13)
 - [v1.5.3 - Incremental Voice Pipeline](https://github.com/mattordev/coda/milestone/14)
 
+See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
+runtime polish, configuration and validation guidance.
 See the [v1.5.1 release notes](docs/release-notes-v1.5.1.md) for setup changes,
 validation and limitations.
 See [incremental speech](docs/incremental-speech.md) for streaming controls,
