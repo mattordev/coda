@@ -48,6 +48,43 @@ def _recognizer():
 
 
 class PhraseListenerTests(unittest.TestCase):
+    def test_playback_end_releases_echo_without_waiting_for_silence(self):
+        speech, quiet = _pcm_buffer(400), _pcm_buffer(0)
+        playing = True
+        def end_playback(read_count):
+            nonlocal playing
+            if read_count == 3:
+                playing = False
+        source = FakeAudioSource(
+            [speech, speech, quiet, speech, speech, speech, quiet, quiet, quiet],
+            before_read=end_playback,
+        )
+        recognizer = _recognizer()
+        recognizer.pause_threshold = 1.8
+        echo = listen_for_phrase(recognizer, source, lambda: playing,
+                                 blocks_capture=bool, end_on_playback_end=True)
+        self.assertTrue(echo.overlapped_capture)
+        self.assertTrue(echo.playback_ended)
+        self.assertEqual(source.stream.read_count, 3)
+        # Starting a fresh capture must not consume the next user's onset as echo.
+        recognizer.pause_threshold = 0.2
+        fresh = listen_for_phrase(recognizer, source, lambda: playing,
+                                  blocks_capture=bool, end_on_playback_end=True)
+        self.assertFalse(fresh.overlapped_capture)
+        self.assertFalse(fresh.playback_ended)
+        self.assertEqual(fresh.audio.frame_data, speech * 3 + quiet)
+
+    def test_waiting_callback_runs_during_idle_reads_not_phrase_capture(self):
+        quiet, speech = _pcm_buffer(0), _pcm_buffer(400)
+        source = FakeAudioSource([quiet, speech, speech, speech, quiet, quiet, quiet])
+        waiting = []
+        captured = listen_for_phrase(
+            _recognizer(), source, lambda: source.stream.read_count,
+            on_waiting=waiting.append,
+        )
+        self.assertEqual(waiting, [0, 1])
+        self.assertIsNotNone(captured)
+
     def test_captures_state_at_energy_onset_after_waiting(self):
         quiet = _pcm_buffer(0)
         speech = _pcm_buffer(400)

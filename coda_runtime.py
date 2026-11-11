@@ -23,7 +23,7 @@ import utils.stt_service as stt_service
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.dashboard_state as dashboard_state
-from utils.console import configure_stdout_encoding
+from utils.console import configure_stdout_encoding, print_line as print
 from colorama import Fore, init
 
 import keyboard
@@ -787,7 +787,15 @@ def _run_runtime(skip_update_check=False):
     acknowledge_handoff(Path(__file__).resolve().parent)
     command.start_tools()
     stt_service.start()
-    model_warmup.start()
+    warmup = model_warmup.start()
+    startup_models = warmup.snapshot()
+    if any(task['state'] in ('queued', 'warming') for task in startup_models.values()):
+        message = ('[PREWARM] Preparing models before input starts...'
+                   if runtime_state.is_debug_enabled() else 'Loading components...')
+        print(message, flush=True)
+    for name in startup_models:
+        if not warmup.wait(name, shutdown_started):
+            return None
 
     load_time = time.perf_counter()
     print(f"C.O.D.A loaded in {round(load_time-startTimer, 2)} second(s)")

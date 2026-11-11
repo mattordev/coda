@@ -11,6 +11,7 @@ import utils.dashboard_state as dashboard_state
 import utils.on_command as command
 import utils.runtime_state as runtime_state
 import utils.stt_service as stt_service
+from utils.console import print_line as print
 from runtime.messages import InputSource, RuntimeRequest
 from runtime.runtime_queue import RuntimeQueue
 from runtime.follow_up import FollowUpState
@@ -148,6 +149,22 @@ def is_stop_phrase(message):
     }
 
 
+def _has_wakeword_stop(message, wakewords):
+    """Match an exact final stop phrase after any complete wakeword.
+
+    Earlier assistant speech may contain the wakeword too. Only cancellation
+    gets this matching rule; ordinary commands keep their existing routing.
+    """
+    for wakeword in wakewords:
+        if not wakeword.strip():
+            continue
+        pattern = rf'\b{re.escape(wakeword)}\b'
+        for match in re.finditer(pattern, message, flags=re.IGNORECASE):
+            if is_stop_phrase(message[match.end():]):
+                return True
+    return False
+
+
 def _get_microphone():
     names = sr.Microphone.list_microphone_names()
     mic_index = os.getenv("CODA_MIC_INDEX", "").strip()
@@ -230,6 +247,30 @@ def run(
         print(f"Microphone calibration failed: {e}")
         return
 
+    previous_status = None
+    def current_capture_state():
+        return VoiceCaptureState(
+            follow_up_active=active_follow_up_state.is_active(),
+            speech_playing=is_speech_playing() if is_speech_playing is not None else False,
+        )
+
+    def report_waiting(state):
+        nonlocal previous_status
+        if state.speech_playing:
+            previous_status = None
+            return
+        current_mode = mode or 'normal'
+        if current_mode == 'normal':
+            status = ('Waiting for follow-up' if state.follow_up_active
+                      else 'Listener ready for voice input')
+        elif current_mode == 'response':
+            status = 'Waiting for response'
+        else:
+            status = None
+        if status is not None and status != previous_status:
+            print(status, flush=True)
+        previous_status = status
+
     while True:
         if stop_event is not None and stop_event.is_set():
             return
@@ -238,16 +279,7 @@ def run(
             default=_voice_command_debug_enabled()
         )
 
-        follow_up_active = active_follow_up_state.is_active()
-        
-        current_mode = mode or "normal"
-
-        if current_mode == "normal" and follow_up_active:
-            print('Waiting for follow-up', flush=True)
-        elif current_mode == "normal":
-            print('Listener ready for voice input', flush=True)
-        elif current_mode == 'response':
-            print('Waiting for response', flush=True)
+        report_waiting(current_capture_state())
 
         try:
             recognizer.pause_threshold = _get_pause_threshold_seconds()
@@ -255,18 +287,15 @@ def run(
                 captured_phrase = listen_for_phrase(
                     recognizer,
                     source,
-                    lambda: VoiceCaptureState(
-                        follow_up_active=active_follow_up_state.is_active(),
-                        speech_playing=(
-                            is_speech_playing()
-                            if is_speech_playing is not None
-                            else False
-                        ),
-                    ),
+                    current_capture_state,
                     timeout=_get_listen_timeout_seconds(),
                     phrase_time_limit=_get_phrase_time_limit_seconds(),
                     stop_event=stop_event,
                     blocks_capture=lambda state: state.speech_playing,
+                    # Stop-enabled listeners must recognize the complete
+                    # phrase before deciding whether overlap was only echo.
+                    end_on_playback_end=cancel_active_request is None,
+                    on_waiting=report_waiting,
                 )
 
             if captured_phrase is None:
@@ -277,6 +306,17 @@ def run(
 
             if stop_event is not None and stop_event.is_set():
                 return
+
+            if cancel_active_request is None and captured_phrase.overlapped_capture and (
+                captured_phrase.playback_ended
+                or (is_speech_playing is not None and not is_speech_playing())
+            ):
+                # Without a stop handler this cannot be a cancellation request.
+                # With one, transcription and stop detection take precedence,
+                # even when playback ended while the phrase was being captured.
+                runtime_state.debug_print(
+                    '[VOICE] Discarded completed playback capture before transcription.')
+                continue
 
             speech, provider_used = stt_service.transcribe_audio(recognizer, audio)
             if not speech:
@@ -323,9 +363,8 @@ def run(
                 print(f"[VOICE] Speech provider used: {provider_used}")
                 
             if (
-                has_wakeword
-                and is_stop_phrase(wakeword_command_message)
-                and cancel_active_request is not None
+                cancel_active_request is not None
+                and _has_wakeword_stop(message, wakeword)
             ):
                 active_follow_up_state.close()
                 cancel_active_request()

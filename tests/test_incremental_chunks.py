@@ -4,6 +4,25 @@ from tts.incremental import SpeakableChunks
 
 
 class IncrementalChunkTests(unittest.TestCase):
+    def test_arriving_sentence_is_not_split_by_an_expired_timeout(self):
+        now = [0.0]
+        accumulator = SpeakableChunks(clock=lambda: now[0])
+        self.assertEqual(accumulator.feed('This is an introductory sentence. T'),
+                         ['This is an introductory sentence.'])
+        now[0] = 5.0
+        rest = 'he second sentence should continue naturally without an awkward pause in the middle.'
+        self.assertEqual(accumulator.feed(rest), [])
+        self.assertEqual(accumulator.finish(), ['T' + rest])
+
+    def test_timeout_does_not_turn_an_unfinished_clause_into_a_sentence(self):
+        now = [0.0]
+        accumulator = SpeakableChunks(clock=lambda: now[0])
+        text = 'I am writing to share my new bank account information for payroll'
+        self.assertEqual(accumulator.feed(text), [])
+        now[0] = 2.0
+        self.assertEqual(accumulator.poll(), [])
+        self.assertEqual(accumulator.finish(), [text])
+
     def render(self, text, size=1, **kwargs):
         accumulator = SpeakableChunks(**kwargs)
         chunks = []
@@ -37,11 +56,11 @@ class IncrementalChunkTests(unittest.TestCase):
     def test_timeout_flushes_complete_words_and_holds_trailing_token(self):
         now = [0.0]
         accumulator = SpeakableChunks(clock=lambda: now[0], min_chars=10)
-        self.assertEqual(accumulator.feed('This is a useful phrase with version 3.'), [])
+        self.assertEqual(accumulator.feed('This is a useful phrase, with version 3.'), [])
         now[0] = 2
-        self.assertEqual(accumulator.poll(), ['This is a useful phrase with version'])
+        self.assertEqual(accumulator.poll(), ['This is a useful phrase,'])
         accumulator.feed('11')
-        self.assertEqual(accumulator.finish(), ['3.11'])
+        self.assertEqual(accumulator.finish(), ['with version 3.11'])
 
     def test_long_answers_and_unbroken_tokens_are_bounded(self):
         text = ('A lengthy useful phrase without terminal punctuation ' * 200)

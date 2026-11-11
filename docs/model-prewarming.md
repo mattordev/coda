@@ -1,7 +1,9 @@
 # Optional model pre-warming
 
-Pre-warming prepares configured local models in the background after command/config
-setup and the updater handshake. It is disabled by default. Set independent choices
+Pre-warming prepares configured local models after command/config setup and the
+updater handshake. At startup, CODA waits for the enabled preparation tasks before
+printing `C.O.D.A loaded in ... second(s)` or starting voice/manual input. The
+reported load duration includes this preparation. It is disabled by default. Set independent choices
 in the effective environment or `.env`:
 
 ```dotenv
@@ -44,14 +46,35 @@ is imposed; users must choose model/device settings appropriate to their hardwar
 
 ## Reuse, status and shutdown
 
-`debug status` reports warming/ready/failed/skipped and duration. The public
+`debug status` reports queued/warming/ready/failed/skipped and duration. The public
 `runtime.model_warmup.snapshot()` additionally contains process RSS and, when
 PyTorch CUDA is already initialized, allocated VRAM before/after preparation.
 Unknown measurements are `null`. These process-wide snapshots include concurrent
 activity and do not measure external Ollama/llama.cpp memory. They are observations,
-not per-model attribution. Errors are safe and also printed when warming fails.
+not per-model attribution. With debug disabled, startup shows `Loading components...`
+and preparation failures show a generic fallback notice. Component-specific failure
+details and `[PREWARM]`/`[MODEL]` loading messages require `CODA_DEBUG=true`.
 
-Native commands and unrelated providers continue while warming. A first request
+With `CODA_DEBUG=true`, `[MODEL]` messages show preparation starting, completion,
+failure or cancellation, and elapsed time every five seconds while waiting.
+PocketTTS and faster-whisper also report on-demand cache misses; cached reuse is
+silent. PocketTTS reports weight loading and voice preparation as separate stages.
+LLM requests report waiting for the server and the first server event. That wait
+may include model loading, queueing and prompt processing; it is not proof of a
+cold model. No additional server probes or inference requests are made.
+
+Elapsed time is activity feedback, not a percentage or estimated time remaining.
+The current native loaders do not provide reliable percentage callbacks. Debug
+output contains stage names rather than prompts, model paths or exception bodies.
+
+Failed or skipped startup tasks finish the wait and retain normal provider fallback;
+the loaded message means startup preparation finished, not that every model succeeded.
+Ctrl+C interrupts the startup wait and runs normal cleanup. Native loaders may not
+be interruptible, so startup can otherwise wait until a loader returns. No artificial
+timeout marks an unfinished model ready.
+
+On `debug reload`, preparation remains in the background: native commands and
+unrelated providers continue while warming. A first request
 for the selected LLM waits on its in-flight preparation, with cancellation support.
 PocketTTS and Whisper first use share their normal initialization lock/cache with
 warming: no duplicate local model is constructed. Warm-up failure does not crash

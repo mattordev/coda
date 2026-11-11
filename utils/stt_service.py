@@ -6,6 +6,7 @@ from threading import Lock
 
 import speech_recognition as sr
 import utils.runtime_state as runtime_state
+from utils.model_activity import ModelActivity
 
 try:
     from dotenv import load_dotenv
@@ -186,12 +187,13 @@ def _load_whisper_model(model_name, device, compute_type):
             if cache_key in whisper_model_cache:
                 return whisper_model_cache[cache_key]
             generation = _whisper_generation
-        loaded = WhisperModel(model_name, device=device, compute_type=compute_type)
-        with _whisper_state_lock:
-            if _whisper_closed or generation != _whisper_generation:
-                raise SpeechToTextError("Whisper configuration changed while loading.")
-            whisper_model_cache[cache_key] = loaded
-            return loaded
+        with ModelActivity('STT faster-whisper', 'loading model (download if uncached)'):
+            loaded = WhisperModel(model_name, device=device, compute_type=compute_type)
+            with _whisper_state_lock:
+                if _whisper_closed or generation != _whisper_generation:
+                    raise SpeechToTextError("Whisper configuration changed while loading.")
+                whisper_model_cache[cache_key] = loaded
+                return loaded
 
 
 def _get_failed_whisper_attempt_message(attempt):

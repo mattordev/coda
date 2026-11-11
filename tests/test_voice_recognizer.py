@@ -27,6 +27,139 @@ def _captured_phrase(
 
 
 class VoiceRecognizerTests(unittest.TestCase):
+    def test_stop_matching_requires_complete_wakeword_and_final_exact_action(self):
+        for text, expected in (
+            ('Coda stop.', True),
+            ('CODA was speaking. Coda, cancel!', True),
+            ('Please stop.', False),
+            ('decoda stop', False),
+            ('Coda stop searching and explain it', False),
+            ('Coda explain the stop command', False),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(voice_recognizer._has_wakeword_stop(text, ['coda']), expected)
+        self.assertFalse(voice_recognizer._has_wakeword_stop('stop', ['', ' ']))
+
+    def test_stop_after_earlier_wakeword_cancels_during_playback(self):
+        stop, requests, cancel = Event(), RuntimeQueue(), MagicMock()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        def transcribe(*_args):
+            stop.set()
+            return 'Coda is still speaking. Coda stop.', 'fixture'
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch.object(voice_recognizer, 'listen_for_phrase',
+                          return_value=_captured_phrase(speech_playing=True)), \
+             patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe), \
+             patch.object(voice_recognizer.dashboard_state, 'record_user_message'), \
+             patch('builtins.print'):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests,
+                                 cancel_active_request=cancel, is_speech_playing=lambda: True)
+        cancel.assert_called_once_with()
+        self.assertIsNone(requests.get(timeout=0.01))
+
+    def test_wakeword_stop_is_checked_when_playback_ends_before_transcription(self):
+        stop = Event()
+        requests = RuntimeQueue()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        cancel = MagicMock(return_value='fixture-request')
+        follow_up = FollowUpState()
+        follow_up.open(10)
+        captures = 0
+        def capture(*_args, **kwargs):
+            nonlocal captures
+            captures += 1
+            if captures > 1:
+                return None
+            # A user can finish saying stop at the same time playback ends.
+            # Capture must not truncate/discard that phrase as presumed echo.
+            return CapturedPhrase(object(), VoiceCaptureState(False, True),
+                                  overlapped_capture=True,
+                                  playback_ended=kwargs['end_on_playback_end'])
+        def transcribe(*_args):
+            stop.set()
+            return 'Coda stop.', 'fixture'
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture), \
+             patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe) as stt, \
+             patch.object(voice_recognizer.dashboard_state, 'record_user_message'), \
+             patch('builtins.print'):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests,
+                                 follow_up_state=follow_up, cancel_active_request=cancel,
+                                 is_speech_playing=lambda: False)
+        stt.assert_called_once()
+        cancel.assert_called_once_with()
+        self.assertFalse(follow_up.is_active())
+        self.assertIsNone(requests.get(timeout=0.01))
+
+    def test_finished_playback_echo_skips_stt_and_preserves_fresh_follow_up(self):
+        follow_up, stop = FollowUpState(), Event()
+        requests = RuntimeQueue()
+        calls = 0
+        def capture(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                follow_up.open(10)
+                return CapturedPhrase(object(), VoiceCaptureState(False, True),
+                                      overlapped_capture=True, playback_ended=True)
+            return _captured_phrase(follow_up_active=True)
+        def transcribe(*_args):
+            stop.set()
+            return 'list the docs folder', 'fixture'
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture), \
+             patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe) as stt, \
+             patch.object(voice_recognizer.dashboard_state, 'record_user_message'), \
+             patch('builtins.print'):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests,
+                                 follow_up_state=follow_up, is_speech_playing=lambda: False)
+        stt.assert_called_once()
+        self.assertEqual(requests.get(timeout=0.1).message, 'list the docs folder')
+
+    def test_follow_up_message_updates_inside_idle_capture_without_a_timeout(self):
+        follow_up = FollowUpState()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()), \
+             patch('builtins.print') as printed:
+            def capture(_recognizer, _source, state, **kwargs):
+                follow_up.open(10)
+                kwargs['on_waiting'](state())
+                printed.assert_any_call('Waiting for follow-up', flush=True)
+                return None
+            with patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture):
+                voice_recognizer.run(['coda'], {}, follow_up_state=follow_up)
+
+    def test_listener_announces_state_changes_without_repeating_timeouts(self):
+        recognizer, microphone = MagicMock(), MagicMock()
+        recognizer.energy_threshold = 100
+        follow_up = FollowUpState()
+        attempts = 0
+        def capture(*_args, **_kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                follow_up.open(duration_seconds=10)
+            if attempts < 3:
+                raise voice_recognizer.sr.WaitTimeoutError()
+            return None
+        with patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer), \
+             patch.object(voice_recognizer, '_get_microphone', return_value=microphone), \
+             patch.object(voice_recognizer, 'listen_for_phrase', side_effect=capture), \
+             patch('builtins.print') as printed:
+            voice_recognizer.run(['coda'], {}, follow_up_state=follow_up)
+        lines = [call.args[0] for call in printed.call_args_list]
+        self.assertEqual(lines.count('Listener ready for voice input'), 1)
+        self.assertEqual(lines.count('Waiting for follow-up'), 1)
+
     def test_queues_voice_runtime_request(self):
         request_queue = RuntimeQueue()
 

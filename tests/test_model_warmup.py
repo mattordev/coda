@@ -17,6 +17,26 @@ from ai.providers.prewarm import warm_local
 
 
 class ModelWarmupTests(unittest.TestCase):
+    def test_failed_preparation_hides_component_details_unless_debug_is_enabled(self):
+        for debug in ('false', 'true'):
+            with self.subTest(debug=debug), patch.dict(os.environ, {'CODA_DEBUG': debug}), \
+                 patch('builtins.print') as printed:
+                manager = self.manager()
+                def fail(_cancel):
+                    raise RuntimeError('private exception')
+                manager.start({'tts': fail})
+                self.assertTrue(manager.wait('tts'))
+                # The worker prints its notice just after publishing task completion.
+                for worker in manager._threads:
+                    worker.join(1)
+                lines = [str(call.args[0]) for call in printed.call_args_list]
+                self.assertFalse(any('private exception' in line for line in lines))
+                if debug == 'true':
+                    self.assertTrue(any('[PREWARM] tts:' in line for line in lines))
+                else:
+                    self.assertFalse(any('[MODEL]' in line or '[PREWARM]' in line for line in lines))
+                    self.assertIn('Some components could not be prepared; normal fallbacks remain available.', lines)
+
     def tearDown(self):
         warming.shutdown(0.2)
 

@@ -1,4 +1,5 @@
 import os
+from utils.console import print_line as print
 
 _input_mode = "unknown"
 
