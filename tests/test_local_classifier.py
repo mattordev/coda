@@ -148,6 +148,18 @@ class LocalClassifierStrategyTests(unittest.TestCase):
         self.assertEqual(result.confidence, 0.0)
         self.assertFalse(result.accepted)
 
+    def test_string_null_is_no_action_and_cannot_execute_arguments(self):
+        for value in ('null', ' NULL '):
+            with self.subTest(value=value):
+                response = json.dumps({'intent': value, 'confidence': 1,
+                                       'arguments': {'path': 'fixture'}})
+                result = LocalClassifierStrategy(FakeGenerator(response)).detect(
+                    'a conversational question', self.registry)
+                self.assertFalse(result.matched)
+                self.assertFalse(result.accepted)
+                self.assertEqual(result.confidence, 0.0)
+                self.assertIsNone(result.arguments)
+
     def test_raises_for_provider_error(self):
         strategy = LocalClassifierStrategy(
             FakeGenerator(error="ollama unavailable")
