@@ -18,6 +18,13 @@ ERROR_EXPLANATIONS = {
     "not_a_directory": "That location isn't a directory.",
     "configuration_error": "The tool's configuration is missing or invalid. Please check its configuration.",
     "invalid_arguments": "I couldn't use those details. Please check the required information and try again.",
+    "workspace_ambiguous": "More than one accessible match was found. Please give me a more specific location.",
+    "workspace_required": "Please provide an absolute path or configure a workspace first.",
+    "workspace_not_found": "Sorry, I couldn't find an accessible match. Please provide a more specific location.",
+    "workspace_unsafe": "I couldn't safely access that location. Please provide an authorized absolute path.",
+    "workspace_limit": "There are too many entries to resolve that reference. Please provide an absolute path.",
+    "workspace_changed": "The filesystem settings changed. Please request the action again.",
+    "workspace_unavailable": "I couldn't access that workspace. Please provide an absolute path or check its settings.",
 }
 
 FAILURE_CATEGORIES = {
@@ -31,6 +38,9 @@ FAILURE_CATEGORIES = {
     "configuration_error": "unavailable", "cleanup_timeout": "unavailable",
     "invalid_arguments": "invalid_arguments", "invalid_request": "invalid_arguments",
     "is_a_directory": "invalid_arguments", "not_a_directory": "invalid_arguments",
+    "workspace_ambiguous": "invalid_arguments", "workspace_required": "invalid_arguments",
+    "workspace_unsafe": "invalid_arguments", "workspace_limit": "invalid_arguments",
+    "workspace_changed": "unavailable", "workspace_unavailable": "unavailable",
     "cancelled": "cancelled",
 }
 FAILURE_RESPONSES = {

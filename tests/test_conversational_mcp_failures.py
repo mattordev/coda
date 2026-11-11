@@ -69,3 +69,18 @@ class ConversationalMCPFailureTests(unittest.TestCase):
                                                        ToolError('mcp_tool_error', 'private'))):
             self.assertEqual(error_feedback.failure_category(result), 'unknown_error')
             self.assertIn('something went wrong', prepare_tool_response(result))
+
+    def test_workspace_failures_preserve_actionable_clarification_without_raw_paths(self):
+        for code, wording in (
+            ('workspace_ambiguous', 'more specific'), ('workspace_required', 'absolute path'),
+            ('workspace_not_found', 'more specific'), ('workspace_unsafe', 'authorized'),
+            ('workspace_limit', 'absolute path'), ('workspace_changed', 'again'),
+            ('workspace_unavailable', 'settings'),
+        ):
+            with self.subTest(code=code):
+                result = ToolResult(False, error=ToolError(code, 'InternalException: C:/private/location'))
+                reply = prepare_tool_response(result)
+                self.assertNotEqual(error_feedback.failure_category(result), 'unknown_error')
+                self.assertIn(wording, reply)
+                self.assertNotIn('InternalException', reply)
+                self.assertNotIn('C:/private', reply)
