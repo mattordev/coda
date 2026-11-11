@@ -1,8 +1,9 @@
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
-from ddgs import DDGS
-from ddgs.exceptions import DDGSException
+# Optional bundle dependency; discovery keeps this bundle unavailable until installed.
+from ddgs import DDGS  # pylint: disable=import-error
+from ddgs.exceptions import DDGSException, TimeoutException  # pylint: disable=import-error
 from pathlib import Path
 import argparse
 import json
@@ -16,6 +17,15 @@ def load_config() -> dict:
 
 
 server = MCPServer("coda-websearch", log_level="ERROR")
+
+
+def search_failure(code: str, message: str) -> CallToolResult:
+    """Keep a machine-readable reason and diagnostic evidence in the MCP result."""
+    return CallToolResult(
+        content=[TextContent(type="text", text=message)],
+        structuredContent={"kind": "web_search", "error": {"code": code, "message": message}},
+        isError=True,
+    )
 
 
 @server.tool(structured_output=False)
@@ -35,12 +45,7 @@ def search_web(query: str, max_results: int | None = None) -> CallToolResult:
         max_results = max(1, min(max_results, configured_max))
 
     if not query.strip():
-        return CallToolResult(
-            content=[
-                TextContent(type="text", text="Search query cannot be empty.")
-            ],
-            isError=True,
-        )
+        return search_failure("invalid_arguments", "Search query cannot be empty.")
 
     try:
         with DDGS(timeout=timeout) as client:
@@ -48,16 +53,15 @@ def search_web(query: str, max_results: int | None = None) -> CallToolResult:
                 query,
                 max_results=max_results,
             )
+    except TimeoutException as error:
+        return search_failure("timeout", f"DDGS search failed: {type(error).__name__}: {error}")
     except DDGSException as error:
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=f"Web search failed: {type(error).__name__}: {error}"
-                )
-            ],
-            isError=True,
-        )
+        # The base exception may mean an empty response, a blocked backend or
+        # unusable parsed results. It does not establish that no matches exist.
+        return search_failure("unavailable", f"DDGS search failed: {type(error).__name__}: {error}")
+
+    if not results:
+        return search_failure("no_results", "DDGS returned no usable search results.")
 
     pages = [
         {

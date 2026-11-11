@@ -2,8 +2,10 @@
 
 MCP results have separate data, visual and spoken representations. The full
 `ToolResult.data` is retained on `CommandResult.tool_result`; presentation never
-mutates it. Conversation history continues to use `prepare_tool_context`, with
-its existing local/cloud privacy rules and size limits.
+mutates it. Successful conversation history continues to use `prepare_tool_context`,
+with its existing local/cloud privacy rules and size limits. Failed exchanges
+put only their category and fixed explanation into model history; the full
+original result remains available through explicit diagnostic inspection.
 
 The execution event also carries the full `tool_result` (excluded from its
 repr). The last eight complete results are retained as local snapshots until
@@ -38,7 +40,8 @@ Servers can supply a structured error in a standard MCP error result:
 }
 ```
 
-Known codes include `permission_denied`, `not_found`, `not_a_directory`,
+Known codes include `no_results`, `unavailable`, `timeout`, `cancelled`,
+`permission_denied`, `not_found`, `not_a_directory`,
 `configuration_error`, `invalid_arguments`, `outside_allowed_roots` and
 `blocked_path`. Speech uses fixed explanations for these server-reported codes;
 it does not read the supplied message or private paths aloud. Explicit typed
@@ -53,11 +56,30 @@ File-read results additionally recognize `file_not_found`, `is_a_directory`,
 speaking supplied filenames, paths or arbitrary server prose. Unclassified OS
 failures retain the honest unknown-cause fallback and detailed visual feedback.
 
-Short plain-language errors can be quoted as a server report (for example,
-"The tool reported: The printer is offline."). Messages containing paths,
-tracebacks, credential terms, recognized secrets or instruction-like wording
-remain visual only. This is a conservative deterministic filter, not a semantic
-verification of a server's claims.
+Failure messages are never quoted as normal replies, even when they appear to
+be short plain language. No LLM call is needed to explain a failure. The existing
+formatter maps known codes into `no_results`, `not_found`, `permission_denied`,
+`timeout`, `unavailable`, `invalid_arguments`, `cancelled`, or `unknown_error`.
+Existing filesystem-specific explanations remain available without echoing paths.
+Host transport codes take precedence over server claims. Standard SDK invalid
+parameters errors are normalized as `invalid_arguments`; unknown or malformed
+server payloads use an honest generic explanation. No server is required to
+implement the optional structured error convention.
+
+Normal `response_text` and failure `display_text` carry the same conversational
+reply to the terminal, speech queue and dashboard. Debug output, explicit
+`show tool output` / `show full tool output`, and local failure logs retain the
+sanitized technical evidence and failure category. Cancellation still suppresses
+late replies when the request cancellation event is set.
+
+The web-search integration uses a `web_search` kind and an optional structured
+error code without changing `search_web(query, max_results=None)`. A typed DDGS
+timeout maps to `timeout`. A returned empty list maps to `no_results`; a base
+`DDGSException` maps to `unavailable`, including the message `No results found.`.
+In the inspected DDGS 9.16.1 implementation, that message does not prove that
+the provider completed a successful search with no matches. Both cases therefore
+say "Sorry, I couldn't get any results for that search." Detailed exception
+evidence is diagnostic-only. This adds no retry, backend selection or failover.
 
 If speech cannot explain a failure, request `show tool output` and inspect the
 local log. Missing server details remain unknown; check the server's own
