@@ -109,7 +109,8 @@ class ToolInterpretationTests(InterpretationTestCase):
             {'name': f'file{i}.py', 'type': 'file'} for i in range(100)]}})
         self.assertIn('100 files', service.interpret_result(listing, 'What is in this folder?').text)
         error = ToolResult(False, {'private': 'do not read'}, ToolError('timeout', 'The operation timed out.'))
-        self.assertEqual(service.interpret_result(error, 'Explain the failure').text, 'The operation timed out.')
+        self.assertEqual(service.interpret_result(error, 'Explain the failure').text,
+                         "That took a little too long, so I couldn't finish the request.")
         self.generate.assert_not_called()
 
     def test_provider_failure_and_empty_response_follow_existing_order(self):
