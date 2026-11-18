@@ -53,7 +53,7 @@ class ToolPresentationTests(unittest.TestCase):
 
     def test_errors_use_safe_message_instead_of_failure_payload(self):
         result = ToolResult(False, {"private":"do-not-read"}, ToolError("timeout","The operation timed out."))
-        self.assertEqual(prepare_tool_response(result), "The operation timed out.")
+        self.assertEqual(prepare_tool_response(result), "That took a little too long, so I couldn't finish the request.")
 
     def test_invalid_limits_are_rejected(self):
         for limit in (True, 0, -1, 1.5):

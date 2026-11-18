@@ -1,0 +1,2 @@
+# Optional bundle dependency; install into Coda's active Python environment.
+ddgs==9.16.1

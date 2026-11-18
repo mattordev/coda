@@ -24,6 +24,16 @@ SERVER = Path(__file__).with_name("mcp_stdio_server.py")
 
 
 class MCPSDKBoundaryTests(unittest.TestCase):
+    def test_standard_invalid_parameters_remain_structured_without_private_sdk_message(self):
+        from ai.tools.error_feedback import failure_category
+        definition = LocalServerDefinition('test', 'unused', trusted=True)
+        error = sdk_boundary.MCPError(sdk_boundary.types.INVALID_PARAMS, 'private argument evidence')
+        with patch.object(sdk_boundary.anyio, 'run', side_effect=ExceptionGroup('SDK group', [error])):
+            result = sdk_boundary.SDKStdioTransport().request(definition, 'discover')
+        self.assertEqual(result.error.code, 'invalid_arguments')
+        self.assertEqual(failure_category(result), 'invalid_arguments')
+        self.assertNotIn('private argument evidence', repr(result))
+
     def test_sdk_timeout_is_normalized_even_before_polling_deadline(self):
         definition = LocalServerDefinition("test", "unused", trusted=True)
 

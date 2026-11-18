@@ -1,0 +1,14 @@
+{
+  "id": "websearch",
+  "transport": "stdio",
+  "bundled_server": "websearch",
+  "env": {
+    "SEARXNG_BASE_URL": "SEARXNG_BASE_URL"
+  },
+  "enabled": false,
+  "trusted": false,
+  "allowed_tools": [],
+  "session_mode": "operation",
+  "startup_mode": "lazy",
+  "timeout_seconds": 30
+}

@@ -252,7 +252,8 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
         print(f"[MCP OUTPUT]\n{display}")
     return CommandResult(
         handled=True, response_text=response, used_llm=interpreted.used_llm, open_follow_up=True,
-        command_matches=(request.intent.name,), tool_result=outcome, display_text=display,
+        command_matches=(request.intent.name,), tool_result=outcome,
+        display_text=display if outcome.success else response,
     )
 
 
@@ -287,7 +288,8 @@ def _retained_tool_reply(message, *, cancel_event=None, debug=False):
     if debug:
         print("[MCP CONTEXT] Answering from the retained tool result; no tool call.")
     return CommandResult(True, response_text=interpreted.text, used_llm=interpreted.used_llm,
-                         open_follow_up=True, tool_result=result, display_text=prepare_tool_display(result))
+                         open_follow_up=True, tool_result=result,
+                         display_text=prepare_tool_display(result) if result.success else interpreted.text)
 
 
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):

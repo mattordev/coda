@@ -13,6 +13,7 @@ mcp==2.3.0
 httpx2==2.13.1
 num2words==0.5.14
 openai==2.32.0
+opentelemetry-api==1.45.2
 pocket-tts==3.0.2
 psutil==7.2.2
 PyAudio==0.2.14; sys_platform == "linux" or sys_platform == "win32"

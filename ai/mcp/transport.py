@@ -34,6 +34,13 @@ def _is_sdk_timeout(error: BaseException) -> bool:
     )
 
 
+def _is_sdk_invalid_arguments(error: BaseException) -> bool:
+    """Recognize standard JSON-RPC invalid parameters, including SDK task groups."""
+    if isinstance(error, BaseExceptionGroup):
+        return any(_is_sdk_invalid_arguments(child) for child in error.exceptions)
+    return isinstance(error, MCPError) and error.code == types.INVALID_PARAMS
+
+
 @contextmanager
 def _private_sdk_diagnostics():
     """Suppress SDK raw exception diagnostics on this operation's thread."""
@@ -242,6 +249,8 @@ class SDKStdioTransport:
             remote_code = _remote_error_code(error)
             if remote_code:
                 return failure(remote_code, "The remote MCP request was rejected.")
+            if _is_sdk_invalid_arguments(error):
+                return failure("invalid_arguments", "The MCP server rejected the tool arguments.")
             if reason is None and _is_sdk_timeout(error):
                 reason = "timeout"
             if reason is None:
