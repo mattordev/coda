@@ -60,7 +60,11 @@ The active roadmap is maintained in the
 - [v1.5.1 - Bundled First-Party MCP Servers](https://github.com/mattordev/coda/milestone/12)
 - [v1.5.2 - LLM Workload Optimisation](https://github.com/mattordev/coda/milestone/13)
 - [v1.5.3 - Incremental Voice Pipeline](https://github.com/mattordev/coda/milestone/14)
+- v1.5.4 - Streaming & Runtime Polish
+- [v1.5.5 - Websearch MCP & Conversational MCP Errors](https://github.com/mattordev/coda/milestone/16)
 
+See the [v1.5.5 release notes](docs/release-notes-v1.5.5.md) for opt-in web search,
+SearXNG configuration, DDGS fallback and conversational tool failures.
 See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
 runtime polish, configuration and validation guidance.
 See the [v1.5.1 release notes](docs/release-notes-v1.5.1.md) for setup changes,
