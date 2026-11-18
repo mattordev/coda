@@ -20,6 +20,14 @@ class FakeCommand:
 
 
 class IntentRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        # Native routing tests must not inherit another test's MCP catalog or
+        # discover the developer's enabled integrations on an unmatched message.
+        for name in ("_mcp_catalog", "_pending_confirmation", "_intent_registry", "_intent_router"):
+            guard = patch.object(command_runtime, name, None)
+            guard.start()
+            self.addCleanup(guard.stop)
+
     @patch.object(command_runtime, "route_request")
     def test_prefix_intent_dispatches_without_llm_fallback(self, route_request):
         command = FakeCommand(

@@ -166,8 +166,10 @@ onnxruntime==1.24.4
     # via faster-whisper
 openai==2.32.0
     # via -r requirements.in
-opentelemetry-api==1.45.1
-    # via mcp
+opentelemetry-api==1.45.2
+    # via
+    #   -r requirements.in
+    #   mcp
 packaging==24.0
     # via
     #   huggingface-hub

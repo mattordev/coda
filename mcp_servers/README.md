@@ -17,7 +17,13 @@ path are resolved by Coda, independent of cwd. This is an explicit selection,
 not automatic discovery or enablement. Trust and exact tool permissions still
 default to deny. See the [filesystem setup](../integrations/coda-filesystem/README.md)
 and [feedback behavior](../docs/mcp-feedback.md).
-# Bundled lifecycle
+## Web search
+
+`websearch.json.example` is an opt-in template for SearXNG search with DDGS as
+backup. See [web-search setup](../integrations/coda-websearch/README.md) for
+optional dependencies, instance configuration and explicit permissions.
+
+## Bundled lifecycle
 
 See [bundled MCP setup, schemas and migration](../docs/mcp-bundled.md).
 Bundled definitions require `enabled: true` independently of trust and tool permission.
