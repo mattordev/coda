@@ -25,6 +25,8 @@ It builds on the v1.5.4 runtime and streaming improvements.
 - Existing successful-result interpretation and actionable filesystem workspace
   clarification remain in place. Search does not change tool trust, allowlists,
   confirmation, privacy policy or cancellation permissions.
+- Patch OpenTelemetry API to 1.45.2 for the reported traceparent-parsing denial
+  of service advisory. No provider or telemetry configuration change is required.
 
 The shared failure handling was implemented in
 [#228](https://github.com/mattordev/coda/pull/228). Web-search delivery is tracked
