@@ -242,7 +242,11 @@ class LocalMCPManager:
                 return failure("confirmation_required", "The MCP action requires confirmation.")
             if decision not in ("allow", "confirm"):
                 return failure("permission_denied", "The MCP tool is not permitted.")
-        if name in definition.confirm_tools and not confirmed:
+        filesystem_creation = (
+            getattr(definition, "bundled_server", None) == "filesystem"
+            and name in {"create_file", "create_directory"}
+        )
+        if (name in definition.confirm_tools or filesystem_creation) and not confirmed:
             return failure("confirmation_required", "The MCP action requires confirmation.")
         return None
 
