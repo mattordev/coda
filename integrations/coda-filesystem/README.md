@@ -240,3 +240,32 @@ The cooperative deadline cannot interrupt an individual blocked filesystem call;
 the host transport timeout/cancellation remains the outer bound. Existing
 application-level filesystem race limitations still apply. No new dependency or
 private configuration migration is required.
+
+## Conversational filesystem follow-ups
+
+After listing a folder, CODA gives counts and can present names without another
+filesystem call. For example, say `show filenames`, `show recent files`, or
+`find Markdown files`. Filtering uses the retained immediate-folder listing;
+it does not inspect file contents or recurse. After a filename search, the same
+presentation requests use only its returned matches and retain partiality.
+
+`search that folder for Markdown files` performs a fresh recursive filename
+search through the normal dispatcher. `read new-report.md`, `read the newest
+report`, or `read that one` performs one normal read, only when the retained
+observation identifies one file. "Report" selection matches filenames containing
+that word; it does not classify document contents. Duplicate names, tied newest
+timestamps, missing timestamps and ambiguous pronouns require clarification.
+A partial listing cannot establish the newest file in the whole folder.
+
+The originating absolute directory and invocation are retained by the host,
+separately from untrusted tool data. This focus expires after two minutes and is
+invalidated by unrelated conversation, cancellation, reset, reconfiguration or
+read-policy changes. A third-party result with a similar shape cannot grant
+filesystem follow-up authority. Every fresh read/search rechecks current tool
+permissions and server path policy; retained names never grant access.
+
+Partial reads use plain-language scope notices; `read the next part` uses the
+server's returned byte position and performs one authorised read. Metadata and
+creation replies state observed facts concisely. `show tool output` retains the
+technical details and original read-range header. Asking to summarize an excerpt
+still uses the existing privacy-aware interpretation policy.

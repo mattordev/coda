@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from copy import deepcopy
 from enum import Enum
 import re
@@ -14,7 +14,7 @@ from ai.intents.models import Intent, IntentParameter, IntentRequest
 from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
 from ai.mcp.remote import RemoteServerDefinition
-from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError
+from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError, _configuration
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -221,6 +221,21 @@ class LocalMCPManager:
             self._servers[server_id].state = ServerState.AVAILABLE
         return ToolResult(success=True, data=tuple(deepcopy(tool[2]) for tool in pending.values()))
 
+    def filesystem_focus_token(self, server_id):
+        """Bind ephemeral focus to this manager and the current read policy."""
+        with self._metadata_lock:
+            runtime = self._servers.get(server_id)
+            if self._closed or runtime is None or getattr(runtime.definition, 'bundled_server', None) != 'filesystem':
+                return None
+            definition, revision = runtime.definition, runtime.configuration_revision
+        if not definition.enabled or not definition.trusted:
+            return None
+        try:
+            policy = _configuration(definition)
+        except WorkspaceReferenceError:
+            return None
+        return id(self), revision, repr(definition), repr(policy)
+
     def executor(self, intent_name: str, *, cancel_event: Event | None = None) -> MCPToolExecutor:
         """Resolve a discovered capability without starting a process."""
         with self._metadata_lock:
@@ -348,11 +363,19 @@ class MCPToolExecutor:
                 arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
             except WorkspaceReferenceError as error:
                 return failure(error.code, str(error))
-            return self._manager._request(
+            token = self._manager.filesystem_focus_token(self._server_id)
+            outcome = self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
             )
+            if outcome.success and token is not None and token == self._manager.filesystem_focus_token(self._server_id):
+                outcome = replace(outcome, host_context={
+                    'server': self._server_id, 'tool': self._tool_name,
+                    'arguments': deepcopy(arguments), 'token': token,
+                    'observed_at': time.monotonic(),
+                })
+            return outcome
 
         adapter = ExternalToolAdapter(
             self._intent,

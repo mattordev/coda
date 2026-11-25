@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class ToolError:
@@ -31,6 +31,8 @@ class ToolResult:
     success: bool
     data: object | None = None
     error: ToolError | None = None
+    # Host provenance never comes from protocol data or enters model context.
+    host_context: dict | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Validate the result envelope and reject contradictory outcomes."""
