@@ -176,6 +176,12 @@ archive-environment tests are skipped where unavailable. It is not evidence for
 Linux, live LLM tool selection, acoustic voice interaction or the newly planned
 capabilities. The previous #43 full-suite count is historical evidence only.
 
+Current full regression validation subsequently completed on the same checkout:
+**1,055 tests, OK (11 skipped), 160.992 seconds**. The first quiet attempt was
+interrupted after no visible progress; a verbose diagnostic rerun completed
+successfully without changing or removing tests. Changed-Python errors-only
+Pylint also passed. Neither result substitutes for new-branch remote CI.
+
 The configured llama.cpp-compatible server responds to its model catalogue
 request (seven advertised entries); that establishes service reachability only,
 not successful generation or tool composition. The configured Ollama endpoint
