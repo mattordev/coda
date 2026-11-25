@@ -12,6 +12,7 @@ import stat
 from datetime import datetime, timezone
 import codecs
 import os
+import re
 from time import monotonic
 from collections import deque
 
@@ -577,6 +578,147 @@ def search_files(path: str, pattern: str, max_depth: int = 5,
         "kind": "filesystem_search", "root": str(root), "pattern": pattern, "matches": matches,
         "partial": bool(reasons), "truncated": bool(reasons), "limits_reached": reasons,
         "entries_examined": examined,
+    })
+
+
+def _content_bytes(path, root, config, budget):
+    """Check candidates again before opening; refuse non-regular or replaced files."""
+    check_if_path_is_allowed(config, str(path))
+    check_if_path_is_blocked(config, str(path))
+    if not path.resolve().is_relative_to(root):
+        raise FilesystemPermissionError('outside_allowed_roots', 'The search candidate left its root.')
+    for ancestor in (path, *path.parents):
+        metadata = ancestor.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+            raise FilesystemPermissionError('unsafe_path', 'A search candidate became a link or reparse point.')
+        if ancestor == root:
+            break
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        return None, 'non_regular_file'
+    if before.st_size > budget:
+        return None, 'file_byte_limit'
+    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, 'rb') as source:
+        opened = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            return None, 'changed_file'
+        data = source.read(budget + 1)
+    return (data, 'file_byte_limit') if len(data) > budget else (data, None)
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+))
+def search_content(path: str, query: str, pattern: str = '*', case_sensitive: bool = False,
+                   max_depth: int = 5, max_entries: int = 4096, max_files: int = 128,
+                   max_results: int = 50, max_file_bytes: int = 65536,
+                   max_total_bytes: int = 1048576) -> CallToolResult:
+    """Search literal single-line text in authorised UTF-8 files, never shell/regex.
+
+    Return one matching snippet per line with 1-based line/column. Filename
+    traversal is bounded independently; at most 200 candidate paths are retained.
+    Skip oversized, NUL-containing and non-UTF-8 files and disclose incompleteness.
+    Per-file bytes cap at 1 MiB, total at 8 MiB, matches at 200, snippets at 240
+    characters, output at 32 KiB and the whole operation at five cooperative seconds.
+    """
+    try:
+        if (not isinstance(query, str) or not query.strip() or len(query) > 256
+                or any(ord(char) < 32 for char in query) or type(case_sensitive) is not bool):
+            raise FilesystemPermissionError('invalid_arguments', 'Supply literal single-line text of 1 to 256 characters and a boolean case_sensitive flag.')
+        try:
+            query.encode('utf-8')
+        except UnicodeError as error:
+            raise FilesystemPermissionError('invalid_arguments', 'The query must be valid UTF-8 text.') from error
+        for value, upper in ((max_files, 200), (max_results, 200),
+                             (max_file_bytes, MAX_READ_BYTES), (max_total_bytes, 8 * MAX_READ_BYTES)):
+            if type(value) is not int or not 1 <= value <= upper:
+                raise FilesystemPermissionError('invalid_arguments', 'Content search limits must be integers within the documented bounds.')
+        deadline = monotonic() + SEARCH_SECONDS
+        config = load_config()
+        names = search_files(path, pattern, max_depth=max_depth, max_entries=max_entries, max_results=200)
+        if names.is_error:
+            return names
+        listing = dict(names.structured_content or {})
+        if not listing:
+            raise FilesystemPermissionError('invalid_result', 'Filename traversal returned no structured observations.')
+        root = Path(listing['root'])
+        reasons = {'traversal_' + reason for reason in listing['limits_reached']}
+        matches, scanned, read_bytes, output_chars = [], 0, 0, 0
+        expression = re.compile(re.escape(query), 0 if case_sensitive else re.IGNORECASE)
+        for candidate in listing['matches']:
+            _search_policy(config, root)
+            if monotonic() >= deadline:
+                reasons.add('time_limit')
+                break
+            if scanned >= max_files:
+                reasons.add('file_limit')
+                break
+            remaining = max_total_bytes - read_bytes
+            if remaining <= 0:
+                reasons.add('total_byte_limit')
+                break
+            target = Path(candidate['path'])
+            scanned += 1
+            try:
+                data, reason = _content_bytes(target, root, config, min(max_file_bytes, remaining))
+                if data is not None:
+                    read_bytes += len(data)
+                if reason:
+                    reasons.add('total_byte_limit' if reason == 'file_byte_limit' and remaining < max_file_bytes else reason)
+                    continue
+                if b'\0' in data:
+                    reasons.add('binary_file')
+                    continue
+                text = data.decode('utf-8-sig')
+            except UnicodeDecodeError:
+                reasons.add('invalid_encoding')
+                continue
+            except FilesystemPermissionError:
+                reasons.add('unavailable_file')
+                continue
+            except (OSError, RuntimeError):
+                reasons.add('unavailable_file')
+                continue
+            for line_number, line in enumerate(text.splitlines(), 1):
+                if monotonic() >= deadline:
+                    reasons.add('time_limit')
+                    break
+                found = expression.search(line)
+                if found is None:
+                    continue
+                start = max(0, found.start() - 80)
+                snippet = line[start:start + 240]
+                match = {'path': str(target), 'name': target.name, 'line': line_number,
+                         'column': found.start() + 1, 'snippet': snippet,
+                         'snippet_start_column': start + 1, 'snippet_truncated': start > 0 or start + len(snippet) < len(line)}
+                cost = len(json.dumps(match, ensure_ascii=True))
+                if output_chars + cost > SEARCH_OUTPUT_CHARS:
+                    reasons.add('output_limit')
+                    break
+                matches.append(match)
+                output_chars += cost
+                if len(matches) >= max_results:
+                    reasons.add('result_limit')
+                    break
+            if reasons.intersection({'time_limit', 'output_limit', 'result_limit'}):
+                break
+        _search_policy(config, root)
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except (OSError, ValueError, RuntimeError, TypeError):
+        return error_result('os_error', 'The content search could not complete.')
+    text = f'Returned {len(matches)} matching lines from {scanned} examined files.'
+    if reasons:
+        text += ' This is an incomplete content search: ' + ', '.join(sorted(reasons)) + '.'
+    if matches:
+        text += '\n' + '\n'.join(f'{match["path"]}:{match["line"]}:{match["column"]}: {match["snippet"]}' for match in matches)
+    return CallToolResult(content=[TextContent(type='text', text=text)], structuredContent={
+        'kind': 'filesystem_content_search', 'root': str(root), 'query': query, 'pattern': pattern,
+        'matches': matches, 'files_examined': scanned, 'bytes_read': read_bytes,
+        'entries_examined': listing['entries_examined'], 'partial': bool(reasons),
+        'truncated': bool(reasons), 'limits_reached': sorted(reasons),
     })
 
 

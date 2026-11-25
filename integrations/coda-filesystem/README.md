@@ -269,3 +269,55 @@ server's returned byte position and performs one authorised read. Metadata and
 creation replies state observed facts concisely. `show tool output` retains the
 technical details and original read-range header. Asking to summarize an excerpt
 still uses the existing privacy-aware interpretation policy.
+
+## Bounded content search
+
+`search_content(path, query)` searches literal single-line text in an explicitly
+authorised directory. Enable `search_content` in the exact tool allowlist;
+existing read grants and discovery do not enable it automatically.
+
+```text
+mcp.filesystem.search_content {"path":"D:/Projects","query":"release notes","pattern":"*.md"}
+mcp.filesystem.search_content {"path":"D:/Projects","query":"TODO","case_sensitive":true,"max_results":20}
+```
+
+Matching is case-insensitive by default; the query is escaped as literal text,
+so punctuation never becomes a regular expression or shell command. Results
+contain one match per matching line, with its absolute path, filename, one-based
+line and character column, and a snippet of at most 240 characters. The snippet's
+starting column and truncation flag identify omitted text. Repeated occurrences
+on the same line contribute one result. UTF-8 and UTF-8 with a BOM are supported;
+NUL-containing, non-UTF-8 and oversized files are skipped and disclosed.
+
+| Limit | Default | Maximum |
+| --- | --- | --- |
+| Examined candidate files (`max_files`) | 128 | 200 |
+| Matching lines (`max_results`) | 50 | 200 |
+| Bytes per file (`max_file_bytes`) | 65,536 | 1,048,576 |
+| Total read bytes (`max_total_bytes`) | 1,048,576 | 8,388,608 |
+
+Filename traversal reuses `max_depth` and `max_entries` from `search_files`,
+retains at most 200 candidate paths and has its own bounded metadata output.
+The complete operation has a five-second cooperative deadline; match metadata
+is capped at 32 KiB of serialised ASCII. A file growing during inspection may
+consume one extra probe byte beyond the remaining byte budget, then scanning
+stops. The host timeout/cancellation bounds blocked filesystem operations and
+retires the owned server; the cooperative deadline cannot interrupt one such
+operation itself.
+
+`files_examined`, `bytes_read`, `entries_examined`, `partial`, `truncated` and
+`limits_reached` describe the observation. Traversal limits use a `traversal_`
+prefix. Skipped encodings/binary/large files or any exhausted limit make a scan
+incomplete; no returned text is not a claim that the entire tree has no matches.
+Matching paths and snippets remain available through `show tool output`; normal
+speech gives a short factual result with the incomplete-scan notice.
+
+After a listing or filename search, `find every file containing "release notes"
+in that folder` performs a new content search through current tool and path
+permissions. It does not mistake retained filenames for searched contents.
+Policy is rechecked before each candidate and at completion; a changed policy
+discards collected matches. Links, junctions, reparse points and non-regular
+files are excluded and candidates are checked again before opening. The
+existing application-level filesystem race limitation still applies; this is
+not an OS sandbox or a consistent snapshot of files being modified elsewhere.
+No new dependency or private configuration migration is required.
