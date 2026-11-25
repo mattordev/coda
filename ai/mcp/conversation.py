@@ -20,6 +20,16 @@ class FollowUp:
     result: object = None
 
 
+def focus_is_current(result, manager):
+    """Validate focus before either explaining it or using it to select an action."""
+    if result is None or not result.host_context:
+        return False
+    context = result.host_context
+    token = manager.filesystem_focus_token(context['server'])
+    return (token is not None and token == context['token']
+            and 0 <= time.monotonic() - context['observed_at'] < FOCUS_SECONDS)
+
+
 def _safe_child(root, name):
     if (not isinstance(name, str) or not name or name in ('.', '..')
             or any(char in name for char in '/\\:') or any(ord(char) < 32 for char in name)):
@@ -50,9 +60,7 @@ def plan_follow_up(message, result, manager):
             return FollowUp(reply=MISSING)
         return None
     context = result.host_context
-    token = manager.filesystem_focus_token(context['server'])
-    if (token is None or token != context['token']
-            or not 0 <= time.monotonic() - context['observed_at'] < FOCUS_SECONDS):
+    if not focus_is_current(result, manager):
         return FollowUp(reply=MISSING)
     payload = _payload(result.data)
     if not isinstance(payload, dict):

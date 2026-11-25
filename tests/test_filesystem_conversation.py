@@ -122,6 +122,11 @@ class FilesystemConversationTests(unittest.TestCase):
         self.assertEqual(len(self.calls), count)
         self.assertIsNone(history.get_tool_follow_up_context())
 
+    def test_expired_file_focus_also_blocks_implicit_interpretation(self):
+        self.command('read_file', path=str(self.root / 'new-report.md'))
+        with patch('ai.mcp.conversation.time.monotonic', return_value=10**12):
+            self.assertIn('Which file', runtime.run('what does that file say?', {}).response_text)
+
     def test_grant_revocation_is_rechecked_by_dispatcher(self):
         self.listing()
         # Configuration revision changes invalidate focus; this also prevents a fresh invocation.

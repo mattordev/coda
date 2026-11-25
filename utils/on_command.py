@@ -15,7 +15,7 @@ from ai.llm_router.core import route_request
 from ai.request_context import request_context
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
-from ai.mcp.conversation import plan_follow_up, MISSING
+from ai.mcp.conversation import plan_follow_up, focus_is_current, MISSING
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_display, prepare_full_tool_output
 from ai.tools.diagnostics import record_tool_failure
@@ -310,6 +310,9 @@ def _filesystem_follow_up(message, commands, *, cancel_event=None, debug=False):
     if _mcp_catalog is None:
         return None
     previous = llm_service.get_tool_follow_up_context()
+    if previous is not None and previous.host_context and not focus_is_current(previous, _mcp_catalog.manager):
+        llm_service.clear_tool_focus()
+        previous = None
     plan = plan_follow_up(message, previous, _mcp_catalog.manager)
     if plan is None:
         return None
