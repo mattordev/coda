@@ -221,6 +221,11 @@ def _dispatch_intent(
                 kind = 'file' if request.intent.name.endswith('.create_file') else 'folder'
                 confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
             parts = request.intent.name.split('.', 2)
+            if (len(parts) == 3 and parts[2] == 'copy_path'
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                source = sanitize_text(str(arguments.get('source', '')))
+                destination = sanitize_text(str(arguments.get('destination', '')))
+                confirmation = f'Copy "{source}" to the new location "{destination}"? Say confirm or cancel.'
             if (len(parts) == 3 and parts[2] in ('edit_file', 'append_file')
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
                 target = sanitize_text(str(arguments.get('path', '')))

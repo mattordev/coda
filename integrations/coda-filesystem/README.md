@@ -387,3 +387,58 @@ Locks are never automatically stolen and mutations are never automatically
 replayed. Successful changes normally remove owned recovery files; if cleanup
 fails, the success reply explicitly reports retained recovery paths. Restarts
 do not erase this evidence. No existing private grant is expanded automatically.
+
+## Copying files and directory trees
+
+Enable `copy_path` separately in `allowed_tools`. CODA requires a one-use
+confirmation naming both absolute paths. Every source entry needs read
+authority and every destination/staging entry needs independent write authority.
+The destination must not exist, including an empty directory; its parent must
+already exist. A directory cannot be copied into itself or a descendant.
+
+```text
+mcp.filesystem.copy_path {"source":"D:/Projects/notes","destination":"D:/Scratch/notes-copy"}
+mcp.filesystem.copy_path {"source":"D:/Projects/archive.zip","destination":"D:/Scratch/archive-copy.zip","max_bytes":67108864}
+```
+
+Copying preserves file bytes, including binary data, and the directory hierarchy.
+It creates new entries using destination/creation permissions; original
+ownership, ACLs, timestamps and executable bits are not implicitly cloned.
+Directories are created privately on POSIX. Source data is never removed or
+returned to the model as part of copying.
+
+| Limit | Default | Allowed maximum |
+| --- | --- | --- |
+| Entries including the source root (`max_entries`) | 1,024 | 4,096 |
+| Total file bytes (`max_bytes`) | 33,554,432 | 134,217,728 |
+| Nested directory levels (`max_depth`) | 8 | 16; zero allows immediate files |
+
+Preflight authorises the entire bounded tree before staging. Relative path
+metadata is capped at 65,536 characters, and the whole operation has a
+five-second cooperative deadline. Linked/reparse ancestors or descendants,
+blocked entries, special files, unsafe names and active/interrupted text-folder
+locks cause refusal. Blocked descendant filenames are not exposed in errors.
+
+Files stream in chunks of at most 64 KiB; actual consumed bytes remain within
+the total byte budget plus one overflow probe byte. Current configuration,
+source identity and relevant metadata are rechecked during copying and before
+publication. A changed source or permission policy refuses publication. These
+are per-operation checks, not an atomic snapshot of a tree being modified by
+another process.
+
+Data is staged beside the destination under an exclusive `.coda-copy-*` name,
+then published without overwriting a competing destination. Windows uses
+[its no-replace rename behaviour](https://docs.python.org/3.11/library/os.html#os.rename);
+Linux uses [renameat2 with RENAME_NOREPLACE](https://man7.org/linux/man-pages/man2/rename.2.html).
+Unsupported platforms, C libraries or filesystems fail rather than falling back
+to an overwrite-capable rename. Network filesystems may have uncertain outcomes
+after interrupted rename requests; inspect the destination before retrying.
+
+Preflight refusals create no copy data. Errors after staging retain the staging
+path and disclose whether publication was attempted; there is no recursive
+cleanup of uncertain paths. Host cancellation/timeout reaps the owned server
+but can leave partial staging before a result is returned. Inspect the
+authorised destination parent for `.coda-copy-*` evidence. A later explicit
+copy does not remove earlier recovery data. A blocking filesystem call remains
+bounded by the host transport timeout, not the cooperative deadline alone.
+The audit's existing filesystem race limitations still apply.

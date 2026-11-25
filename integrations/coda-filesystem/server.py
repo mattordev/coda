@@ -1,4 +1,4 @@
-"""Standalone filesystem MCP with separate, explicit read and create permissions."""
+"""Standalone filesystem MCP with separate, explicit read and write permissions."""
 
 import argparse
 from mcp.server import MCPServer
@@ -15,6 +15,7 @@ import os
 import re
 import hashlib
 import uuid
+import sys
 from time import monotonic
 from collections import deque
 
@@ -231,10 +232,13 @@ def create_directory(path: str) -> CallToolResult:
     return creation_result(target, "directory")
 
 
-def creation_path(path: str, *, allow_existing=False) -> Path:
-    """Authorize a new entry without borrowing any of the read root grants."""
+def _concrete_path(path):
     if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
-        raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute creation path.")
+        raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute concrete path.")
+    try:
+        path.encode('utf-8')
+    except UnicodeError as error:
+        raise FilesystemPermissionError('invalid_arguments', 'Paths must contain valid UTF-8 text.') from error
     target = Path(path)
     # Reject ambiguous Windows names on both supported platforms, including
     # alternate data streams, device names and dot/space normalization tricks.
@@ -242,6 +246,12 @@ def creation_path(path: str, *, allow_existing=False) -> Path:
            or PureWindowsPath(part).is_reserved() or any(char in part for char in '<>:"|?*')
            or any(ord(char) < 32 for char in part) for part in target.parts[1:]):
         raise FilesystemPermissionError("invalid_arguments", "Please supply a concrete path without traversal or reserved names.")
+    return target
+
+
+def creation_path(path: str, *, allow_existing=False) -> Path:
+    """Authorize an entry without borrowing any of the read root grants."""
+    target = _concrete_path(path)
     config = load_config()
     write = config.get("write", {})
     if not isinstance(write, dict) or type(write.get("enabled", False)) is not bool:
@@ -953,6 +963,221 @@ def append_file(path: str, content: str, expected_sha256: str) -> CallToolResult
     staged replacement, conflict detection and recovery policy as edit_file.
     """
     return _text_mutation(path, expected_sha256, 'append', content=content)
+
+
+def _rename_no_replace(source, destination):
+    """Publish without an existence-check/overwrite race on supported platforms."""
+    if os.name == 'nt':
+        os.rename(source, destination)
+        return
+    if sys.platform != 'linux':
+        raise FilesystemPermissionError('unsupported_operation', 'No safe no-replace rename is available on this platform.')
+    import ctypes
+    import errno
+    rename = getattr(ctypes.CDLL(None, use_errno=True), 'renameat2', None)
+    if rename is None:
+        raise FilesystemPermissionError('unsupported_operation', 'The C library has no renameat2 support.')
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1) != 0:
+        code = ctypes.get_errno()
+        if code in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+            raise FilesystemPermissionError('unsupported_operation', 'The filesystem has no safe no-replace rename support.')
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def _copy_source(path, config):
+    try:
+        check_if_path_is_allowed(config, str(path))
+        check_if_path_is_blocked(config, str(path))
+    except FilesystemPermissionError as error:
+        raise FilesystemPermissionError(error.code, 'The copy source or a descendant is outside its read authority or blocked.') from error
+    except RuntimeError as error:
+        raise FilesystemPermissionError('unsafe_path', 'A copy source could not be safely resolved.') from error
+    for ancestor in (path, *path.parents):
+        metadata = ancestor.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+            raise FilesystemPermissionError('unsafe_path', 'Copying through links, junctions or reparse points is not supported.')
+    if (path.parent / '.coda-lock').exists() or (path.is_dir() and (path / '.coda-lock').exists()):
+        raise FilesystemPermissionError('mutation_in_progress', 'Resolve the active or interrupted source-folder transaction first.')
+    metadata = path.lstat()
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+        raise FilesystemPermissionError('unsafe_path', 'Copy only ordinary files or directories.')
+    return metadata
+
+
+def _copy_signature(metadata):
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+
+def _copy_guard(config, source, destination, deadline):
+    if monotonic() >= deadline:
+        raise FilesystemPermissionError('resource_limit', 'The copy reached its five-second cooperative time limit.')
+    if load_config() != config:
+        raise FilesystemPermissionError('permission_denied', 'Filesystem configuration changed during the copy.')
+    _copy_source(source, config)
+    creation_path(str(destination))
+
+
+def _copy_manifest(source, destination, config, max_entries, max_bytes, max_depth, deadline):
+    pending = deque([(source, Path('.'), 0)])
+    entries, size, path_chars = [], 0, 0
+    while pending:
+        current, relative, depth = pending.popleft()
+        _copy_guard(config, source, destination, deadline)
+        metadata = _copy_source(current, config)
+        creation_path(str(destination / relative))
+        is_directory = stat.S_ISDIR(metadata.st_mode)
+        if is_directory and depth > max_depth:
+            raise FilesystemPermissionError('resource_limit', 'The source tree exceeds the depth limit.')
+        entries.append((relative, is_directory, metadata))
+        path_chars += len(str(relative))
+        if len(entries) > max_entries or path_chars > 65536:
+            raise FilesystemPermissionError('resource_limit', 'The source tree exceeds its entry or path-metadata limit.')
+        if not is_directory:
+            size += metadata.st_size
+            if size > max_bytes:
+                raise FilesystemPermissionError('resource_limit', 'The source tree exceeds the total copy byte limit.')
+            continue
+        children = []
+        with os.scandir(current) as directory:
+            for entry in directory:
+                if len(entries) + len(pending) + len(children) >= max_entries:
+                    raise FilesystemPermissionError('resource_limit', 'The source tree exceeds its entry limit.')
+                if monotonic() >= deadline:
+                    raise FilesystemPermissionError('resource_limit', 'The copy reached its time limit during enumeration.')
+                children.append(entry.name)
+        for name in sorted(children, key=lambda name: (name.casefold(), name)):
+            _concrete_path(str(current / name))
+            pending.append((current / name, relative / name, depth + 1))
+    return entries
+
+
+def _copy_file_data(source, staged, output, metadata, remaining, config, root, destination, deadline):
+    _copy_guard(config, root, destination, deadline)
+    current = _copy_source(source, config)
+    if _copy_signature(current) != _copy_signature(metadata):
+        raise FilesystemPermissionError('content_changed', 'A source file changed before copying.')
+    flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    descriptor = os.open(source, flags)
+    copied = 0
+    with os.fdopen(descriptor, 'rb') as input_file:
+        if _copy_signature(os.fstat(input_file.fileno())) != _copy_signature(metadata):
+            raise FilesystemPermissionError('content_changed', 'The opened source file changed identity.')
+        while True:
+            _copy_guard(config, root, destination, deadline)
+            _copy_source(source, config)
+            creation_path(str(staged), allow_existing=True)
+            data = input_file.read(min(65536, remaining - copied + 1))
+            if not data:
+                break
+            if copied + len(data) > remaining:
+                raise FilesystemPermissionError('resource_limit', 'A growing file exhausted the copy byte budget.')
+            output.write(data)
+            copied += len(data)
+        output.flush()
+        os.fsync(output.fileno())
+        if _copy_signature(os.fstat(input_file.fileno())) != _copy_signature(metadata):
+            raise FilesystemPermissionError('content_changed', 'A source file changed while copying.')
+    return copied
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+))
+def copy_path(source: str, destination: str, max_entries: int = 1024,
+              max_bytes: int = 33554432, max_depth: int = 8) -> CallToolResult:
+    """Copy file data or a directory tree to a new absolute destination, never overwrite.
+
+    Independently requires read authority for every source and write authority
+    for every destination/staging entry, plus CODA confirmation. No links or
+    blocked descendants are copied. Preflight caps entries (4096 maximum),
+    bytes (128 MiB maximum), depth (16 maximum), paths (64 KiB), and the whole
+    operation at five cooperative seconds. Interrupted staging is retained.
+    File security/ownership metadata is not cloned to the approved destination.
+    """
+    staged = None
+    staged_created = False
+    publication_attempted = False
+    try:
+        deadline = monotonic() + SEARCH_SECONDS
+        for value, lower, upper in ((max_entries, 1, 4096), (max_bytes, 1, 134217728), (max_depth, 0, 16)):
+            if type(value) is not int or not lower <= value <= upper:
+                raise FilesystemPermissionError('invalid_arguments', 'Supply copy limits within the documented integer bounds.')
+        source_path = _concrete_path(source)
+        config = load_config()
+        source_metadata = _copy_source(source_path, config)
+        source_path = source_path.resolve()
+        target = creation_path(destination)
+        if not target.parent.is_dir():
+            raise FilesystemPermissionError('not_found', 'The destination parent must already exist.')
+        if stat.S_ISDIR(source_metadata.st_mode):
+            for ancestor in (target.parent, *target.parent.parents):
+                if monotonic() >= deadline:
+                    raise FilesystemPermissionError('resource_limit', 'Copy path checks reached their time limit.')
+                metadata = ancestor.stat()
+                if (metadata.st_dev, metadata.st_ino) == (source_metadata.st_dev, source_metadata.st_ino):
+                    raise FilesystemPermissionError('invalid_arguments', 'A directory cannot be copied into itself.')
+        entries = _copy_manifest(source_path, target, config, max_entries, max_bytes, max_depth, deadline)
+        if _copy_signature(entries[0][2]) != _copy_signature(source_metadata):
+            raise FilesystemPermissionError('content_changed', 'The source changed during copy preflight.')
+        staged = creation_path(str(target.parent / ('.coda-copy-' + uuid.uuid4().hex)))
+        copied = 0
+        staged_entries = []
+        for relative, is_directory, metadata in entries:
+            _copy_guard(config, source_path, target, deadline)
+            output_path = staged / relative if stat.S_ISDIR(source_metadata.st_mode) else staged
+            creation_path(str(output_path))
+            if is_directory:
+                output_path.mkdir(mode=0o700)
+                staged_created = True
+                created = output_path.lstat()
+                staged_entries.append((output_path, True, (created.st_dev, created.st_ino)))
+            else:
+                with output_path.open('xb') as output:
+                    staged_created = True
+                    copied += _copy_file_data(source_path / relative, output_path, output, metadata,
+                                             max_bytes - copied, config, source_path, target, deadline)
+                    opened = os.fstat(output.fileno())
+                created = output_path.lstat()
+                if (created.st_dev, created.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise FilesystemPermissionError('content_changed', 'A staged file changed identity.')
+                staged_entries.append((output_path, False, _copy_signature(created)))
+        for relative, _, metadata in entries:
+            _copy_guard(config, source_path, target, deadline)
+            if _copy_signature(_copy_source(source_path / relative, config)) != _copy_signature(metadata):
+                raise FilesystemPermissionError('content_changed', 'The source tree changed before publication.')
+        for output_path, is_directory, expected in staged_entries:
+            creation_path(str(output_path), allow_existing=True)
+            current = output_path.lstat()
+            actual = (current.st_dev, current.st_ino) if is_directory else _copy_signature(current)
+            if actual != expected:
+                raise FilesystemPermissionError('content_changed', 'Staged copy data changed before publication.')
+        _copy_guard(config, source_path, target, deadline)
+        publication_attempted = True
+        _rename_no_replace(staged, target)
+    except (FilesystemPermissionError, OSError, ValueError, RuntimeError) as error:
+        if isinstance(error, FilesystemPermissionError):
+            code = error.code
+        elif isinstance(error, FileExistsError):
+            code = 'already_exists'
+        elif isinstance(error, FileNotFoundError):
+            code = 'not_found'
+        elif isinstance(error, PermissionError):
+            code = 'permission_denied'
+        else:
+            code = 'os_error'
+        if not staged_created:
+            return error_result(code, str(error))
+        return CallToolResult(isError=True, content=[TextContent(type='text', text=
+            f'Copy did not complete: {error}. Retained staging: {staged}. Inspect the destination before retrying.')],
+            structuredContent={'error': {'code': 'copy_incomplete', 'message': str(error)},
+                               'cause_code': code, 'staging_path': str(staged),
+                               'destination': destination, 'publication_attempted': publication_attempted})
+    return CallToolResult(content=[TextContent(type='text', text=f'Copied {source_path} to {target}; {copied} bytes.')],
+        structuredContent={'kind': 'filesystem_copied', 'source': str(source_path), 'destination': str(target),
+                           'bytes_copied': copied, 'entries_copied': len(entries),
+                           'type': 'directory' if stat.S_ISDIR(source_metadata.st_mode) else 'file'})
 
 
 if __name__ == "__main__":

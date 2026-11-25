@@ -113,8 +113,10 @@ def filesystem_fact_summary(data, text, question):
             answer += ' The first match is in ' + _names([first], 1) + f' at line {first["line"]}.'
             answer += ' Say show tool output for the matching paths and excerpts.'
         return answer
-    name = PureWindowsPath(str(payload.get('path', ''))).name
+    name = PureWindowsPath(str(payload.get('destination' if kind == 'filesystem_copied' else 'path', ''))).name
     label = _names([{'name': name}], 1) if name else 'The item'
+    if kind == 'filesystem_copied' and name and payload.get('type') in ('file', 'directory'):
+        return ('Copied the folder to ' if payload['type'] == 'directory' else 'Copied the file to ') + label + '.'
     if kind == 'filesystem_changed' and name and payload.get('operation') in ('edit', 'append'):
         answer = ('Updated the file ' if payload['operation'] == 'edit' else 'Appended to the file ') + label + '.'
         if payload.get('recovery_paths'):
