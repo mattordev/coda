@@ -96,6 +96,21 @@ def filesystem_fact_summary(data, text, question):
     if not isinstance(payload, dict):
         return None
     kind = payload.get('kind')
+    if kind == 'filesystem_content_search':
+        matches = payload.get('matches')
+        if not isinstance(matches, list) or not all(
+                isinstance(match, dict) and isinstance(match.get('name'), str)
+                and type(match.get('line')) is int and match['line'] > 0 for match in matches):
+            return None
+        count = len(matches)
+        answer = (f'The content search returned {count} matching ' + ('line.' if count == 1 else 'lines.')) if count else 'No matching text was returned.'
+        if payload.get('partial') is True or payload.get('truncated') is True:
+            answer += ' This is an incomplete content search.'
+        if matches:
+            first = matches[0]
+            answer += ' The first match is in ' + _names([first], 1) + f' at line {first["line"]}.'
+            answer += ' Say show tool output for the matching paths and excerpts.'
+        return answer
     name = PureWindowsPath(str(payload.get('path', ''))).name
     label = _names([{'name': name}], 1) if name else 'The item'
     if kind == 'filesystem_created' and payload.get('type') in ('file', 'directory') and name:

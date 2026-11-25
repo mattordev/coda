@@ -44,9 +44,11 @@ def plan_follow_up(message, result, manager):
     names = re.fullmatch(r'(?:list|show|say|read)(?: me)? (?:all (?:the )?|the )?(?:file ?names|names|(?:most recently modified|most recent|latest|recent|newest) files)', text)
     filtering = re.fullmatch(r'(?:find|show|list)(?: me)? (?:all (?:the )?|the )?(markdown|text|python|\*\.[a-z0-9]+) files(?: (?:here|in that folder))?', text)
     searching = re.fullmatch(r'(?:search|look)(?: recursively)? (?:in )?(?:that|this) folder for (\*\.[a-z0-9]+|markdown|text|python)(?: files)?', text)
+    content_search = re.fullmatch(r'(?:find|search for) (?:every |all (?:the )?)?files? containing "([^"\r\n]{1,256})"(?: in (?:that|this) folder)?[.!?]?',
+                                 message.strip(), re.IGNORECASE)
     reading = re.fullmatch(r'(?:read|open)(?: me)? (?:the )?(.{1,180})', text)
     continuation = text in ('continue reading', 'read more', 'read the next part', 'next part')
-    if not (names or filtering or searching or continuation or reading):
+    if not (names or filtering or searching or content_search or continuation or reading):
         return None
     # A concrete path or new task should go through ordinary routing.
     if reading and (any(char in reading[1] for char in '/\\:') or reading[1] in ('all files', 'a file')):
@@ -55,7 +57,7 @@ def plan_follow_up(message, result, manager):
         if result is not None and (names or filtering):
             return None
         # Only explicit contextual language claims missing focus; ordinary reads route normally.
-        if names or filtering or searching or continuation or (reading and re.search(
+        if names or filtering or searching or content_search or continuation or (reading and re.search(
                 r'\b(that|this|one|first|second|third|newest|latest|recent)\b', reading[1])):
             return FollowUp(reply=MISSING)
         return None
@@ -104,6 +106,8 @@ def plan_follow_up(message, result, manager):
     patterns = {'markdown': '*.md', 'text': '*.txt', 'python': '*.py'}
     if searching:
         return FollowUp('search_files', {'path': path, 'pattern': patterns.get(searching[1], searching[1])})
+    if content_search:
+        return FollowUp('search_content', {'path': path, 'query': content_search[1]})
     if names or filtering:
         chosen = files
         if filtering:

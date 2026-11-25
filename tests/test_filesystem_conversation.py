@@ -107,6 +107,17 @@ class FilesystemConversationTests(unittest.TestCase):
         self.assertIn('ambiguous', result.response_text)
         self.assertEqual(len(self.calls), count)
 
+    def test_content_follow_up_runs_a_fresh_search_with_the_exact_quoted_query(self):
+        self.manager.replace_definition(replace(self.definition,
+            allowed_tools=self.definition.allowed_tools | {'search_content'}))
+        self.listing()
+        result = runtime.run('find every file containing "NeW" in that folder', {})
+        self.assertTrue(result.tool_result.success)
+        self.assertEqual(self.calls[-1]['tool_name'], 'search_content')
+        self.assertEqual(self.calls[-1]['arguments'], {'path': str(self.root), 'query': 'NeW'})
+        self.assertIn('1 matching line', result.response_text)
+        self.assertEqual(result.tool_result.data['structuredContent']['matches'][0]['name'], 'new-report.md')
+
     def test_ambiguous_pronoun_never_reads_a_random_file(self):
         self.listing()
         count = len(self.calls)
