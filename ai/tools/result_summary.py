@@ -96,6 +96,8 @@ def filesystem_fact_summary(data, text, question):
     if not isinstance(payload, dict):
         return None
     kind = payload.get('kind')
+    if kind == 'file_contents' and payload.get('byte_length') == 0:
+        return 'The file contains no readable text.'
     if kind == 'filesystem_content_search':
         matches = payload.get('matches')
         if not isinstance(matches, list) or not all(
@@ -113,6 +115,11 @@ def filesystem_fact_summary(data, text, question):
         return answer
     name = PureWindowsPath(str(payload.get('path', ''))).name
     label = _names([{'name': name}], 1) if name else 'The item'
+    if kind == 'filesystem_changed' and name and payload.get('operation') in ('edit', 'append'):
+        answer = ('Updated the file ' if payload['operation'] == 'edit' else 'Appended to the file ') + label + '.'
+        if payload.get('recovery_paths'):
+            answer += ' Recovery files still need cleanup; say show tool output for their locations.'
+        return answer
     if kind == 'filesystem_created' and payload.get('type') in ('file', 'directory') and name:
         item = 'folder' if payload['type'] == 'directory' else 'file'
         return f'Created the {item} {label}.'

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 import codecs
 import os
 import re
+import hashlib
+import uuid
 from time import monotonic
 from collections import deque
 
@@ -59,13 +61,16 @@ def list_directory(path: str) -> CallToolResult:
     )
     
 @server.tool(structured_output=False)
-def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None) -> CallToolResult:
+def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None,
+              include_revision: bool = False) -> CallToolResult:
     """Read permitted UTF-8 text; optionally select a bounded byte range.
 
     Without range arguments, preserve the complete-file 1 MiB limit. Supplying
     max_bytes (1 to 1048576) or a nonzero offset selects a range; the default
     range budget is 65536 bytes. Resume using returned next_offset_bytes, which
     never splits a UTF-8 character or CRLF pair. Ranges do not grant permission.
+    include_revision adds the original-byte SHA-256 to a complete read and
+    preserves exact UTF-8/newlines for a subsequent conflict-checked mutation.
     """
     
     try:
@@ -75,6 +80,8 @@ def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None) ->
             raise FilesystemPermissionError("invalid_arguments", "The byte offset must be a nonnegative 64-bit integer.")
         if max_bytes is not None and (type(max_bytes) is not int or not 1 <= max_bytes <= MAX_READ_BYTES):
             raise FilesystemPermissionError("invalid_arguments", "The byte budget must be an integer from 1 to 1048576.")
+        if type(include_revision) is not bool or (include_revision and (offset_bytes or max_bytes is not None)):
+            raise FilesystemPermissionError('invalid_arguments', 'Revision reads require a complete file without range arguments.')
         config = load_config()
         check_if_path_is_allowed(config, path)
         check_if_path_is_blocked(config, path)
@@ -96,7 +103,11 @@ def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None) ->
         try: 
             if offset_bytes or max_bytes is not None:
                 return read_file_range(requested_path, offset_bytes, max_bytes or DEFAULT_RANGE_BYTES)
-            text = read_safe_file(requested_path)
+            if include_revision:
+                raw = _read_safe_bytes(requested_path)
+                text = raw.decode('utf-8')
+            else:
+                text = read_safe_file(requested_path)
         except FilesystemPermissionError as error:
             return error_result(error.code, str(error))
         except UnicodeDecodeError as error:
@@ -107,7 +118,8 @@ def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None) ->
             return error_result("os_error", str(error))
         return CallToolResult(
                 content=[TextContent(type="text", text=text)],
-                structuredContent={"kind": "file_contents"},
+                structuredContent=({'kind': 'file_contents', 'sha256': hashlib.sha256(raw).hexdigest(),
+                                    'byte_length': len(raw)} if include_revision else {"kind": "file_contents"}),
             )
     elif requested_path.is_dir():
         return error_result("is_a_directory", f"{requested_path} is a directory, not a file.")
@@ -219,7 +231,7 @@ def create_directory(path: str) -> CallToolResult:
     return creation_result(target, "directory")
 
 
-def creation_path(path: str) -> Path:
+def creation_path(path: str, *, allow_existing=False) -> Path:
     """Authorize a new entry without borrowing any of the read root grants."""
     if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
         raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute creation path.")
@@ -255,7 +267,7 @@ def creation_path(path: str) -> Path:
             continue
         if candidate.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400:
             raise FilesystemPermissionError("blocked_path", "Creation through symbolic links or junctions is not permitted.")
-    if target.exists():
+    if target.exists() and not allow_existing:
         raise FilesystemPermissionError("already_exists", "That path already exists. Nothing was replaced.")
     return target
 
@@ -267,7 +279,7 @@ def creation_result(path: Path, entry_type: str) -> CallToolResult:
     )
 
 
-def read_safe_file(path: Path) -> str:
+def _read_safe_bytes(path: Path) -> bytes:
     """Bound the actual read, including files that grow after the size check."""
     max_file_size_b = MAX_READ_BYTES
 
@@ -277,8 +289,12 @@ def read_safe_file(path: Path) -> str:
         data = source.read(max_file_size_b + 1)
     if len(data) > max_file_size_b:
         raise ValueError(f"{path.name} is too big to be read, please open it manually.")
-    # Match read_text's universal newline handling without an unbounded text read.
-    return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return data
+
+
+def read_safe_file(path: Path) -> str:
+    """Match universal newline handling without an unbounded text read."""
+    return _read_safe_bytes(path).decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def error_result(code, message):
@@ -720,6 +736,223 @@ def search_content(path: str, query: str, pattern: str = '*', case_sensitive: bo
         'entries_examined': listing['entries_examined'], 'partial': bool(reasons),
         'truncated': bool(reasons), 'limits_reached': sorted(reasons),
     })
+
+
+def _windows_security(source, destination):
+    """Apply the original owner/group/DACL before writing any staged content."""
+    import ctypes
+    from ctypes import wintypes
+    security = getattr(ctypes, 'WinDLL')('advapi32', use_last_error=True)
+    get_security = security.GetFileSecurityW
+    get_security.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID,
+                            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    get_security.restype = wintypes.BOOL
+    needed = wintypes.DWORD()
+    get_security(str(source), 7, None, 0, ctypes.byref(needed))
+    if not 0 < needed.value <= 65536:
+        raise OSError('The file security descriptor is unavailable or too large.')
+    descriptor = ctypes.create_string_buffer(needed.value)
+    if not get_security(str(source), 7, descriptor, needed.value, ctypes.byref(needed)):
+        raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+    set_security = security.SetFileSecurityW
+    set_security.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID]
+    set_security.restype = wintypes.BOOL
+    # Protect the copied DACL from additional parent-directory inheritance.
+    if not set_security(str(destination), 7 | 0x80000000, descriptor):
+        raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+
+
+def _stage_security(source, destination, descriptor, original):
+    if os.name == 'nt':
+        _windows_security(source, destination)
+        return
+    current = os.fstat(descriptor)
+    if (current.st_uid, current.st_gid) != (original.st_uid, original.st_gid):
+        getattr(os, 'fchown')(descriptor, original.st_uid, original.st_gid)
+    # Include POSIX ACLs and security attributes; never silently drop an ACL.
+    if hasattr(os, 'listxattr'):
+        attributes = os.listxattr(source)
+        if 'system.posix_acl_access' not in attributes and 'system.posix_acl_access' in os.listxattr(destination):
+            os.removexattr(destination, 'system.posix_acl_access')
+        getattr(os, 'fchmod')(descriptor, stat.S_IMODE(original.st_mode))
+        total = 0
+        for attribute in attributes:
+            value = os.getxattr(source, attribute)
+            total += len(value)
+            if total > 65536:
+                raise OSError('File security attributes exceed the supported metadata limit.')
+            os.setxattr(destination, attribute, value)
+    else:
+        getattr(os, 'fchmod')(descriptor, stat.S_IMODE(original.st_mode))
+
+
+def _replace_text(target, staged, backup):
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        replace_file = getattr(ctypes, 'WinDLL')('kernel32', use_last_error=True).ReplaceFileW
+        replace_file.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+                                wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID]
+        replace_file.restype = wintypes.BOOL
+        # Do not ignore ACL/attribute errors. Retain an original-file backup even
+        # for Windows' documented partial replacement failure modes.
+        if not replace_file(str(target), str(staged), str(backup), 0, None, None):
+            raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+    else:
+        os.link(target, backup, follow_symlinks=False)
+        os.replace(staged, target)
+
+
+def _mutation_path(path):
+    target = creation_path(path, allow_existing=True)
+    config = load_config()
+    check_if_path_is_allowed(config, str(target))
+    check_if_path_is_blocked(config, str(target))
+    metadata = target.stat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise FilesystemPermissionError('unsafe_path', 'Choose a regular file with no hard-link aliases.')
+    if not metadata.st_mode & 0o222 or metadata.st_mode & (stat.S_ISUID | stat.S_ISGID):
+        raise FilesystemPermissionError('permission_denied', 'Read-only or privileged files cannot be edited.')
+    return target, metadata, config
+
+
+def _text_mutation(path, expected_sha256, operation, *, old_text=None, content=''):
+    artifacts = []
+    attempted = False
+    committed = False
+    try:
+        if not isinstance(expected_sha256, str) or not re.fullmatch('[0-9a-fA-F]{64}', expected_sha256):
+            raise FilesystemPermissionError('invalid_arguments', 'Supply the SHA-256 from a complete revision read.')
+        if not isinstance(content, str) or (operation == 'edit' and (not isinstance(old_text, str) or not old_text)):
+            raise FilesystemPermissionError('invalid_arguments', 'Supply nonempty old_text for an edit and UTF-8 replacement or append text.')
+        if (len(content.encode('utf-8')) > MAX_READ_BYTES
+                or (operation == 'edit' and len(old_text.encode('utf-8')) > MAX_READ_BYTES)):
+            raise FilesystemPermissionError('content_too_large', 'Mutation text is limited to 1 MiB of UTF-8.')
+        target, before, config = _mutation_path(path)
+        if before.st_size > MAX_READ_BYTES:
+            raise FilesystemPermissionError('content_too_large', 'The existing file exceeds the 1 MiB mutation limit.')
+        parent = target.parent
+        token = uuid.uuid4().hex
+        staged = creation_path(str(parent / ('.coda-edit-' + token + '.tmp')))
+        backup = creation_path(str(parent / ('.coda-backup-' + token)))
+        # A stable folder lock survives target replacement and filename aliases.
+        # Mutations in the same folder fail busy rather than racing each other.
+        lock_name = '.coda-lock'
+        lock = creation_path(str(parent / lock_name), allow_existing=True)
+        try:
+            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as error:
+            raise FilesystemPermissionError('mutation_in_progress', 'Another mutation or interrupted transaction owns this file lock.') from error
+        artifacts.append(lock)
+        with os.fdopen(descriptor, 'wb') as output:
+            output.write(json.dumps({'target': str(target), 'staged': str(staged), 'backup': str(backup),
+                                     'expected_sha256': expected_sha256.lower()}).encode('utf-8'))
+            output.flush()
+            os.fsync(output.fileno())
+        original = _read_safe_bytes(target)
+        if hashlib.sha256(original).hexdigest() != expected_sha256.lower():
+            raise FilesystemPermissionError('content_changed', 'The file has changed. Read its current revision before requesting another mutation.')
+        text = original.decode('utf-8')
+        if '\0' in text:
+            raise FilesystemPermissionError('invalid_encoding', 'Binary files cannot be edited as text.')
+        if operation == 'edit':
+            occurrences = text.count(old_text)
+            if occurrences != 1:
+                raise FilesystemPermissionError('ambiguous_edit', 'The old text must occur exactly once. Nothing was changed.')
+            changed = text.replace(old_text, content, 1).encode('utf-8')
+        else:
+            changed = original + content.encode('utf-8')
+        if len(changed) > MAX_READ_BYTES:
+            raise FilesystemPermissionError('content_too_large', 'The resulting file must fit within 1 MiB of UTF-8.')
+        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        artifacts.append(staged)
+        with os.fdopen(descriptor, 'wb') as output:
+            _stage_security(target, staged, output.fileno(), before)
+            output.write(changed)
+            output.flush()
+            os.fsync(output.fileno())
+        # Check both permission planes and source identity again immediately
+        # before replacement. Cooperative writers are excluded by the lock.
+        _, current, fresh = _mutation_path(path)
+        if fresh != config or (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+            raise FilesystemPermissionError('content_changed', 'The file or its permissions changed before replacement.')
+        if os.name != 'nt' and (current.st_mode, current.st_uid, current.st_gid, current.st_ctime_ns) != (
+                before.st_mode, before.st_uid, before.st_gid, before.st_ctime_ns):
+            raise FilesystemPermissionError('content_changed', 'File metadata changed before replacement.')
+        if hashlib.sha256(_read_safe_bytes(target)).hexdigest() != expected_sha256.lower():
+            raise FilesystemPermissionError('content_changed', 'The file changed before replacement.')
+        creation_path(str(backup))
+        artifacts.append(backup)
+        attempted = True
+        _replace_text(target, staged, backup)
+        if _read_safe_bytes(target) != changed:
+            raise FilesystemPermissionError('mutation_incomplete', 'The replacement could not be verified.')
+        committed = True
+    except (FilesystemPermissionError, OSError, ValueError, UnicodeError, RuntimeError) as error:
+        if isinstance(error, FilesystemPermissionError):
+            code = error.code
+        elif isinstance(error, UnicodeError):
+            code = 'invalid_encoding'
+        elif isinstance(error, FileNotFoundError):
+            code = 'not_found'
+        elif isinstance(error, PermissionError):
+            code = 'permission_denied'
+        elif isinstance(error, ValueError):
+            code = 'content_too_large'
+        else:
+            code = 'os_error'
+        if attempted:
+            code = 'mutation_incomplete'
+        result = error_result(code, str(error))
+    else:
+        result = CallToolResult(content=[TextContent(type='text', text=f'{operation.capitalize()} completed: {target}')],
+            structuredContent={'kind': 'filesystem_changed', 'path': str(target), 'operation': operation,
+                               'sha256': hashlib.sha256(changed).hexdigest(), 'size_bytes': len(changed)})
+    # Before replacement the original is intact, so temporary files can go.
+    # After a failed replacement retain all recovery evidence and the lock.
+    pending = []
+    if not attempted or committed:
+        for artifact in reversed(artifacts):
+            try:
+                artifact.unlink(missing_ok=True)
+            except OSError:
+                pending.append(str(artifact))
+    else:
+        pending = [str(artifact) for artifact in artifacts if artifact.exists()]
+    if pending:
+        payload = dict(result.structured_content or {})
+        payload['recovery_paths'] = pending
+        payload['target_may_have_changed'] = attempted
+        result.content.append(TextContent(type='text', text='Recovery files retained:\n' + '\n'.join(pending)
+                                          + '\nInspect the target and recovery files before another mutation.'))
+        result = CallToolResult(isError=result.is_error, content=result.content, structuredContent=payload)
+    return result
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False,
+))
+def edit_file(path: str, old_text: str, new_text: str, expected_sha256: str) -> CallToolResult:
+    """Replace exactly one literal occurrence in a bounded UTF-8 file.
+
+    Requires independent read/write grants, host confirmation and the SHA-256
+    from read_file(include_revision=true). Reject conflicts and ambiguous edits.
+    Stage in the same directory, preserve file security and retain recovery
+    artifacts if replacement fails. Never automatically replay a failed edit.
+    """
+    return _text_mutation(path, expected_sha256, 'edit', old_text=old_text, content=new_text)
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False,
+))
+def append_file(path: str, content: str, expected_sha256: str) -> CallToolResult:
+    """Append exact UTF-8 text to an existing bounded file using revision checks.
+
+    No newline is inserted automatically. Uses the same grants, confirmation,
+    staged replacement, conflict detection and recovery policy as edit_file.
+    """
+    return _text_mutation(path, expected_sha256, 'append', content=content)
 
 
 if __name__ == "__main__":

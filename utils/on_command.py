@@ -220,6 +220,18 @@ def _dispatch_intent(
             if request.intent.name in ('mcp.filesystem.create_file', 'mcp.filesystem.create_directory'):
                 kind = 'file' if request.intent.name.endswith('.create_file') else 'folder'
                 confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
+            parts = request.intent.name.split('.', 2)
+            if (len(parts) == 3 and parts[2] in ('edit_file', 'append_file')
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                target = sanitize_text(str(arguments.get('path', '')))
+                content = str(arguments.get('new_text' if parts[2] == 'edit_file' else 'content', ''))
+                preview = sanitize_text(content[:120]).replace('\r', '\\r').replace('\n', '\\n')
+                suffix = ' (excerpt)' if len(content) > 120 else ''
+                if parts[2] == 'edit_file':
+                    old = sanitize_text(str(arguments.get('old_text', ''))[:120]).replace('\r', '\\r').replace('\n', '\\n')
+                    confirmation = f'Replace one occurrence of "{old}" with "{preview}"{suffix} in "{target}"? Say confirm or cancel.'
+                else:
+                    confirmation = f'Append "{preview}"{suffix} to "{target}"? Say confirm or cancel.'
             return CommandResult(
                 handled=True, response_text=confirmation,
                 open_follow_up=True, tool_result=outcome,
