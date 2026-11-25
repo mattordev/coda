@@ -86,7 +86,7 @@ class FilesystemConversationTests(unittest.TestCase):
     def test_list_filter_then_read_recent_report_uses_only_observed_folder(self):
         self.assertIn('3 files', self.listing().response_text)
         count = len(self.calls)
-        filtered = runtime.run('find Markdown files', {})
+        filtered = runtime.run('find all the Markdown files in that folder', {})
         self.assertIn('retained immediate-folder listing', filtered.response_text)
         self.assertIn('2 files', filtered.response_text)
         self.assertEqual(len(self.calls), count)

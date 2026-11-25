@@ -41,8 +41,8 @@ def plan_follow_up(message, result, manager):
     """Plan at most one read/search, or present retained names with explicit scope."""
     text = message.strip().rstrip('.!?').casefold()
     # Full matches keep unrelated requests and embedded filenames out of control flow.
-    names = re.fullmatch(r'(?:list|show|say|read)(?: me)? (?:all |the )?(?:file ?names|names|recent files|newest files)', text)
-    filtering = re.fullmatch(r'(?:find|show|list)(?: me)? (?:the )?(markdown|text|python|\*\.[a-z0-9]+) files(?: (?:here|in that folder))?', text)
+    names = re.fullmatch(r'(?:list|show|say|read)(?: me)? (?:all (?:the )?|the )?(?:file ?names|names|(?:most recently modified|most recent|latest|recent|newest) files)', text)
+    filtering = re.fullmatch(r'(?:find|show|list)(?: me)? (?:all (?:the )?|the )?(markdown|text|python|\*\.[a-z0-9]+) files(?: (?:here|in that folder))?', text)
     searching = re.fullmatch(r'(?:search|look)(?: recursively)? (?:in )?(?:that|this) folder for (\*\.[a-z0-9]+|markdown|text|python)(?: files)?', text)
     reading = re.fullmatch(r'(?:read|open)(?: me)? (?:the )?(.{1,180})', text)
     continuation = text in ('continue reading', 'read more', 'read the next part', 'next part')
@@ -109,7 +109,7 @@ def plan_follow_up(message, result, manager):
         if filtering:
             pattern = patterns.get(filtering[1], filtering[1])
             chosen = [entry for entry in files if fnmatchcase(entry['name'].casefold(), pattern)]
-        elif names and ('recent' in text or 'newest' in text) and all(_valid_modified_at(entry) for entry in files):
+        elif names and any(word in text for word in ('recent', 'newest', 'latest')) and all(_valid_modified_at(entry) for entry in files):
             chosen = sorted(files, key=lambda entry: entry['modified_at'], reverse=True)
         # Keep the filtered observation as focus; raw originals remain retained separately.
         partial = payload.get('partial') is True or payload.get('truncated') is True

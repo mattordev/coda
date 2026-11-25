@@ -322,7 +322,7 @@ def _filesystem_follow_up(message, commands, *, cancel_event=None, debug=False):
         return _dispatch_intent(command, commands, cancel_event=cancel_event, debug=debug, user_message=message)
     if plan.result is not None:
         from ai.tools.presentation import prepare_tool_response
-        question = message if 'recent' in message.casefold() or 'newest' in message.casefold() else 'list all filenames'
+        question = message if _presentation_style(message.casefold()) == 'recent_files' else 'list all filenames'
         response = plan.reply + prepare_tool_response(plan.result, question=question)
         if not llm_service.record_tool_exchange(message, plan.result, response, cancel_event=cancel_event):
             return CommandResult(False)
