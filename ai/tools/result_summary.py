@@ -113,8 +113,13 @@ def filesystem_fact_summary(data, text, question):
             answer += ' The first match is in ' + _names([first], 1) + f' at line {first["line"]}.'
             answer += ' Say show tool output for the matching paths and excerpts.'
         return answer
-    name = PureWindowsPath(str(payload.get('destination' if kind == 'filesystem_copied' else 'path', ''))).name
+    name = PureWindowsPath(str(payload.get('destination' if kind in ('filesystem_copied', 'filesystem_moved') else 'path', ''))).name
     label = _names([{'name': name}], 1) if name else 'The item'
+    if kind == 'filesystem_moved' and name and payload.get('type') in ('file', 'directory'):
+        answer = ('Moved the folder to ' if payload['type'] == 'directory' else 'Moved the file to ') + label + '.'
+        if payload.get('recovery_lock_count'):
+            answer += ' Recovery locks still need cleanup; say show tool output for details.'
+        return answer
     if kind == 'filesystem_deleted' and name:
         return 'Deleted ' + label + '.' + (' Recovery locks still need cleanup; say show tool output for details.'
                                          if payload.get('recovery_lock_count') else '')

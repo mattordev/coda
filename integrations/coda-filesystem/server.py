@@ -1330,7 +1330,7 @@ def _release_operation_lock(path, owned_locks):
     del owned_locks[path]
 
 
-def _lock_destructive_scope(root, entries, config, deadline, owned_locks):
+def _lock_destructive_scope(root, entries, config, deadline, owned_locks, operation='delete'):
     """Internal metadata locks belong to the approved destructive transaction."""
     directories = [root.parent] + [path for path, metadata in entries if stat.S_ISDIR(metadata.st_mode)]
     authority = config['destructive']
@@ -1357,7 +1357,7 @@ def _lock_destructive_scope(root, entries, config, deadline, owned_locks):
         with os.fdopen(descriptor, 'wb') as output:
             created = os.fstat(output.fileno())
             owned_locks[lock] = (created.st_dev, created.st_ino)
-            record = {'operation': 'delete', 'transaction': transaction, 'outcome': 'unverified'}
+            record = {'operation': operation, 'transaction': transaction, 'outcome': 'unverified'}
             record['target' if index == 0 else 'relative_folder'] = str(root if index == 0 else directory.relative_to(root))
             output.write(json.dumps(record, ensure_ascii=False).encode('utf-8'))
             output.flush()
@@ -1454,6 +1454,137 @@ def delete_path(path: str, recursive: bool = False, max_entries: int = 1024, max
         result = CallToolResult(isError=result.is_error, content=result.content + [TextContent(type='text', text=
             f'Retained {len(owned_locks)} transaction locks. Example locations:\n' + '\n'.join(examples)
             + '\nInspect the remaining target before any retry or lock cleanup.')], structuredContent=payload)
+    return result
+
+
+def _move_destination(source, target, entries, config, owned_locks, deadline):
+    """Every relocated entry needs destination write authority, including names."""
+    expected_children = {}
+    for current, metadata in entries:
+        _verify_destructive_entry(current, metadata, config, owned_locks, deadline)
+        output = target / current.relative_to(source)
+        creation_path(str(output))
+        _protect_transaction_paths(output)
+        if current != source:
+            expected_children.setdefault(current.parent, set()).add(current.name)
+        if stat.S_ISDIR(metadata.st_mode):
+            expected_children.setdefault(current, set())
+    # A single rename moves the whole tree. Refuse new descendants rather than
+    # silently including names that were never authorised during preflight.
+    for directory, expected in expected_children.items():
+        actual = set()
+        with os.scandir(directory) as children:
+            for child in children:
+                if monotonic() >= deadline or len(actual) > len(expected):
+                    raise FilesystemPermissionError('content_changed', 'The move scope changed before publication.')
+                if directory / child.name not in owned_locks:
+                    actual.add(child.name)
+        if actual != expected:
+            raise FilesystemPermissionError('content_changed', 'The move scope changed before publication.')
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False,
+))
+def move_path(source: str, destination: str, max_entries: int = 1024, max_depth: int = 8) -> CallToolResult:
+    """Move/rename an authorised file or complete bounded directory to a new path.
+
+    Requires independent destructive source and write destination grants, plus
+    CODA confirmation. Never overwrite or copy/delete across filesystems. Parent
+    must exist; roots, links, aliases, blocked descendants and recovery paths are
+    refused. Limits: 4096 entries, depth 16, 64 KiB paths, five cooperative seconds.
+    Cancellation can leave a completed rename without a returned result: inspect
+    both paths and retained locks before any new request. Never automatically retry.
+    """
+    owned_locks = {}
+    attempted = False
+    relocated = False
+    target = source_path = None
+    try:
+        deadline = monotonic() + SEARCH_SECONDS
+        if type(max_entries) is not int or not 1 <= max_entries <= 4096 or (
+                type(max_depth) is not int or not 0 <= max_depth <= 16):
+            raise FilesystemPermissionError('invalid_arguments', 'Supply bounded integer move limits.')
+        source_path = _concrete_path(source)
+        config = load_config()
+        entries = _destructive_manifest(source_path, config, True, max_entries, max_depth, deadline)
+        target = creation_path(destination)
+        _protect_transaction_paths(target)
+        if not target.parent.is_dir():
+            raise FilesystemPermissionError('not_found', 'The destination parent must already exist.')
+        source_metadata = entries[0][1]
+        for ancestor in (target.parent, *target.parent.parents):
+            metadata = ancestor.stat()
+            if (metadata.st_dev, metadata.st_ino) == (source_metadata.st_dev, source_metadata.st_ino):
+                raise FilesystemPermissionError('invalid_arguments', 'A directory cannot be moved into itself.')
+        if source_metadata.st_dev != target.parent.stat().st_dev:
+            raise FilesystemPermissionError('cross_device', 'Cross-filesystem moves are unsupported; no copy/delete fallback was attempted.')
+        _move_destination(source_path, target, entries, config, owned_locks, deadline)
+        _lock_destructive_scope(source_path, entries, config, deadline, owned_locks, operation='move')
+        destination_lock = target.parent / '.coda-lock'
+        if destination_lock not in owned_locks:
+            creation_path(str(destination_lock))
+            with destination_lock.open('xb') as output:
+                metadata = os.fstat(output.fileno())
+                owned_locks[destination_lock] = metadata.st_dev, metadata.st_ino
+                output.write(json.dumps({'operation': 'move', 'source': str(source_path),
+                                         'destination': str(target), 'outcome': 'unverified'}).encode('utf-8'))
+                output.flush()
+                os.fsync(output.fileno())
+        _move_destination(source_path, target, entries, config, owned_locks, deadline)
+        creation_path(str(target))
+        if load_config() != config:
+            raise FilesystemPermissionError('permission_denied', 'Permissions changed before the move.')
+        attempted = True
+        _rename_no_replace(source_path, target)
+        relocated = True
+        owned_locks = {(target / lock.relative_to(source_path) if lock.is_relative_to(source_path) else lock): identity
+                       for lock, identity in owned_locks.items()}
+        published = target.lstat()
+        if (published.st_dev, published.st_ino) != (source_metadata.st_dev, source_metadata.st_ino) or source_path.exists():
+            raise FilesystemPermissionError('content_changed', 'The rename outcome could not be verified.')
+    except (FilesystemPermissionError, OSError, ValueError, RuntimeError) as error:
+        import errno
+        code = error.code if isinstance(error, FilesystemPermissionError) else (
+            'already_exists' if isinstance(error, FileExistsError) else 'not_found' if isinstance(error, FileNotFoundError)
+            else 'permission_denied' if isinstance(error, PermissionError)
+            else 'cross_device' if isinstance(error, OSError) and error.errno == errno.EXDEV else 'os_error')
+        if attempted:
+            result = CallToolResult(isError=True, content=[TextContent(type='text', text=
+                'The move outcome is unverified. Inspect both paths and transaction locks before any new request.')],
+                structuredContent={'error': {'code': 'move_incomplete', 'message': str(error)},
+                    'cause_code': code, 'source': source, 'destination': destination, 'rename_attempted': True})
+        else:
+            result = error_result(code, str(error))
+    else:
+        result = CallToolResult(content=[TextContent(type='text', text=f'Moved {source_path} to {target}.')],
+            structuredContent={'kind': 'filesystem_moved', 'source': str(source_path), 'destination': str(target),
+                'entries_moved': len(entries), 'type': 'directory' if stat.S_ISDIR(source_metadata.st_mode) else 'file'})
+    if not attempted or not result.is_error:
+        for lock in list(reversed(owned_locks)):
+            try:
+                _release_operation_lock(lock, owned_locks)
+            except (OSError, FilesystemPermissionError):
+                pass
+    if owned_locks:
+        # If rename raised after a remote effect, locks may have moved with the
+        # directory. Report both possible roots rather than claiming a location.
+        payload = dict(result.structured_content or {})
+        examples, output_chars = [], 2
+        for lock in owned_locks:
+            name = str(lock)
+            cost = len(json.dumps(name, ensure_ascii=True)) + 2
+            if len(examples) >= 20 or output_chars + cost > SEARCH_OUTPUT_CHARS:
+                break
+            examples.append(name)
+            output_chars += cost
+        payload.update(recovery_lock_count=len(owned_locks), recovery_paths=examples,
+                       recovery_paths_truncated=len(owned_locks) > len(examples))
+        if attempted and not relocated:
+            payload['possible_relocated_root'] = str(target)
+        result = CallToolResult(isError=result.is_error, content=result.content + [TextContent(type='text', text=
+            'Transaction locks remain. Inspect source, destination and structured recovery details before cleanup or retry.')],
+            structuredContent=payload)
     return result
 
 

@@ -510,3 +510,46 @@ read tools remain available for authorised inspection. Mutation/copy paths use
 valid UTF-8, at most 32,768 characters and 128 components, alongside the existing
 portable-name rules. Operator configuration must be changed outside these tools;
 no existing private grant is expanded automatically.
+
+## Move and rename
+
+`move_path` moves a file or a complete, bounded directory tree to a new absolute
+path. Changing only the final filename is a rename. The source and every
+descendant need destructive authority; each destination needs separate write
+authority. Read grants are not required, and file contents are not read. Add
+`move_path` to the operator tool allowlist only when these capabilities are
+wanted. CODA always asks for one-use confirmation naming both paths and folder
+contents. Existing private grants and allowlists are not expanded automatically.
+
+```text
+mcp.filesystem.move_path {"source":"D:/Scratch/managed/old.txt","destination":"D:/Scratch/managed/new.txt"}
+```
+
+The destination parent must already exist. No destination is overwritten,
+including an empty directory or a competing creator. Roots/workspaces, links,
+reparse entries, hard-link aliases, blocked descendants, protected operator
+paths and recovery artifacts are refused. Directory moves into themselves are
+refused. Case-only renames on a case-insensitive filesystem are refused as an
+existing destination; use a separately confirmed intermediate filename if needed.
+Cross-filesystem moves fail clearly without a copy/delete fallback. The native
+Windows/Linux no-replace rename support described for copying is required.
+
+Defaults are 1,024 entries and eight directory levels, capped at 4,096 and
+sixteen. Relative path metadata is capped at 65,536 characters. Current source
+and destination permissions, identities and directory membership are rechecked
+before rename; new descendants are refused. The cooperative deadline is five
+seconds, with blocking calls additionally subject to the host timeout. Stable
+source/destination folder locks coordinate text and destructive transactions.
+Successful moves preserve the original filesystem entry and normally remove
+locks, including locks relocated inside moved folders. Filesystem security and
+metadata follow native same-filesystem rename semantics; destination-parent
+inheritance is not promised and permissions are not rewritten.
+
+A rename may finish before cancellation, timeout or a lost network response.
+Such outcomes are never automatically replayed or reported as confirmed success.
+Inspect both source and destination and retained `.coda-lock` metadata before a
+new request or manual cleanup. Uncertain tool results report the attempted
+paths, cause and at most twenty recovery-lock examples within 32 KiB, plus a
+possible relocated root when an exception leaves its location uncertain. A
+success with leftover locks states that cleanup still needs operator inspection.
+The existing non-sandbox filesystem race limitations apply.
