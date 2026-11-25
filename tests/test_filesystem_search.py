@@ -268,6 +268,21 @@ class FilesystemSearchTests(unittest.TestCase):
         self.assertIn("a.md", speech)
         self.assertNotIn("listing", speech)
 
+    def test_long_search_results_do_not_trigger_unnecessary_model_interpretation(self):
+        from ai.tools.interpretation import interpret_result
+        from ai.tools.models import ToolResult
+
+        for index in range(12):
+            (self.root / f"report-{index}.md").touch()
+        raw = self.result("*.md", max_results=10)
+        result = ToolResult(True, raw.model_dump(mode="json", by_alias=True))
+        with patch.dict(os.environ, {"CODA_MCP_INTERPRETATION": "auto"}), \
+             patch("ai.llm_router.core.get_provider_order", side_effect=AssertionError("No model is needed")):
+            interpreted = interpret_result(result, "Find Markdown files")
+        self.assertFalse(interpreted.used_llm)
+        self.assertIn("10 matching files", interpreted.text)
+        self.assertIn("partial", interpreted.text)
+
     def test_real_search_discovery_grants_cancellation_and_revocation(self):
         from ai.intents import IntentRequest
         from ai.mcp.config import LocalServerDefinition
