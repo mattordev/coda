@@ -200,3 +200,162 @@ class FilesystemMCPTests(unittest.TestCase):
         inside.write_text("inside", encoding="utf-8")
         (self.root / ".env").symlink_to(inside)
         self.assertEqual(self.read_code(self.root / ".env"), "blocked_path")
+
+    def range_text(self, result):
+        """Remove only the server's explicit scope notice, preserving source text."""
+        self.assertFalse(result.is_error, result)
+        text = result.content[0].text
+        return text.split("\n", 1)[1] if result.structured_content["partial"] else text
+
+    def test_large_file_ranges_seek_directly_and_bound_actual_io(self):
+        from unittest.mock import MagicMock
+
+        source = self.root / "large.txt"
+        source.write_bytes(b"a" * (2 * 1024 * 1024) + b"tail")
+        self.assertEqual(self.read_code(source), "file_too_large")
+        real_open = Path.open
+        reads = []
+
+        def tracked_open(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            if path == source and mode == "rb":
+                tracked = MagicMock(wraps=handle)
+                tracked.__enter__.return_value = tracked
+                tracked.__exit__.side_effect = lambda *unused: handle.close()
+                reads.append(tracked)
+                return tracked
+            return handle
+
+        with patch.object(Path, "open", tracked_open), \
+             patch.object(filesystem, "read_safe_file", side_effect=AssertionError("No whole-file read")):
+            result = filesystem.read_file(str(source), offset_bytes=2 * 1024 * 1024, max_bytes=4)
+        self.assertEqual(self.range_text(result), "tail")
+        self.assertTrue(result.structured_content["partial"])
+        self.assertFalse(result.structured_content["has_more"])
+        self.assertIsNone(result.structured_content["next_offset_bytes"])
+        reads[0].read.assert_called_once_with(5)
+        self.assertEqual(reads[0].seek.call_args_list[-1].args, (2 * 1024 * 1024,))
+        self.assertTrue(reads[0].closed)
+
+    def test_range_continuations_preserve_multibyte_text_and_newlines(self):
+        source = self.root / "unicode.txt"
+        raw = "a\u00e9\U0001f680\r\nnext\rlast\n".encode("utf-8")
+        source.write_bytes(raw)
+        for budget in range(4, 11):
+            with self.subTest(budget=budget):
+                offset, pieces = 0, []
+                while offset is not None:
+                    result = filesystem.read_file(str(source), offset_bytes=offset, max_bytes=budget)
+                    pieces.append(self.range_text(result))
+                    metadata = result.structured_content
+                    self.assertLessEqual(metadata["bytes_read"], budget)
+                    following = metadata["next_offset_bytes"]
+                    if following is not None:
+                        self.assertGreater(following, offset)
+                        self.assertEqual(following, offset + metadata["bytes_read"])
+                        self.assertTrue(metadata["has_more"])
+                    offset = following
+                self.assertEqual("".join(pieces), "a\u00e9\U0001f680\nnext\nlast\n")
+
+    def test_ranges_disclose_omitted_prefix_and_suffix(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"abcdef")
+        result = filesystem.read_file(str(source), max_bytes=3)
+        self.assertEqual(self.range_text(result), "abc")
+        self.assertEqual(result.structured_content, {
+            "kind": "file_contents", "partial": True, "offset_bytes": 0,
+            "bytes_read": 3, "has_more": True, "next_offset_bytes": 3,
+        })
+        self.assertIn("Partial file content", result.content[0].text)
+        self.assertIn("Continue at byte 3", result.content[0].text)
+        final = filesystem.read_file(str(source), offset_bytes=3)
+        self.assertEqual(self.range_text(final), "def")
+        self.assertTrue(final.structured_content["partial"])
+        self.assertFalse(final.structured_content["has_more"])
+        self.assertIn("End of file", final.content[0].text)
+        complete = filesystem.read_file(str(source), max_bytes=6)
+        self.assertFalse(complete.structured_content["partial"])
+        self.assertEqual(self.range_text(complete), "abcdef")
+
+    def test_range_default_budget_and_exact_maximum_are_bounded(self):
+        source = self.root / "large.txt"
+        source.write_bytes(b"x" * (2 * filesystem.MAX_READ_BYTES))
+        default = filesystem.read_file(str(source), offset_bytes=1)
+        self.assertEqual(default.structured_content["bytes_read"], 65536)
+        maximum = filesystem.read_file(str(source), max_bytes=filesystem.MAX_READ_BYTES)
+        self.assertEqual(maximum.structured_content["bytes_read"], filesystem.MAX_READ_BYTES)
+        self.assertTrue(maximum.structured_content["has_more"])
+
+    def test_invalid_range_arguments_fail_without_opening_file(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"valid")
+        for arguments in ({"offset_bytes": -1}, {"offset_bytes": True}, {"offset_bytes": 1.5},
+                          {"offset_bytes": "1"}, {"offset_bytes": 2**63},
+                          {"max_bytes": 0}, {"max_bytes": -1}, {"max_bytes": True},
+                          {"max_bytes": 1.5}, {"max_bytes": "1"},
+                          {"max_bytes": filesystem.MAX_READ_BYTES + 1}):
+            with self.subTest(arguments=arguments), \
+                 patch.object(filesystem, "load_config", side_effect=AssertionError("Validate first")):
+                result = filesystem.read_file(str(source), **arguments)
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "invalid_arguments")
+
+    def test_empty_file_eof_and_beyond_eof_have_explicit_range_semantics(self):
+        source = self.root / "empty.txt"
+        source.touch()
+        self.assertEqual(self.range_text(filesystem.read_file(str(source), max_bytes=1)), "")
+        source.write_bytes(b"abc")
+        at_end = filesystem.read_file(str(source), offset_bytes=3, max_bytes=1)
+        self.assertEqual(self.range_text(at_end), "")
+        self.assertTrue(at_end.structured_content["partial"])
+        beyond = filesystem.read_file(str(source), offset_bytes=4, max_bytes=1)
+        self.assertEqual(beyond.structured_content["error"]["code"], "invalid_arguments")
+
+    def test_range_rejects_split_start_tiny_budget_and_malformed_utf8(self):
+        source = self.root / "unicode.txt"
+        source.write_bytes("\u00e9\r\nx".encode("utf-8"))
+        for arguments in ({"offset_bytes": 1, "max_bytes": 4}, {"max_bytes": 1},
+                          {"offset_bytes": 2, "max_bytes": 1}):
+            result = filesystem.read_file(str(source), **arguments)
+            self.assertEqual(result.structured_content["error"]["code"], "invalid_arguments")
+        for raw in (b"\xffbad", b"\xc3", b"x\xc3z"):
+            source.write_bytes(raw)
+            result = filesystem.read_file(str(source), max_bytes=8)
+            self.assertEqual(result.structured_content["error"]["code"], "invalid_encoding")
+
+    def test_ranges_use_current_roots_blocks_and_error_policy(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"facts")
+        self.assertFalse(filesystem.read_file(str(source), max_bytes=2).is_error)
+        self.configure(allowed_roots=[])
+        result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "outside_allowed_roots")
+        self.configure(blocked_paths=["**/notes.txt"])
+        result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "blocked_path")
+        self.configure()
+        with patch.object(filesystem, "read_file_range", side_effect=PermissionError("denied")):
+            result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "os_error")
+
+    def test_partial_ranges_are_recognised_by_existing_interpretation_policy(self):
+        from ai.tools.interpretation import _partial_source
+
+        source = self.root / "notes.txt"
+        source.write_bytes(b"some observed facts")
+        result = filesystem.read_file(str(source), max_bytes=4)
+        self.assertTrue(_partial_source(result.model_dump(mode="json", by_alias=True)))
+
+    def test_concurrent_ranges_keep_offsets_and_contents_independent(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        source = self.root / "concurrent.txt"
+        raw = b"first " + b"a" * 1000 + b" last"
+        source.write_bytes(raw)
+        offsets = (0, 2, 500, 1006)
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            results = list(workers.map(lambda offset: filesystem.read_file(
+                str(source), offset_bytes=offset, max_bytes=4), offsets))
+        for offset, result in zip(offsets, results):
+            self.assertEqual(self.range_text(result), raw[offset:offset + 4].decode("utf-8"))
+            self.assertEqual(result.structured_content["offset_bytes"], offset)

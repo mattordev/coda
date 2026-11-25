@@ -18,6 +18,60 @@ from ai.mcp.transport import SDKStdioTransport
 
 
 class BundledMCPTests(unittest.TestCase):
+    def test_real_range_reads_preserve_schemas_partiality_cancellation_and_revocation(self):
+        from ai.intents import IntentRequest
+        from ai.mcp.runtime import LocalMCPManager
+        from threading import Event
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "large.txt"
+            prefix_bytes = 2 * 1024 * 1024
+            source.write_bytes(b"a" * prefix_bytes + "\u00e9\r\nend".encode("utf-8"))
+            permissions = root / "permissions.json"
+            policy = {"read": {"allowed_roots": [str(root)], "blocked_paths": []}}
+            configs = root / "servers"
+            configs.mkdir()
+            for mode in ("operation", "persistent"):
+                with self.subTest(mode=mode):
+                    permissions.write_text(json.dumps(policy), encoding="utf-8")
+                    (configs / "files.json").write_text(json.dumps({
+                        "id": "ranges", "bundled_server": "filesystem", "enabled": True,
+                        "trusted": True, "allowed_tools": ["read_file"], "session_mode": mode,
+                        "settings": {"config_file": str(permissions)},
+                    }), encoding="utf-8")
+                    definitions = discover_definitions(configs)
+                    self.assertFalse(definitions.errors)
+                    manager = LocalMCPManager(definitions.servers)
+                    try:
+                        found = manager.discover("ranges")
+                        self.assertTrue(found.success, found.error)
+                        intent = next(i for i in found.data if i.name == "mcp.ranges.read_file")
+                        self.assertIn("max_bytes", intent.input_schema["properties"])
+                        request = IntentRequest(intent, "Read the tail", 1, arguments={
+                            "path": str(source), "offset_bytes": prefix_bytes, "max_bytes": 4,
+                        })
+                        result = manager.executor(intent.name).execute(request)
+                        self.assertTrue(result.success, result.error)
+                        structured = result.data["structuredContent"]
+                        self.assertTrue(structured["partial"])
+                        self.assertEqual(structured["next_offset_bytes"], prefix_bytes + 4)
+                        self.assertTrue(result.data["content"][0]["text"].endswith("\u00e9\n"))
+                        cancelled = Event()
+                        cancelled.set()
+                        self.assertEqual(manager.executor(intent.name).execute(
+                            request, cancel_event=cancelled).error.code, "cancelled")
+                        malformed = replace(request, arguments={"path": str(source), "max_bytes": True})
+                        self.assertEqual(manager.executor(intent.name).execute(malformed).error.code, "invalid_arguments")
+                        permissions.write_text(json.dumps({"read": {
+                            "allowed_roots": [], "blocked_paths": [],
+                        }}), encoding="utf-8")
+                        denied = manager.executor(intent.name).execute(request)
+                        self.assertFalse(denied.success)
+                        self.assertEqual(denied.data["structuredContent"]["error"]["code"], "outside_allowed_roots")
+                    finally:
+                        self.assertTrue(manager.close()["ranges"].success)
+
     def test_new_read_tool_requires_explicit_grant_and_reads_through_real_server(self):
         from ai.intents import IntentRequest
         from ai.mcp.runtime import LocalMCPManager
