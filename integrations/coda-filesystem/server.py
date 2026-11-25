@@ -1201,6 +1201,23 @@ def _protect_operator_paths(target, *, contains=False):
     for root in roots:
         if target.is_relative_to(root) or (contains and root.is_relative_to(target)):
             raise FilesystemPermissionError('protected_path', 'The running integration/application is protected from filesystem mutations.')
+    # Physical aliases (for example bind mounts) need not resolve to the same
+    # spelling. Match existing target/ancestor identities as well as paths.
+    protected_identities = {(metadata.st_dev, metadata.st_ino) for root in roots
+                            for metadata in (root.stat(),)}
+    try:
+        metadata = protected_file.stat()
+        configuration_identity = (metadata.st_dev, metadata.st_ino)
+    except FileNotFoundError:
+        configuration_identity = None
+    for ancestor in (target, *target.parents):
+        try:
+            metadata = ancestor.stat()
+        except FileNotFoundError:
+            continue
+        identity = metadata.st_dev, metadata.st_ino
+        if identity in protected_identities or (ancestor == target and identity == configuration_identity):
+            raise FilesystemPermissionError('protected_path', 'An operator/runtime path alias is protected from mutations.')
 
 
 def _protect_transaction_paths(target):

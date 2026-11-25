@@ -63,7 +63,8 @@ class FilesystemCopyTests(unittest.TestCase):
     def test_single_file_copy_and_existing_destinations_never_overwrite(self):
         source = self.source / 'notes'
         source.write_bytes(b'original')
-        self.assertFalse(self.copy(source).is_error)
+        result = self.copy(source)
+        self.assertFalse(result.is_error, result)
         self.assertEqual(self.target.read_bytes(), b'original')
         source.write_bytes(b'changed')
         self.error(self.copy(source), 'already_exists')
@@ -289,7 +290,9 @@ module.server.run(transport='stdio')
             deadline = time.monotonic() + 8
             while not marker.exists() and time.monotonic() < deadline:
                 cancelled.wait(0.01)
-            self.assertTrue(marker.exists(), 'The real first chunk must be written before interruption.')
+            if not marker.exists():
+                worker.join(3)
+            self.assertTrue(marker.exists(), f'The real first chunk must be written before interruption. Results: {results!r}')
             pid = int(marker.read_text(encoding='utf-8'))
             if action == 'cancel':
                 cancelled.set()
