@@ -1,6 +1,8 @@
 """Deterministic summaries of returned data; no model calls or tool execution."""
 
 import json
+from datetime import datetime, timezone
+from pathlib import PureWindowsPath
 from math import isfinite
 import re
 
@@ -88,8 +90,48 @@ def _filename_search(data):
     return None
 
 
+def filesystem_fact_summary(data, text, question):
+    """Speak confirmed filesystem facts without a second model request."""
+    payload = _payload(data)
+    if not isinstance(payload, dict):
+        return None
+    kind = payload.get('kind')
+    name = PureWindowsPath(str(payload.get('path', ''))).name
+    label = _names([{'name': name}], 1) if name else 'The item'
+    if kind == 'filesystem_created' and payload.get('type') in ('file', 'directory') and name:
+        item = 'folder' if payload['type'] == 'directory' else 'file'
+        return f'Created the {item} {label}.'
+    if kind == 'file_metadata' and payload.get('type') in ('file', 'directory', 'other') and name:
+        item = {'directory': 'folder', 'file': 'file', 'other': 'filesystem item'}[payload['type']]
+        answer = f'{label} is a {item}.'
+        size = payload.get('size_bytes')
+        if item == 'file' and isinstance(size, int) and not isinstance(size, bool) and size >= 0:
+            answer += f' Its size is {size:,} ' + ('byte.' if size == 1 else 'bytes.')
+        if _valid_modified_at(payload):
+            try:
+                date = datetime.fromtimestamp(payload['modified_at'], timezone.utc)
+                answer += f' It was last modified on {date:%d %B %Y at %H:%M} UTC.'
+            except (ValueError, OSError, OverflowError):
+                pass
+        return answer
+    if kind == 'file_contents' and payload.get('partial') is True:
+        excerpt = re.sub(r'^\[Partial file content:[^\n]*\]\s*\n?', '', text)
+        intro = 'Here is part of the file.'
+        if payload.get('has_more') is True:
+            intro += ' There is more to read; say read the next part.'
+        else:
+            intro += ' This excerpt reaches the end of the file.'
+        if len(excerpt) > 750 or len(excerpt.splitlines()) > 8:
+            return intro + ' Say show tool output for the excerpt, or ask me to summarize it.'
+        return intro + ('\n' + excerpt if excerpt else '')
+    return None
+
+
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
+    facts = filesystem_fact_summary(data, text, question)
+    if facts is not None:
+        return facts
     search = _filename_search(data)
     if search is not None:
         matches, partial = search
@@ -98,8 +140,17 @@ def summarize_result(data, text, question):
         if partial:
             answer += " This is a partial search."
         if matches:
-            answer += " Matches include " + _names(matches, 3) + "."
-            if count > 3:
+            style = _presentation_style(_question_text(question))
+            selected = matches
+            if style == 'recent_files':
+                if not all(_valid_modified_at(entry) for entry in matches):
+                    return answer + " Modification times are missing or invalid, so I can't reliably identify the most recently edited files."
+                selected = sorted(matches, key=lambda entry: entry['modified_at'], reverse=True)
+            limit = count if style == 'all_names' else 3
+            if len(_names(selected, limit)) > 750:
+                limit = 5
+            answer += (" The most recently modified matches returned are " if style == 'recent_files' else " Matches include ") + _names(selected, limit) + "."
+            if count > limit:
                 answer += " Say show tool output for the other paths."
         return answer
     directory = _directory_entries(data, text)
@@ -113,7 +164,7 @@ def summarize_result(data, text, question):
             r"(?<![\w.])" + re.escape(entry["name"].casefold()) + r"(?![\w.])", question
         )] if re.search(r"\b(is|does|find|contain|has|have)\b", question) else []
         if specific:
-            return "The listing includes " + _names(specific, 3) + "."
+            return "The listing includes " + _names(specific, 3) + "." + (" This is a partial result." if partial else "")
         files = sum(entry["type"] == "file" for entry in entries)
         directories = len(entries) - files
         counts = []
