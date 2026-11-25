@@ -177,6 +177,7 @@ def create_file(path: str, content: str = "") -> CallToolResult:
     bytes. Coda requires explicit write permissions and confirmation before use.
     """
     try:
+        _protect_transaction_paths(_concrete_path(path))
         if not isinstance(content, str):
             raise FilesystemPermissionError("invalid_arguments", "File content must be UTF-8 text.")
         try:
@@ -215,6 +216,7 @@ def create_directory(path: str) -> CallToolResult:
     and confirmation before use; missing parent directories are not created.
     """
     try:
+        _protect_transaction_paths(_concrete_path(path))
         target = creation_path(path)
         target.mkdir(parents=False, exist_ok=False)
     except FilesystemPermissionError as error:
@@ -233,13 +235,15 @@ def create_directory(path: str) -> CallToolResult:
 
 
 def _concrete_path(path):
-    if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
+    if not isinstance(path, str) or not path.strip() or len(path) > 32768 or not Path(path).is_absolute():
         raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute concrete path.")
     try:
         path.encode('utf-8')
     except UnicodeError as error:
         raise FilesystemPermissionError('invalid_arguments', 'Paths must contain valid UTF-8 text.') from error
     target = Path(path)
+    if len(target.parts) > 128:
+        raise FilesystemPermissionError('invalid_arguments', 'Mutation paths are limited to 128 components.')
     # Reject ambiguous Windows names on both supported platforms, including
     # alternate data streams, device names and dot/space normalization tricks.
     if any(part in (".", "..") or part.endswith((" ", "."))
@@ -252,6 +256,7 @@ def _concrete_path(path):
 def creation_path(path: str, *, allow_existing=False) -> Path:
     """Authorize an entry without borrowing any of the read root grants."""
     target = _concrete_path(path)
+    _protect_operator_paths(target)
     config = load_config()
     write = config.get("write", {})
     if not isinstance(write, dict) or type(write.get("enabled", False)) is not bool:
@@ -814,6 +819,7 @@ def _replace_text(target, staged, backup):
 
 
 def _mutation_path(path):
+    _protect_transaction_paths(_concrete_path(path))
     target = creation_path(path, allow_existing=True)
     config = load_config()
     check_if_path_is_allowed(config, str(target))
@@ -1109,6 +1115,7 @@ def copy_path(source: str, destination: str, max_entries: int = 1024,
         source_metadata = _copy_source(source_path, config)
         source_path = source_path.resolve()
         target = creation_path(destination)
+        _protect_transaction_paths(target)
         if not target.parent.is_dir():
             raise FilesystemPermissionError('not_found', 'The destination parent must already exist.')
         if stat.S_ISDIR(source_metadata.st_mode):
@@ -1178,6 +1185,254 @@ def copy_path(source: str, destination: str, max_entries: int = 1024,
         structuredContent={'kind': 'filesystem_copied', 'source': str(source_path), 'destination': str(target),
                            'bytes_copied': copied, 'entries_copied': len(entries),
                            'type': 'directory' if stat.S_ISDIR(source_metadata.st_mode) else 'file'})
+
+
+def _protect_operator_paths(target, *, contains=False):
+    """File tools cannot rewrite their own authority or running installation."""
+    target = target.resolve()
+    server_root = Path(__file__).resolve().parent
+    roots = [server_root]
+    installation = server_root.parent.parent
+    if (installation / 'coda_runtime.py').is_file() and (installation / 'ai/mcp/runtime.py').is_file():
+        roots.append(installation)
+    protected_file = CONFIG_PATH.resolve()
+    if target == protected_file or (contains and protected_file.is_relative_to(target)):
+        raise FilesystemPermissionError('protected_path', 'Operator permissions cannot be changed by filesystem tools.')
+    for root in roots:
+        if target.is_relative_to(root) or (contains and root.is_relative_to(target)):
+            raise FilesystemPermissionError('protected_path', 'The running integration/application is protected from filesystem mutations.')
+
+
+def _protect_transaction_paths(target):
+    if any(re.fullmatch(r'\.coda-(?:lock|edit-[0-9a-f]{32}\.tmp|backup-[0-9a-f]{32}|copy-[0-9a-f]{32})', ancestor.name)
+           for ancestor in (target, *target.parents)):
+        raise FilesystemPermissionError('protected_path', 'Transaction recovery artifacts require explicit operator inspection.')
+
+
+def _destructive_path(path, config, owned_locks=()):
+    target = _concrete_path(str(path))
+    destructive = config.get('destructive', {})
+    if not isinstance(destructive, dict) or type(destructive.get('enabled', False)) is not bool:
+        raise FilesystemPermissionError('configuration_error', 'Destructive configuration is invalid.')
+    if not destructive.get('enabled', False):
+        raise FilesystemPermissionError('destructive_disabled', 'Destructive filesystem authority is disabled.')
+    roots = destructive.get('allowed_roots', [])
+    blocked = destructive.get('blocked_paths', [])
+    if (not isinstance(roots, list) or len(roots) > 64
+            or any(not isinstance(root, str) or not Path(root).is_absolute() or '\0' in root for root in roots)
+            or not isinstance(blocked, list) or any(not isinstance(pattern, str) or not pattern.strip() for pattern in blocked)
+            or type(destructive.get('require_confirmation', True)) is not bool):
+        raise FilesystemPermissionError('configuration_error', 'Destructive roots or blocks are invalid.')
+    policy = {'read': {'allowed_roots': roots, 'blocked_paths': config['read']['blocked_paths'] + blocked}}
+    try:
+        check_if_path_is_allowed(policy, str(target))
+        check_if_path_is_blocked(policy, str(target))
+    except FilesystemPermissionError as error:
+        raise FilesystemPermissionError(error.code, 'The destructive target or a descendant is outside its authority or blocked.') from error
+    _protect_operator_paths(target, contains=True)
+    for ancestor in (target, *target.parents):
+        metadata = ancestor.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+            raise FilesystemPermissionError('unsafe_path', 'Destructive operations refuse linked/reparse ancestors or targets.')
+    for lock in (target.parent / '.coda-lock', target / '.coda-lock' if target.is_dir() else target.parent / '.coda-lock'):
+        if lock.exists() and lock not in owned_locks:
+            raise FilesystemPermissionError('mutation_in_progress', 'Inspect the interrupted or active transaction before destructive work.')
+    _protect_transaction_paths(target)
+    metadata = target.lstat()
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)) or (
+            stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1):
+        raise FilesystemPermissionError('unsafe_path', 'Choose an ordinary entry without aliases.')
+    protected = [Path(target.anchor)]
+    write = config.get('write', {})
+    if not isinstance(write, dict):
+        raise FilesystemPermissionError('configuration_error', 'Write boundaries are invalid.')
+    for group in (config['read']['allowed_roots'], config['read'].get('workspace_roots', []),
+                  write.get('allowed_roots', []), roots):
+        if not isinstance(group, list) or len(group) > 64 or any(
+                not isinstance(root, str) or not Path(root).is_absolute() or '\0' in root for root in group):
+            raise FilesystemPermissionError('configuration_error', 'Protected filesystem boundaries are invalid.')
+        protected.extend(Path(root).resolve() for root in group)
+    canonical = target.resolve()
+    for root in protected:
+        if canonical == root or root.is_relative_to(canonical):
+            raise FilesystemPermissionError('protected_path', 'Configured roots and workspaces cannot be removed or moved.')
+        try:
+            root_metadata = root.stat()
+        except FileNotFoundError:
+            continue
+        if (root_metadata.st_dev, root_metadata.st_ino) == (metadata.st_dev, metadata.st_ino):
+            raise FilesystemPermissionError('protected_path', 'A configured root alias is protected.')
+    return target, metadata
+
+
+def _destructive_manifest(root, config, recursive, max_entries, max_depth, deadline):
+    pending = deque([(root, 0)])
+    entries = []
+    path_chars = 0
+    while pending:
+        if monotonic() >= deadline:
+            raise FilesystemPermissionError('resource_limit', 'Destructive traversal reached its time limit.')
+        if load_config() != config:
+            raise FilesystemPermissionError('permission_denied', 'Permissions changed during destructive preflight.')
+        current, depth = pending.popleft()
+        target, metadata = _destructive_path(current, config)
+        entries.append((target, metadata))
+        path_chars += len(str(target.relative_to(root)))
+        if len(entries) > max_entries or path_chars > 65536:
+            raise FilesystemPermissionError('resource_limit', 'Destructive scope exceeds its entry/path limit.')
+        if not stat.S_ISDIR(metadata.st_mode):
+            continue
+        if depth > max_depth:
+            raise FilesystemPermissionError('resource_limit', 'Destructive scope exceeds its directory-depth limit.')
+        children = []
+        with os.scandir(target) as directory:
+            for entry in directory:
+                if not recursive:
+                    raise FilesystemPermissionError('directory_not_empty', 'Set recursive=true explicitly to delete a nonempty directory.')
+                if monotonic() >= deadline or len(entries) + len(pending) + len(children) >= max_entries:
+                    raise FilesystemPermissionError('resource_limit', 'Destructive scope reached its time or entry limit.')
+                children.append(entry.name)
+        for name in sorted(children, key=lambda name: (name.casefold(), name)):
+            pending.append((target / name, depth + 1))
+    return entries
+
+
+def _release_operation_lock(path, owned_locks):
+    expected = owned_locks.get(path)
+    if expected is None:
+        return
+    current = path.lstat()
+    if (current.st_dev, current.st_ino) != expected or stat.S_ISLNK(current.st_mode):
+        raise FilesystemPermissionError('content_changed', 'An operation lock changed identity; it was not removed.')
+    path.unlink()
+    del owned_locks[path]
+
+
+def _lock_destructive_scope(root, entries, config, deadline, owned_locks):
+    """Internal metadata locks belong to the approved destructive transaction."""
+    directories = [root.parent] + [path for path, metadata in entries if stat.S_ISDIR(metadata.st_mode)]
+    authority = config['destructive']
+    policy = {'read': {'allowed_roots': authority['allowed_roots'],
+                       'blocked_paths': config['read']['blocked_paths'] + authority.get('blocked_paths', [])}}
+    transaction = uuid.uuid4().hex
+    for index, directory in enumerate(directories):
+        if monotonic() >= deadline:
+            raise FilesystemPermissionError('resource_limit', 'Destructive lock acquisition reached its time limit.')
+        if load_config() != config:
+            raise FilesystemPermissionError('permission_denied', 'Permissions changed while acquiring destructive locks.')
+        lock = directory / '.coda-lock'
+        check_if_path_is_allowed(policy, str(lock))
+        check_if_path_is_blocked(policy, str(lock))
+        _protect_operator_paths(lock)
+        for ancestor in (directory, *directory.parents):
+            metadata = ancestor.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, 'st_file_attributes', 0) & 0x400:
+                raise FilesystemPermissionError('unsafe_path', 'A lock directory became a link or reparse point.')
+        try:
+            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as error:
+            raise FilesystemPermissionError('mutation_in_progress', 'Another transaction owns a required folder lock.') from error
+        with os.fdopen(descriptor, 'wb') as output:
+            created = os.fstat(output.fileno())
+            owned_locks[lock] = (created.st_dev, created.st_ino)
+            record = {'operation': 'delete', 'transaction': transaction, 'outcome': 'unverified'}
+            record['target' if index == 0 else 'relative_folder'] = str(root if index == 0 else directory.relative_to(root))
+            output.write(json.dumps(record, ensure_ascii=False).encode('utf-8'))
+            output.flush()
+            os.fsync(output.fileno())
+
+
+def _verify_destructive_entry(current, original, config, owned_locks, deadline):
+    if monotonic() >= deadline:
+        raise FilesystemPermissionError('resource_limit', 'Deletion reached its time limit.')
+    if load_config() != config:
+        raise FilesystemPermissionError('permission_denied', 'Permissions changed during deletion.')
+    _, fresh = _destructive_path(current, config, owned_locks)
+    if stat.S_ISDIR(original.st_mode):
+        same = (fresh.st_dev, fresh.st_ino, fresh.st_mode) == (original.st_dev, original.st_ino, original.st_mode)
+    else:
+        same = _copy_signature(fresh) == _copy_signature(original)
+    if not same:
+        raise FilesystemPermissionError('content_changed', 'An entry changed before deletion.')
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False,
+))
+def delete_path(path: str, recursive: bool = False, max_entries: int = 1024, max_depth: int = 8) -> CallToolResult:
+    """Delete an authorised file or directory with separate destructive permission.
+
+    CODA always requires action-bound confirmation. Nonempty directories require
+    recursive=true; every bounded descendant is authorised before any deletion.
+    Protect roots/workspaces, operator configuration, runtime and recovery paths.
+    Entries cap at 4096, depth at 16, path metadata at 64 KiB and cooperative time
+    at five seconds. Interrupted/partial deletion is never automatically replayed.
+    """
+    removed_files = removed_directories = 0
+    attempted = False
+    owned_locks = {}
+    try:
+        deadline = monotonic() + SEARCH_SECONDS
+        if type(recursive) is not bool or type(max_entries) is not int or not 1 <= max_entries <= 4096 or (
+                type(max_depth) is not int or not 0 <= max_depth <= 16):
+            raise FilesystemPermissionError('invalid_arguments', 'Supply a boolean recursive flag and bounded integer deletion limits.')
+        target = _concrete_path(path)
+        config = load_config()
+        entries = _destructive_manifest(target, config, recursive, max_entries, max_depth, deadline)
+        _lock_destructive_scope(target, entries, config, deadline, owned_locks)
+        for current, original in entries:
+            _verify_destructive_entry(current, original, config, owned_locks, deadline)
+        for current, original in reversed(entries):
+            _verify_destructive_entry(current, original, config, owned_locks, deadline)
+            attempted = True
+            if stat.S_ISDIR(original.st_mode):
+                _release_operation_lock(current / '.coda-lock', owned_locks)
+                current.rmdir()
+                removed_directories += 1
+            else:
+                current.unlink()
+                removed_files += 1
+    except (FilesystemPermissionError, OSError, ValueError, RuntimeError) as error:
+        code = error.code if isinstance(error, FilesystemPermissionError) else (
+            'not_found' if isinstance(error, FileNotFoundError) else 'permission_denied' if isinstance(error, PermissionError) else 'os_error')
+        if not attempted:
+            result = error_result(code, str(error))
+        else:
+            result = CallToolResult(isError=True, content=[TextContent(type='text', text=
+                f'Deletion interrupted: {removed_files} files and {removed_directories} directories confirmed removed. Inspect the remaining target before retrying.')],
+                structuredContent={'error': {'code': 'delete_incomplete', 'message': str(error)},
+                    'cause_code': code, 'path': path, 'recursive': recursive, 'partial': True,
+                    'files_removed': removed_files, 'directories_removed': removed_directories,
+                    'outcome_may_be_incomplete': True})
+    else:
+        result = CallToolResult(content=[TextContent(type='text', text=
+            f'Deleted {target}: {removed_files} files and {removed_directories} directories.')], structuredContent={
+            'kind': 'filesystem_deleted', 'path': str(target), 'recursive': recursive,
+            'files_removed': removed_files, 'directories_removed': removed_directories})
+    if not attempted or not result.is_error:
+        for lock in list(reversed(owned_locks)):
+            try:
+                _release_operation_lock(lock, owned_locks)
+            except (OSError, FilesystemPermissionError):
+                pass
+    if owned_locks:
+        payload = dict(result.structured_content or {})
+        examples = []
+        output_chars = 2
+        for lock in owned_locks:
+            name = str(lock)
+            cost = len(json.dumps(name, ensure_ascii=True)) + 2
+            if len(examples) >= 20 or output_chars + cost > SEARCH_OUTPUT_CHARS:
+                break
+            examples.append(name)
+            output_chars += cost
+        payload['recovery_paths'] = examples
+        payload['recovery_lock_count'] = len(owned_locks)
+        payload['recovery_paths_truncated'] = len(examples) < len(owned_locks)
+        result = CallToolResult(isError=result.is_error, content=result.content + [TextContent(type='text', text=
+            f'Retained {len(owned_locks)} transaction locks. Example locations:\n' + '\n'.join(examples)
+            + '\nInspect the remaining target before any retry or lock cleanup.')], structuredContent=payload)
+    return result
 
 
 if __name__ == "__main__":

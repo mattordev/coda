@@ -115,6 +115,9 @@ def filesystem_fact_summary(data, text, question):
         return answer
     name = PureWindowsPath(str(payload.get('destination' if kind == 'filesystem_copied' else 'path', ''))).name
     label = _names([{'name': name}], 1) if name else 'The item'
+    if kind == 'filesystem_deleted' and name:
+        return 'Deleted ' + label + '.' + (' Recovery locks still need cleanup; say show tool output for details.'
+                                         if payload.get('recovery_lock_count') else '')
     if kind == 'filesystem_copied' and name and payload.get('type') in ('file', 'directory'):
         return ('Copied the folder to ' if payload['type'] == 'directory' else 'Copied the file to ') + label + '.'
     if kind == 'filesystem_changed' and name and payload.get('operation') in ('edit', 'append'):

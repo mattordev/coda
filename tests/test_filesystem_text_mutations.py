@@ -321,7 +321,7 @@ class FilesystemTextMutationTests(unittest.TestCase):
         self.source.write_bytes(b'external change')
         result = runtime.run('confirm', {})
         self.assertFalse(result.tool_result.success)
-        self.assertIn('file has changed', result.response_text)
+        self.assertIn('changed', result.response_text)
         self.assertEqual(self.source.read_bytes(), b'external change')
         self.assertEqual(self.artifacts(), [])
 

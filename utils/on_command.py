@@ -221,6 +221,11 @@ def _dispatch_intent(
                 kind = 'file' if request.intent.name.endswith('.create_file') else 'folder'
                 confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
             parts = request.intent.name.split('.', 2)
+            if (len(parts) == 3 and parts[2] == 'delete_path'
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                target = sanitize_text(str(arguments.get('path', '')))
+                scope = ' including all its contents' if arguments.get('recursive') is True else ' (files and empty folders only)'
+                confirmation = f'Permanently delete "{target}"{scope}? Say confirm or cancel.'
             if (len(parts) == 3 and parts[2] == 'copy_path'
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
                 source = sanitize_text(str(arguments.get('source', '')))
