@@ -10,6 +10,11 @@ import json
 from fnmatch import fnmatchcase
 import stat
 from datetime import datetime, timezone
+import codecs
+
+
+MAX_READ_BYTES = 1024 * 1024
+DEFAULT_RANGE_BYTES = 64 * 1024
 
 
 # Locate the config file alongside server.py
@@ -48,12 +53,22 @@ def list_directory(path: str) -> CallToolResult:
     )
     
 @server.tool(structured_output=False)
-def read_file(path: str) -> CallToolResult:
-    """Read a specified file."""
+def read_file(path: str, offset_bytes: int = 0, max_bytes: int | None = None) -> CallToolResult:
+    """Read permitted UTF-8 text; optionally select a bounded byte range.
+
+    Without range arguments, preserve the complete-file 1 MiB limit. Supplying
+    max_bytes (1 to 1048576) or a nonzero offset selects a range; the default
+    range budget is 65536 bytes. Resume using returned next_offset_bytes, which
+    never splits a UTF-8 character or CRLF pair. Ranges do not grant permission.
+    """
     
     try:
-        if not path.strip() or not Path(path).is_absolute():
+        if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
                 raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute file path.")
+        if type(offset_bytes) is not int or not 0 <= offset_bytes <= 2**63 - 1:
+            raise FilesystemPermissionError("invalid_arguments", "The byte offset must be a nonnegative 64-bit integer.")
+        if max_bytes is not None and (type(max_bytes) is not int or not 1 <= max_bytes <= MAX_READ_BYTES):
+            raise FilesystemPermissionError("invalid_arguments", "The byte budget must be an integer from 1 to 1048576.")
         config = load_config()
         check_if_path_is_allowed(config, path)
         check_if_path_is_blocked(config, path)
@@ -73,7 +88,11 @@ def read_file(path: str) -> CallToolResult:
     if is_file:
         # do file reading
         try: 
+            if offset_bytes or max_bytes is not None:
+                return read_file_range(requested_path, offset_bytes, max_bytes or DEFAULT_RANGE_BYTES)
             text = read_safe_file(requested_path)
+        except FilesystemPermissionError as error:
+            return error_result(error.code, str(error))
         except UnicodeDecodeError as error:
             return error_result("invalid_encoding", f"Not the correct file type: {error}")
         except ValueError as error:
@@ -90,6 +109,44 @@ def read_file(path: str) -> CallToolResult:
         return error_result("file_not_found", f"File not found at: {requested_path}")
 
         
+
+def read_file_range(path: Path, offset_bytes: int, max_bytes: int) -> CallToolResult:
+    """Seek without scanning preceding content; read at most budget + 1 bytes."""
+    with path.open("rb") as source:
+        source.seek(0, 2)
+        if offset_bytes > source.tell():
+            raise FilesystemPermissionError("invalid_arguments", "The byte offset is beyond the end of the file.")
+        source.seek(offset_bytes)
+        data = source.read(max_bytes + 1)
+    if offset_bytes and data and data[0] & 0xC0 == 0x80:
+        raise FilesystemPermissionError("invalid_arguments", "The byte offset must begin at a UTF-8 character boundary.")
+    # Decode only the selected bytes. An unfinished final character is retained
+    # for the next range, but malformed UTF-8 and incomplete EOF still fail.
+    chunk = data[:max_bytes]
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    text = decoder.decode(chunk, final=len(data) <= max_bytes)
+    consumed = len(chunk) - len(decoder.getstate()[0])
+    # Keeping CRLF together avoids producing two newlines across continuations.
+    if consumed and data[consumed - 1:consumed + 1] == b"\r\n":
+        consumed -= 1
+        text = text[:-1]
+    has_more = len(data) > consumed
+    if has_more and consumed == 0:
+        raise FilesystemPermissionError("invalid_arguments", "The byte budget is too small for the next character or newline. Increase max_bytes.")
+    next_offset = offset_bytes + consumed if has_more else None
+    partial = bool(offset_bytes or has_more)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if partial:
+        continuation = f" Continue at byte {next_offset}." if has_more else " End of file."
+        text = f"[Partial file content: bytes {offset_bytes} to {offset_bytes + consumed} (end exclusive).{continuation}]\n" + text
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structuredContent={
+            "kind": "file_contents", "partial": partial, "offset_bytes": offset_bytes,
+            "bytes_read": consumed, "has_more": has_more, "next_offset_bytes": next_offset,
+        },
+    )
+
 
 @server.tool(structured_output=False, annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
@@ -206,8 +263,7 @@ def creation_result(path: Path, entry_type: str) -> CallToolResult:
 
 def read_safe_file(path: Path) -> str:
     """Bound the actual read, including files that grow after the size check."""
-    max_file_size_mib = 1
-    max_file_size_b = max_file_size_mib * 1024 * 1024   
+    max_file_size_b = MAX_READ_BYTES
 
     if path.stat().st_size > max_file_size_b:
         raise ValueError(f"{path.name} is too big to be read, please open it manually.")

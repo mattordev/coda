@@ -62,7 +62,7 @@ precedence and safe conversational failure handling. The supported test matrix
 covers Windows and Linux with Python 3.11 and 3.12. The release tag is checked
 against `version.json` with `python -m utils.update_releases v1.5.5`.
 
-The owner confirmed successful live search against an existing SearXNG instance.
+Live search was verified against an existing SearXNG instance.
 Automated provider tests use mocked boundaries; they do not guarantee availability
 of every search engine or verify live microphone and speaker behavior. DDGS and
 the engines behind SearXNG may be blocked, rate limited or unavailable.

@@ -13,6 +13,41 @@ non-UTF-8, missing and directory inputs return errors. The actual read is bounde
 even if a file grows after its size was checked. File contents remain untrusted
 data and pass through Coda's existing tool-result privacy policy.
 
+### Bounded ranges in large files
+
+Use `max_bytes` to read a bounded portion of a large UTF-8 file without loading
+the preceding content. `offset_bytes` defaults to zero. For example:
+
+```text
+mcp.filesystem.read_file {"path":"D:/Projects/report.txt","max_bytes":4096}
+mcp.filesystem.read_file {"path":"D:/Projects/report.txt","offset_bytes":4096,"max_bytes":4096}
+```
+
+For continuation, use the returned `next_offset_bytes` rather than adding the
+requested budget: the server can shorten a chunk to keep a UTF-8 character or
+CRLF pair together. Offsets count original file bytes; output retains the
+existing newline normalisation. A byte offset inside a UTF-8 character is
+rejected. Very small budgets that cannot fit the next character/newline are
+rejected rather than returning a continuation that cannot advance.
+
+`max_bytes` must be an integer from 1 to 1,048,576. A nonzero offset without an
+explicit budget uses 65,536 bytes. Each range reads at most its byte budget plus
+one lookahead byte and seeks directly to the offset. The legacy call without
+range arguments still reads a complete file only when it fits the 1 MiB cap.
+
+Range results include `partial`, `offset_bytes`, `bytes_read`, `has_more` and
+`next_offset_bytes`. A missing suffix or prefix is labelled partial in both the
+text and structured data, including when a tail range reaches EOF. An offset at
+EOF returns an empty range; an offset beyond EOF is rejected. Invalid UTF-8 in
+the selected range is rejected; unread portions are not validated. Repeated
+ranges observe the file at each call, so concurrent edits can change its bytes;
+this is not a snapshot or an automatic multi-call read loop.
+
+Current roots, blocked paths, tool grants and cancellation apply to each call.
+No configuration migration or new dependency is required. A cancelled MCP
+operation is retired through the existing transport; an individual bounded
+local file read has no separate mid-read cancellation mechanism.
+
 Each entry also supplies its `modified_at` timestamp. The displayed listing stays
 alphabetical. General requests get spoken counts, recent-edits requests get the
 three newest files, and explicit filename requests get names within the speech limit.
