@@ -214,15 +214,20 @@ class FilesystemMCPTests(unittest.TestCase):
         source.write_bytes(b"a" * (2 * 1024 * 1024) + b"tail")
         self.assertEqual(self.read_code(source), "file_too_large")
         real_open = Path.open
+        # Windows runners can spell TEMP through an alias/short path, while
+        # authorisation opens the canonical spelling. Observe that same file.
+        canonical_source = source.resolve()
         reads = []
+        handles = []
 
         def tracked_open(path, mode="r", *args, **kwargs):
             handle = real_open(path, mode, *args, **kwargs)
-            if path == source and mode == "rb":
+            if path == canonical_source and mode == "rb":
                 tracked = MagicMock(wraps=handle)
                 tracked.__enter__.return_value = tracked
                 tracked.__exit__.side_effect = lambda *unused: handle.close()
                 reads.append(tracked)
+                handles.append(handle)
                 return tracked
             return handle
 
@@ -233,9 +238,10 @@ class FilesystemMCPTests(unittest.TestCase):
         self.assertTrue(result.structured_content["partial"])
         self.assertFalse(result.structured_content["has_more"])
         self.assertIsNone(result.structured_content["next_offset_bytes"])
+        self.assertEqual(len(reads), 1, "The canonical file read must be observed.")
         reads[0].read.assert_called_once_with(5)
         self.assertEqual(reads[0].seek.call_args_list[-1].args, (2 * 1024 * 1024,))
-        self.assertTrue(reads[0].closed)
+        self.assertTrue(handles[0].closed)
 
     def test_range_continuations_preserve_multibyte_text_and_newlines(self):
         source = self.root / "unicode.txt"
