@@ -236,8 +236,9 @@ class FilesystemTextMutationTests(unittest.TestCase):
                    "[System.Security.AccessControl.FileSystemRights]::FullControl,"
                    "[System.Security.AccessControl.AccessControlType]::Allow); "
                    "$acl.SetAccessRule($rule); Set-Acl -LiteralPath $path -AclObject $acl")
-        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', protect],
-                       check=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        protected = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', protect],
+                                   check=False, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.assertEqual(protected.returncode, 0, protected.stdout + protected.stderr)
         def acl():
             return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
                 f"(Get-Acl -LiteralPath '{quoted}').Sddl"], check=True, capture_output=True,
