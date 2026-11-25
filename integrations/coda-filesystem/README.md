@@ -190,3 +190,53 @@ Outside or blocked symlink/junction targets reveal no metadata. Relative
 workspace resolution currently applies to `read_file` and `list_directory`;
 provide an absolute path for metadata. Metadata is a per-call observation and
 can change immediately afterwards. No new dependency or migration is required.
+
+## Bounded filename search
+
+`search_files(path, pattern)` searches file basenames beneath an explicit,
+read-authorised absolute directory. Add `search_files` to the MCP definition's
+exact `allowed_tools` list to enable it. Discovery grants no new permission.
+
+```text
+mcp.filesystem.search_files {"path":"D:/Projects","pattern":"*.md"}
+mcp.filesystem.search_files {"path":"D:/Projects","pattern":"README.md","max_depth":2,"max_results":20}
+```
+
+Matching is case-insensitive on Windows and Linux. Patterns use filename glob
+syntax (`*`, `?`, character classes), without directory separators. `*.md`
+matches Markdown filenames at every examined depth. Only regular files match;
+file contents are never read. Descendant symlinks, junctions and reparse points
+are skipped, including links to another permitted root and directory cycles.
+An explicitly supplied root is authorised using the existing absolute-path
+policy before traversal; no home, current directory or workspace is inferred.
+
+| Limit | Default | Allowed range |
+| --- | --- | --- |
+| `max_depth` | 5 | 0–16; zero examines immediate files |
+| `max_entries` | 4,096 | 1–10,000 enumerated names |
+| `max_results` | 50 | 1–200 matches |
+
+Traversal also has a five-second cooperative deadline. Match metadata is capped
+at 32,768 serialised ASCII characters, independently of the MCP transport limit.
+Directories are processed breadth first, with names sorted within each fully
+enumerated directory. An oversized directory uses at most one extra enumeration
+step to detect the entry limit; its arbitrary enumeration prefix is discarded.
+Earlier complete directories can still contribute matches. Narrow the requested
+directory or adjust the bounded limits when a search is incomplete.
+
+`matches` retains exact authorised paths, names and observed modification times.
+`partial`, `truncated` and `limits_reached` disclose depth, entry, result, output,
+time or unavailable-entry limits. Reaching the result cap is conservatively
+reported as partial even if it coincides with the final match. Normal replies
+retain that scope notice and show a few names; `show tool output` exposes all
+returned paths. A filename search is not presented as a complete directory
+listing or a content search.
+
+Read policy is reloaded before each directory, periodically during enumeration
+and processing, and before returning results. A policy change discards collected
+observations and denies the request. Existing MCP cancellation retires the owned
+operation/server; directory iterators are closed when limits stop traversal.
+The cooperative deadline cannot interrupt an individual blocked filesystem call;
+the host transport timeout/cancellation remains the outer bound. Existing
+application-level filesystem race limitations still apply. No new dependency or
+private configuration migration is required.

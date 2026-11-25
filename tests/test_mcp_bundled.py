@@ -201,6 +201,7 @@ class BundledMCPTests(unittest.TestCase):
                 "mcp.files.list_directory", "mcp.files.read_file",
                 "mcp.files.create_file", "mcp.files.create_directory",
                 "mcp.files.get_file_metadata",
+                "mcp.files.search_files",
             })
             intent = next(item for item in discovered.data if item.name == "mcp.files.read_file")
             request = IntentRequest(intent, "Read README", 1, arguments={"path": str(source)})

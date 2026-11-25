@@ -11,10 +11,15 @@ from fnmatch import fnmatchcase
 import stat
 from datetime import datetime, timezone
 import codecs
+import os
+from time import monotonic
+from collections import deque
 
 
 MAX_READ_BYTES = 1024 * 1024
 DEFAULT_RANGE_BYTES = 64 * 1024
+SEARCH_SECONDS = 5
+SEARCH_OUTPUT_CHARS = 32768
 
 
 # Locate the config file alongside server.py
@@ -423,6 +428,156 @@ def get_file_metadata(path: str) -> CallToolResult:
             "size_bytes": size, "modified_at": metadata.st_mtime,
         },
     )
+
+
+def _search_policy(config, root):
+    """Revocation discards observations rather than returning stale grants."""
+    current = load_config()
+    if current["read"] != config["read"]:
+        raise FilesystemPermissionError("permission_denied", "Read permissions changed during the search. Request it again.")
+    check_if_path_is_allowed(current, str(root))
+    check_if_path_is_blocked(current, str(root))
+
+
+def _search_tree(root, pattern, config, max_depth, max_entries, max_results):
+    """Breadth-first traversal sorts only completely enumerated bounded folders."""
+    pending = deque([(root, 0)])
+    matches, reasons = [], set()
+    examined = processed = output_chars = 0
+    deadline = monotonic() + SEARCH_SECONDS
+    stopped = False
+    while pending and not stopped:
+        directory, depth = pending.popleft()
+        _search_policy(config, root)
+        try:
+            directory_stat = directory.lstat()
+            if stat.S_ISLNK(directory_stat.st_mode) or getattr(directory_stat, "st_file_attributes", 0) & 0x400:
+                reasons.add("unavailable_directory")
+                continue
+            check_if_path_is_allowed(config, str(directory))
+            check_if_path_is_blocked(config, str(directory))
+            if not directory.resolve().is_relative_to(root):
+                reasons.add("unavailable_directory")
+                continue
+            children = []
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if monotonic() >= deadline:
+                        reasons.add("time_limit")
+                        stopped = True
+                        break
+                    examined += 1
+                    if examined > max_entries:
+                        reasons.add("entry_limit")
+                        stopped = True
+                        break
+                    children.append(entry)
+                    if examined % 64 == 0:
+                        _search_policy(config, root)
+            if stopped:
+                # A capped directory's arbitrary OS enumeration prefix must not
+                # decide which names match. Return only earlier complete folders.
+                break
+            for entry in sorted(children, key=lambda child: (child.name.casefold(), child.name)):
+                if monotonic() >= deadline:
+                    reasons.add("time_limit")
+                    stopped = True
+                    break
+                processed += 1
+                if processed % 64 == 0:
+                    _search_policy(config, root)
+                child = directory / entry.name
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                    if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+                        continue
+                    check_if_path_is_allowed(config, str(child))
+                    check_if_path_is_blocked(config, str(child))
+                    canonical = child.resolve()
+                    if not canonical.is_relative_to(root):
+                        continue
+                    if stat.S_ISDIR(metadata.st_mode):
+                        if depth < max_depth:
+                            pending.append((canonical, depth + 1))
+                        else:
+                            reasons.add("depth_limit")
+                    elif stat.S_ISREG(metadata.st_mode) and fnmatchcase(entry.name.casefold(), pattern.casefold()):
+                        match = {"name": entry.name, "path": str(canonical), "type": "file",
+                                 "modified_at": metadata.st_mtime}
+                        cost = len(json.dumps(match, ensure_ascii=True))
+                        if output_chars + cost > SEARCH_OUTPUT_CHARS:
+                            reasons.add("output_limit")
+                            stopped = True
+                            break
+                        matches.append(match)
+                        output_chars += cost
+                        if len(matches) >= max_results:
+                            reasons.add("result_limit")
+                            stopped = True
+                            break
+                except FilesystemPermissionError:
+                    continue
+                except (OSError, RuntimeError):
+                    reasons.add("unavailable_entry")
+        except FilesystemPermissionError:
+            raise
+        except (OSError, RuntimeError):
+            reasons.add("unavailable_directory")
+    _search_policy(config, root)
+    matches.sort(key=lambda match: (match["path"].casefold(), match["path"]))
+    return matches, sorted(reasons), examined
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+))
+def search_files(path: str, pattern: str, max_depth: int = 5,
+                 max_entries: int = 4096, max_results: int = 50) -> CallToolResult:
+    """Find file basenames by case-insensitive glob under an absolute read root.
+
+    Searches names only, without following descendant links/junctions or reading
+    contents. Depth 0 examines immediate files. Depth is capped at 16, entries
+    at 10000, results at 200, traversal at 5 seconds and match metadata at 32 KiB.
+    Partial results disclose the limit; no ambient working directory is inferred.
+    """
+    try:
+        if not isinstance(path, str) or not path.strip() or "\0" in path or not Path(path).is_absolute():
+            raise FilesystemPermissionError("invalid_arguments", "Supply an absolute search directory.")
+        if (not isinstance(pattern, str) or not pattern or len(pattern) > 256
+                or any(char in pattern for char in '/\\') or any(ord(char) < 32 for char in pattern)):
+            raise FilesystemPermissionError("invalid_arguments", "Supply a filename glob of at most 256 characters, without directory separators.")
+        for value, lower, upper in ((max_depth, 0, 16), (max_entries, 1, 10000), (max_results, 1, 200)):
+            if type(value) is not int or not lower <= value <= upper:
+                raise FilesystemPermissionError("invalid_arguments", "Search limits must be integers within the documented bounds.")
+        config = load_config()
+        check_if_path_is_allowed(config, path)
+        check_if_path_is_blocked(config, path)
+        root = get_full_path(path)
+        if not root.is_dir():
+            if not root.exists():
+                raise FileNotFoundError
+            raise NotADirectoryError
+        matches, reasons, examined = _search_tree(root, pattern, config, max_depth, max_entries, max_results)
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except FileNotFoundError:
+        return error_result("not_found", "The search directory does not exist.")
+    except NotADirectoryError:
+        return error_result("not_a_directory", "The search path is not a directory.")
+    except PermissionError:
+        return error_result("permission_denied", "The search directory could not be inspected.")
+    except (OSError, RuntimeError, ValueError):
+        return error_result("os_error", "The filesystem search could not complete.")
+    text = f"Returned {len(matches)} matching filenames. Only names were searched."
+    if reasons:
+        text += " This is a partial search: " + ", ".join(reasons) + "."
+    if matches:
+        text += "\n" + "\n".join(match["path"] for match in matches)
+    return CallToolResult(content=[TextContent(type="text", text=text)], structuredContent={
+        "kind": "filesystem_search", "root": str(root), "pattern": pattern, "matches": matches,
+        "partial": bool(reasons), "truncated": bool(reasons), "limits_reached": reasons,
+        "entries_examined": examined,
+    })
 
 
 if __name__ == "__main__":
