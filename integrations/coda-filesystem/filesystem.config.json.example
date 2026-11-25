@@ -4,6 +4,12 @@
     "allowed_roots": [],
     "blocked_paths": ["**/.env", "**/.ssh", "**/credentials.json"]
   },
+  "destructive": {
+    "enabled": false,
+    "allowed_roots": [],
+    "blocked_paths": ["**/.env", "**/.ssh", "**/credentials.json"],
+    "require_confirmation": true
+  },
   "write": {
     "enabled": false,
     "allowed_roots": [],

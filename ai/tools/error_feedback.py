@@ -7,10 +7,14 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'destructive_disabled': 'Deleting and moving files is disabled in the filesystem configuration.',
+    'directory_not_empty': 'That folder is not empty. Request recursive deletion explicitly if you want its contents removed too.',
+    'delete_incomplete': 'Deletion was interrupted. Some entries may already have been removed. Say show tool output and inspect the remaining target before retrying.',
+    'protected_path': 'That location is protected and cannot be changed by file tools. Say show tool output for the reason.',
     'copy_incomplete': 'The copy did not finish. Partial staging may remain; say show tool output before retrying.',
     'resource_limit': 'The operation reached its configured limits. Please narrow its scope or use the documented bounded options.',
     'unsupported_operation': 'This platform or filesystem does not support the required safe operation.',
-    'content_changed': 'That file has changed. Please read its current revision before editing it.',
+    'content_changed': 'The requested file or folder changed. Inspect its current state before making a new request.',
     'ambiguous_edit': 'The text to replace must occur exactly once. Nothing was changed.',
     'mutation_in_progress': 'Another edit or an interrupted transaction is locking that file. Please inspect its recovery files before retrying.',
     'mutation_incomplete': 'The mutation did not finish safely. The file may have changed and recovery files were retained. Say show tool output before retrying.',
@@ -39,6 +43,8 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'destructive_disabled': 'permission_denied', 'directory_not_empty': 'invalid_arguments',
+    'delete_incomplete': 'unknown_error', 'protected_path': 'permission_denied',
     'copy_incomplete': 'unknown_error', 'resource_limit': 'invalid_arguments', 'unsupported_operation': 'unavailable',
     'content_changed': 'invalid_arguments', 'ambiguous_edit': 'invalid_arguments',
     'mutation_in_progress': 'unavailable', 'mutation_incomplete': 'unknown_error', 'unsafe_path': 'permission_denied',

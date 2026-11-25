@@ -155,8 +155,8 @@ mcp.filesystem.create_directory {"path":"D:/Projects/Scratch/notes"}
 mcp.filesystem.create_file {"path":"D:/Projects/Scratch/notes/todo.txt","content":"Review the draft.\n"}
 ```
 
-Existing installations remain read-only until both the write configuration and
-tool allowlist are changed explicitly. No private settings are migrated or
+Creation and content changes remain disabled until both the write configuration
+and tool allowlist are changed explicitly. No private settings are migrated or
 expanded. These additions are separate from v1.5.5.
 An I/O failure after exclusive file creation can leave a partial new file; the
 tool reports failure, and does not delete it or replay the operation.
@@ -442,3 +442,71 @@ authorised destination parent for `.coda-copy-*` evidence. A later explicit
 copy does not remove earlier recovery data. A blocking filesystem call remains
 bounded by the host transport timeout, not the cooperative deadline alone.
 The audit's existing filesystem race limitations still apply.
+
+## Explicit destructive authority and deletion
+
+`delete_path` requires its own tool allowlist entry and an independently enabled
+`destructive` configuration. Read or write grants alone never authorise removal.
+Existing configurations omit this grant and therefore remain unable to delete.
+An empty `read.allowed_roots` list grants no read access and is valid for a
+destructive-only or write-only setup; no dummy read root is required.
+
+```json
+"destructive": {
+  "enabled": false,
+  "allowed_roots": [],
+  "blocked_paths": ["**/.env", "**/.ssh", "**/credentials.json"],
+  "require_confirmation": true
+}
+```
+
+Enable this authority only for an explicitly chosen disposable/test or managed
+data root. CODA always requires a fresh confirmation naming the path and whether
+contents are included, even when a confirmation setting is false. Deletion is
+permanent filesystem removal; it does not use a recycle bin or promise undo.
+
+```text
+mcp.filesystem.delete_path {"path":"D:/Scratch/test-only/temporary.txt"}
+mcp.filesystem.delete_path {"path":"D:/Scratch/test-only/old-notes","recursive":true}
+```
+
+Without `recursive:true`, only files and empty directories can be removed. A
+recursive request preflights the complete bounded tree before removing entries.
+Defaults are 1,024 entries and eight nested directory levels; maxima are 4,096
+entries and sixteen levels. Relative path metadata is capped at 65,536 characters,
+the cooperative deadline is five seconds, and destructive/protected root lists
+are capped at 64 roots each. File contents are not read, including for large or
+binary files.
+
+Filesystem roots, configured read/write/destructive roots, workspace roots and
+ancestors containing them are protected. Linked/reparse ancestors, descendants,
+hard-link aliases, blocked entries and transaction recovery paths are refused.
+Read-side sensitive-name blocks also apply to destructive authority. Every
+entry's authority and identity are rechecked before removal; configuration
+changes stop execution. New entries appearing after preflight are never added
+to the approved scope: final directory removal fails rather than deleting them.
+
+Deletion acquires stable `.coda-lock` metadata files in the target's parent and
+selected directories. These internal locks belong to the destructive transaction;
+they do not grant general content-write authority. They exclude concurrent CODA
+text/destructive operations, including across managed server processes. Ordinary
+lock/setup failures remove only owned metadata locks and leave user entries
+intact. Successful deletion normally removes its owned locks. Interrupted or
+partially failed deletion retains locks for inspection and never automatically
+replays the request. This can also block other mutations in affected folders.
+
+Partial failures report confirmed file/directory removal counts and uncertainty
+about other effects. Recovery output gives total retained lock count and at most
+twenty path examples within a 32 KiB budget, with an explicit truncation flag.
+Cancellation/timeout can occur after entries were already removed and before
+a result is returned; inspect the remaining tree and lock metadata before any
+new request or manual lock cleanup. There are no deletion backups. Host process
+cleanup and the existing filesystem race limitations still apply.
+
+All mutation tools reserve the running integration/application and its own
+permissions file, even if a broad data grant overlaps them. Generic creation,
+editing, copying and deletion also reserve recognised transaction/recovery names;
+read tools remain available for authorised inspection. Mutation/copy paths use
+valid UTF-8, at most 32,768 characters and 128 components, alongside the existing
+portable-name rules. Operator configuration must be changed outside these tools;
+no existing private grant is expanded automatically.
