@@ -166,3 +166,27 @@ then opening a path has a filesystem race if another process can replace links
 concurrently. Do not grant roots controlled by an adversary when that guarantee
 is required. Keep permissions narrow. See [MCP feedback](../../docs/mcp-feedback.md)
 for detailed visual output, speech, privacy and diagnostics behavior.
+
+## File metadata
+
+`get_file_metadata(path)` inspects an absolute, read-authorised file or directory
+without reading file contents or recursively scanning a directory. Add
+`get_file_metadata` to the definition's exact `allowed_tools` list to enable it;
+existing read grants do not automatically allow a newly discovered tool.
+
+```text
+mcp.filesystem.get_file_metadata {"path":"D:/Projects/report.txt"}
+```
+
+Results include the canonical path, entry type, file `size_bytes` and observed
+`modified_at` in Unix seconds. Text renders the modification time in UTC. File
+sizes count bytes, including for binary files and files larger than the read
+limit. Directory/other entry sizes are `null`: they are not recursively computed
+tree sizes. Creation times are omitted because platform-specific `ctime` does
+not consistently mean creation time.
+
+The same current read roots and lexical/resolved blocked-ancestor rules apply.
+Outside or blocked symlink/junction targets reveal no metadata. Relative
+workspace resolution currently applies to `read_file` and `list_directory`;
+provide an absolute path for metadata. Metadata is a per-call observation and
+can change immediately afterwards. No new dependency or migration is required.

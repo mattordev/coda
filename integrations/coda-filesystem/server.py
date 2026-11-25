@@ -8,6 +8,8 @@ from os.path import isdir, isfile, join
 from pathlib import Path, PureWindowsPath
 import json
 from fnmatch import fnmatchcase
+import stat
+from datetime import datetime, timezone
 import codecs
 
 
@@ -379,6 +381,48 @@ def load_config() -> dict:
 
 def get_full_path(incomplete_path: str) -> Path:
     return Path(incomplete_path).resolve()
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+))
+def get_file_metadata(path: str) -> CallToolResult:
+    """Inspect type, file byte size and modification time without reading contents.
+
+    Requires an absolute, read-authorised path. Directory/other entry sizes are
+    omitted because their filesystem allocation size is not their content size.
+    Modification time is Unix seconds in structured output and UTC in text;
+    no portable creation timestamp is inferred from platform-specific ctime.
+    """
+    try:
+        if not isinstance(path, str) or not path.strip() or "\0" in path or not Path(path).is_absolute():
+            raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute metadata path.")
+        config = load_config()
+        check_if_path_is_allowed(config, path)
+        check_if_path_is_blocked(config, path)
+        target = get_full_path(path)
+        metadata = target.stat()
+        kind = "file" if stat.S_ISREG(metadata.st_mode) else "directory" if stat.S_ISDIR(metadata.st_mode) else "other"
+        size = metadata.st_size if kind == "file" else None
+        modified = datetime.fromtimestamp(metadata.st_mtime, timezone.utc).isoformat(timespec="seconds")
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except FileNotFoundError:
+        return error_result("not_found", "That path does not exist.")
+    except NotADirectoryError:
+        return error_result("not_a_directory", "A parent path is not a directory.")
+    except PermissionError:
+        return error_result("permission_denied", "Metadata access was denied.")
+    except (OSError, ValueError, RuntimeError, OverflowError):
+        return error_result("os_error", "File metadata could not be inspected.")
+    size_text = f" {size} bytes." if size is not None else ""
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{kind.capitalize()}: {target.name}.{size_text} Last modified: {modified}.")],
+        structuredContent={
+            "kind": "file_metadata", "path": str(target), "type": kind,
+            "size_bytes": size, "modified_at": metadata.st_mtime,
+        },
+    )
 
 
 if __name__ == "__main__":
