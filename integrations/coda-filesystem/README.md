@@ -321,3 +321,69 @@ files are excluded and candidates are checked again before opening. The
 existing application-level filesystem race limitation still applies; this is
 not an OS sandbox or a consistent snapshot of files being modified elsewhere.
 No new dependency or private configuration migration is required.
+
+## Editing and appending existing text
+
+Enable `edit_file` and/or `append_file` individually in `allowed_tools`. Both
+require independent read and write grants for the existing target, and CODA
+always requires a fresh one-use confirmation even if `confirm_tools` is empty.
+Write grants do not grant read access. Files must be ordinary, writable UTF-8
+files of at most 1 MiB; linked/reparse ancestors, hard-link aliases and privileged
+set-ID files are refused. Resulting files and replacement/append text have the
+same UTF-8 byte limit. Existing creation tools still never overwrite a path.
+
+First read the complete revision; range reads cannot supply a mutation revision:
+
+```text
+mcp.filesystem.read_file {"path":"D:/Scratch/report.txt","include_revision":true}
+```
+
+The structured result includes `sha256` of the original bytes and `byte_length`.
+Use `show full tool output` to inspect them. Revision reads preserve exact
+newlines and any UTF-8 BOM; default reads retain their existing behaviour.
+Supply that hash with the explicit mutation:
+
+```text
+mcp.filesystem.edit_file {"path":"D:/Scratch/report.txt","old_text":"draft","new_text":"reviewed","expected_sha256":"<sha256 from the revision read>"}
+mcp.filesystem.append_file {"path":"D:/Scratch/report.txt","content":"Additional notes.\r\n","expected_sha256":"<current sha256>"}
+```
+
+An edit replaces one exact, case-sensitive occurrence, refusing zero or multiple
+matches. Append adds exactly the supplied text without inserting newlines.
+Both refuse a changed revision. Successful mutations return the new `sha256`
+and byte size for subsequent explicit operations. Confirmation retains a copy
+of the requested target, revision and mutation; changing or cancelling a request
+does not reuse its approval for another action.
+
+The transaction creates an exclusive `.coda-lock` sidecar and stages bytes in
+an adjacent `.coda-edit-*.tmp`. It rechecks current read/write policy, file
+identity and SHA-256 before replacement. Staging receives the original file's
+security before content is written. Windows uses
+[ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
+with an original-file backup and without flags that ignore ACL failures. POSIX
+preserves ownership, mode and extended security attributes, hard-links the
+original to a recovery name, then replaces the path. Transaction siblings must
+also be permitted by the configured write roots and block lists. Metadata or
+security-copy failures abort before replacing the original.
+
+The stable folder lock excludes cooperative CODA text writers even when
+replacement changes a file's identity or a caller uses a filename alias. Only
+one text mutation per folder can run at a time; other requests fail busy.
+These checks do not provide
+an OS sandbox against another same-privilege process racing path changes; the
+audit's existing local filesystem threat model still applies. Replacement is
+not a durable database transaction or a guarantee against power loss.
+
+Before replacement, ordinary errors clean up staging and leave the original
+intact. Interrupted work, a failed replacement or failed verification can retain
+`.coda-backup-*`, staging and lock files. Windows can fail after moving the
+original; recovery copies are retained rather than deleted or blindly retried.
+Error output includes recovery paths and whether the target may have changed.
+Cancellation/timeout can kill the server before it returns those paths; inspect
+the sidecar's target/staging/backup metadata in the authorised folder.
+
+Inspect the target and retained old/new bytes before choosing a recovery action.
+Locks are never automatically stolen and mutations are never automatically
+replayed. Successful changes normally remove owned recovery files; if cleanup
+fails, the success reply explicitly reports retained recovery paths. Restarts
+do not erase this evidence. No existing private grant is expanded automatically.
