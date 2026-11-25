@@ -227,6 +227,9 @@ class FilesystemTextMutationTests(unittest.TestCase):
             return
         import subprocess
         quoted = str(self.source).replace("'", "''")
+        # A PowerShell 7 parent can export module paths incompatible with the
+        # Windows PowerShell child. Let the child build its own built-in paths.
+        environment = {name: value for name, value in os.environ.items() if name.casefold() != 'psmodulepath'}
         # Use a private explicit DACL so inheriting the parent ACL would be a
         # meaningful regression, rather than comparing identical defaults.
         protect = (f"$path='{quoted}'; $acl=Get-Acl -LiteralPath $path; "
@@ -237,12 +240,13 @@ class FilesystemTextMutationTests(unittest.TestCase):
                    "[System.Security.AccessControl.AccessControlType]::Allow); "
                    "$acl.SetAccessRule($rule); Set-Acl -LiteralPath $path -AclObject $acl")
         protected = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', protect],
-                                   check=False, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                   check=False, capture_output=True, text=True, env=environment,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
         self.assertEqual(protected.returncode, 0, protected.stdout + protected.stderr)
         def acl():
             return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
                 f"(Get-Acl -LiteralPath '{quoted}').Sddl"], check=True, capture_output=True,
-                text=True, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
+                text=True, env=environment, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
         original = acl()
         result = self.edit()
         self.assertFalse(result.is_error, result)
