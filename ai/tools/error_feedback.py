@@ -7,11 +7,14 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'copy_incomplete': 'The copy did not finish. Partial staging may remain; say show tool output before retrying.',
+    'resource_limit': 'The operation reached its configured limits. Please narrow its scope or use the documented bounded options.',
+    'unsupported_operation': 'This platform or filesystem does not support the required safe operation.',
     'content_changed': 'That file has changed. Please read its current revision before editing it.',
     'ambiguous_edit': 'The text to replace must occur exactly once. Nothing was changed.',
     'mutation_in_progress': 'Another edit or an interrupted transaction is locking that file. Please inspect its recovery files before retrying.',
     'mutation_incomplete': 'The mutation did not finish safely. The file may have changed and recovery files were retained. Say show tool output before retrying.',
-    'unsafe_path': 'That location cannot be safely modified. Please choose an ordinary file without links or aliases.',
+    'unsafe_path': "That location has a link, alias or unsupported entry type, so I can't safely use it.",
     "write_disabled": "Writing files and folders is disabled in the filesystem configuration.",
     "already_exists": "That location already exists. Nothing was overwritten.",
     "content_too_large": "That content exceeds the tool's limit of 1 MiB of UTF-8 text.",
@@ -36,6 +39,7 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'copy_incomplete': 'unknown_error', 'resource_limit': 'invalid_arguments', 'unsupported_operation': 'unavailable',
     'content_changed': 'invalid_arguments', 'ambiguous_edit': 'invalid_arguments',
     'mutation_in_progress': 'unavailable', 'mutation_incomplete': 'unknown_error', 'unsafe_path': 'permission_denied',
     "write_disabled": "permission_denied", "already_exists": "invalid_arguments",
