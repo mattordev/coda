@@ -74,6 +74,52 @@ class FilesystemCopyTests(unittest.TestCase):
         self.error(self.copy(source, destination), 'already_exists')
         self.assertTrue(destination.is_dir())
 
+    def test_distinct_handle_change_time_does_not_look_like_a_replaced_file(self):
+        # CPython Windows stat/fstat can disagree about ctime's meaning. This
+        # reproduces that difference on every platform without skipping identity
+        # or within-handle concurrent-change verification.
+        from types import SimpleNamespace
+        source = self.source / 'notes'
+        source.write_bytes(b'original')
+        original = source.stat()
+        fstat = os.fstat
+        def differing_ctime(descriptor):
+            actual = fstat(descriptor)
+            if (actual.st_dev, actual.st_ino) != (original.st_dev, original.st_ino):
+                return actual
+            fields = {name: getattr(actual, name) for name in dir(actual) if name.startswith('st_')}
+            fields['st_birthtime_ns'] = getattr(original, 'st_birthtime_ns', original.st_ctime_ns)
+            fields['st_ctime_ns'] += 1000000
+            return SimpleNamespace(**fields)
+        with patch.object(filesystem.os, 'fstat', side_effect=differing_ctime):
+            result = self.copy(source)
+        self.assertFalse(result.is_error, result)
+        self.assertEqual(self.target.read_bytes(), b'original')
+
+    def test_handle_change_time_still_detects_changes_with_restored_size_and_mtime(self):
+        from types import SimpleNamespace
+        source = self.source / 'notes'
+        source.write_bytes(b'original')
+        original = source.stat()
+        fstat = os.fstat
+        seen = 0
+        def changed_ctime(descriptor):
+            nonlocal seen
+            actual = fstat(descriptor)
+            if (actual.st_dev, actual.st_ino) != (original.st_dev, original.st_ino):
+                return actual
+            seen += 1
+            fields = {name: getattr(actual, name) for name in dir(actual) if name.startswith('st_')}
+            fields['st_birthtime_ns'] = getattr(original, 'st_birthtime_ns', original.st_ctime_ns)
+            fields['st_ctime_ns'] += seen * 1000000
+            return SimpleNamespace(**fields)
+        with patch.object(filesystem.os, 'fstat', side_effect=changed_ctime):
+            result = self.copy(source)
+        self.error(result, 'copy_incomplete')
+        self.assertEqual(result.structured_content['cause_code'], 'content_changed')
+        self.assertFalse(self.target.exists())
+        self.assertEqual(source.read_bytes(), b'original')
+
     def test_read_and_write_grants_are_independent_and_checked_before_creation(self):
         (self.source / 'notes').write_bytes(b'original')
         self.configure(write={})

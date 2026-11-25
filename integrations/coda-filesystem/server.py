@@ -1012,8 +1012,12 @@ def _copy_source(path, config):
     return metadata
 
 
-def _copy_signature(metadata):
-    return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
+def _copy_signature(metadata, *, opened_identity=False):
+    # Windows CPython 3.12+ stat may expose creation time as ctime while fstat
+    # exposes metadata-change time (CPython #157671). Compare birthtime across
+    # APIs where available, and keep full ctime for comparisons within one API.
+    timestamp = getattr(metadata, 'st_birthtime_ns', metadata.st_ctime_ns) if opened_identity else metadata.st_ctime_ns
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size, metadata.st_mtime_ns, timestamp
 
 
 def _copy_guard(config, source, destination, deadline):
@@ -1068,7 +1072,8 @@ def _copy_file_data(source, staged, output, metadata, remaining, config, root, d
     descriptor = os.open(source, flags)
     copied = 0
     with os.fdopen(descriptor, 'rb') as input_file:
-        if _copy_signature(os.fstat(input_file.fileno())) != _copy_signature(metadata):
+        opened = os.fstat(input_file.fileno())
+        if _copy_signature(opened, opened_identity=True) != _copy_signature(metadata, opened_identity=True):
             raise FilesystemPermissionError('content_changed', 'The opened source file changed identity.')
         while True:
             _copy_guard(config, root, destination, deadline)
@@ -1083,7 +1088,7 @@ def _copy_file_data(source, staged, output, metadata, remaining, config, root, d
             copied += len(data)
         output.flush()
         os.fsync(output.fileno())
-        if _copy_signature(os.fstat(input_file.fileno())) != _copy_signature(metadata):
+        if _copy_signature(os.fstat(input_file.fileno())) != _copy_signature(opened):
             raise FilesystemPermissionError('content_changed', 'A source file changed while copying.')
     return copied
 
