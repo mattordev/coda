@@ -1,11 +1,11 @@
-"""Standalone, read-only filesystem MCP with explicit local permissions."""
+"""Standalone filesystem MCP with separate, explicit read and create permissions."""
 
 import argparse
 from mcp.server import MCPServer
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from os import listdir
 from os.path import isdir, isfile, join
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import json
 from fnmatch import fnmatchcase
 
@@ -88,6 +88,119 @@ def read_file(path: str) -> CallToolResult:
         return error_result("file_not_found", f"File not found at: {requested_path}")
 
         
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+))
+def create_file(path: str, content: str = "") -> CallToolResult:
+    """Create a new UTF-8 file at an absolute path; never overwrite an existing path.
+
+    The parent directory must already exist. Content is limited to 1 MiB of UTF-8
+    bytes. Coda requires explicit write permissions and confirmation before use.
+    """
+    try:
+        if not isinstance(content, str):
+            raise FilesystemPermissionError("invalid_arguments", "File content must be UTF-8 text.")
+        try:
+            data = content.encode("utf-8")
+        except UnicodeError as error:
+            raise FilesystemPermissionError("invalid_arguments", "File content must be UTF-8 text.") from error
+        if len(data) > 1024 * 1024:
+            raise FilesystemPermissionError("content_too_large", "New file content must be at most 1 MiB of UTF-8 bytes.")
+        target = creation_path(path)
+        # The earlier existence check improves errors, but is not enough on its
+        # own: exclusive creation also rejects a competing creator atomically.
+        with target.open("xb") as output:
+            output.write(data)
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except FileExistsError:
+        return error_result("already_exists", "That path already exists. Nothing was overwritten.")
+    except FileNotFoundError:
+        return error_result("not_found", "The parent directory does not exist. Create it first.")
+    except NotADirectoryError:
+        return error_result("not_a_directory", "The parent path is not a directory.")
+    except PermissionError as error:
+        return error_result("permission_denied", str(error))
+    except (OSError, RuntimeError) as error:
+        return error_result("os_error", str(error))
+    return creation_result(target, "file")
+
+
+@server.tool(structured_output=False, annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+))
+def create_directory(path: str) -> CallToolResult:
+    """Create one new directory at an absolute path with an existing parent.
+
+    Existing paths are never replaced. Coda requires explicit write permissions
+    and confirmation before use; missing parent directories are not created.
+    """
+    try:
+        target = creation_path(path)
+        target.mkdir(parents=False, exist_ok=False)
+    except FilesystemPermissionError as error:
+        return error_result(error.code, str(error))
+    except FileExistsError:
+        return error_result("already_exists", "That path already exists. Nothing was replaced.")
+    except FileNotFoundError:
+        return error_result("not_found", "The parent directory does not exist. Create it first.")
+    except NotADirectoryError:
+        return error_result("not_a_directory", "The parent path is not a directory.")
+    except PermissionError as error:
+        return error_result("permission_denied", str(error))
+    except (OSError, RuntimeError) as error:
+        return error_result("os_error", str(error))
+    return creation_result(target, "directory")
+
+
+def creation_path(path: str) -> Path:
+    """Authorize a new entry without borrowing any of the read root grants."""
+    if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
+        raise FilesystemPermissionError("invalid_arguments", "Please supply an absolute creation path.")
+    target = Path(path)
+    # Reject ambiguous Windows names on both supported platforms, including
+    # alternate data streams, device names and dot/space normalization tricks.
+    if any(part in (".", "..") or part.endswith((" ", "."))
+           or PureWindowsPath(part).is_reserved() or any(char in part for char in '<>:"|?*')
+           or any(ord(char) < 32 for char in part) for part in target.parts[1:]):
+        raise FilesystemPermissionError("invalid_arguments", "Please supply a concrete path without traversal or reserved names.")
+    config = load_config()
+    write = config.get("write", {})
+    if not isinstance(write, dict) or type(write.get("enabled", False)) is not bool:
+        raise FilesystemPermissionError("configuration_error", "Write configuration is invalid.")
+    if not write.get("enabled", False):
+        raise FilesystemPermissionError("write_disabled", "Filesystem creation is disabled in the write configuration.")
+    roots = write.get("allowed_roots", [])
+    blocked = write.get("blocked_paths", [])
+    if (not isinstance(roots, list) or any(not isinstance(root, str) or not root.strip()
+            or not Path(root).is_absolute() or '\0' in root for root in roots)
+            or not isinstance(blocked, list) or any(not isinstance(pattern, str) or not pattern.strip() for pattern in blocked)
+            or type(write.get("require_confirmation", True)) is not bool):
+        raise FilesystemPermissionError("configuration_error", "Write roots and blocked paths are invalid.")
+    # Read-side blocks still protect sensitive names, but read roots never grant
+    # write access. A separate write block list may restrict creation further.
+    policy = {"read": {"allowed_roots": roots, "blocked_paths": config["read"]["blocked_paths"] + blocked}}
+    check_if_path_is_allowed(policy, path)
+    check_if_path_is_blocked(policy, path)
+    for candidate in (target, *target.parents):
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if candidate.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400:
+            raise FilesystemPermissionError("blocked_path", "Creation through symbolic links or junctions is not permitted.")
+    if target.exists():
+        raise FilesystemPermissionError("already_exists", "That path already exists. Nothing was replaced.")
+    return target
+
+
+def creation_result(path: Path, entry_type: str) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Created {entry_type}: {path}")],
+        structuredContent={"kind": "filesystem_created", "path": str(path), "type": entry_type},
+    )
+
 
 def read_safe_file(path: Path) -> str:
     """Bound the actual read, including files that grow after the size check."""

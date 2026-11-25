@@ -18,6 +18,67 @@ from ai.mcp.transport import SDKStdioTransport
 
 
 class BundledMCPTests(unittest.TestCase):
+    def test_creation_requires_allowlist_and_confirmation_before_real_server_mutation(self):
+        from ai.intents import IntentRequest
+        from ai.mcp.runtime import LocalMCPManager
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            permissions = root / 'permissions.json'
+            config = {'read': {'allowed_roots': [str(root)], 'blocked_paths': ['**/.env']},
+                      'write': {'enabled': True, 'allowed_roots': [str(root)],
+                                'require_confirmation': False}}
+            permissions.write_text(json.dumps(config), encoding='utf-8')
+            configs = root / 'servers'
+            configs.mkdir()
+            (configs / 'files.json').write_text(json.dumps({
+                'id': 'files', 'bundled_server': 'filesystem', 'enabled': True,
+                'trusted': True, 'allowed_tools': ['list_directory'],
+                'settings': {'config_file': str(permissions)},
+            }), encoding='utf-8')
+            found = discover_definitions(configs)
+            self.assertEqual(found.errors, {})
+            definition = found.servers[0]
+            manager = LocalMCPManager([definition])
+            self.addCleanup(manager.close)
+            discovered = manager.discover('files')
+            self.assertTrue(discovered.success, discovered.error)
+            intent = next(item for item in discovered.data if item.name == 'mcp.files.create_file')
+            target = root / 'created.txt'
+            request = IntentRequest(intent, 'Create a file', 1,
+                                    arguments={'path': str(target), 'content': 'confirmed'})
+            self.assertEqual(manager.executor(intent.name).execute(request).error.code, 'permission_denied')
+            self.assertFalse(target.exists())
+            allowed = replace(definition, allowed_tools=frozenset({'create_file', 'create_directory'}))
+            self.assertTrue(manager.replace_definition(allowed).success)
+            discovered = manager.discover('files')
+            self.assertTrue(discovered.success, discovered.error)
+            intent = next(item for item in discovered.data if item.name == 'mcp.files.create_file')
+            request = IntentRequest(intent, 'Create a file', 1,
+                                    arguments={'path': str(target), 'content': 'confirmed'})
+            self.assertEqual(manager.executor(intent.name).execute(request).error.code, 'confirmation_required')
+            self.assertFalse(target.exists())
+            outcome = manager.executor(intent.name).execute(request, confirmed=True)
+            self.assertTrue(outcome.success, outcome.error)
+            self.assertEqual(target.read_text(encoding='utf-8'), 'confirmed')
+            directory_intent = next(item for item in discovered.data if item.name == 'mcp.files.create_directory')
+            directory_target = root / 'created-directory'
+            directory_request = IntentRequest(directory_intent, 'Create a directory', 1,
+                                              arguments={'path': str(directory_target)})
+            self.assertEqual(manager.executor(directory_intent.name).execute(directory_request).error.code,
+                             'confirmation_required')
+            self.assertFalse(directory_target.exists())
+            self.assertTrue(manager.executor(directory_intent.name).execute(directory_request, confirmed=True).success)
+            self.assertTrue(directory_target.is_dir())
+            config['write']['enabled'] = False
+            permissions.write_text(json.dumps(config), encoding='utf-8')
+            revoked = root / 'revoked.txt'
+            request = IntentRequest(intent, 'Create another file', 1, arguments={'path': str(revoked)})
+            outcome = manager.executor(intent.name).execute(request, confirmed=True)
+            self.assertFalse(outcome.success)
+            self.assertEqual(outcome.data['structuredContent']['error']['code'], 'write_disabled')
+            self.assertFalse(revoked.exists())
+
     def test_new_read_tool_requires_explicit_grant_and_reads_through_real_server(self):
         from ai.intents import IntentRequest
         from ai.mcp.runtime import LocalMCPManager
@@ -44,6 +105,7 @@ class BundledMCPTests(unittest.TestCase):
             self.assertTrue(discovered.success, discovered.error)
             self.assertEqual({item.name for item in discovered.data}, {
                 "mcp.files.list_directory", "mcp.files.read_file",
+                "mcp.files.create_file", "mcp.files.create_directory",
             })
             intent = next(item for item in discovered.data if item.name == "mcp.files.read_file")
             request = IntentRequest(intent, "Read README", 1, arguments={"path": str(source)})

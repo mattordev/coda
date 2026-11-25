@@ -200,3 +200,189 @@ class FilesystemMCPTests(unittest.TestCase):
         inside.write_text("inside", encoding="utf-8")
         (self.root / ".env").symlink_to(inside)
         self.assertEqual(self.read_code(self.root / ".env"), "blocked_path")
+
+
+class FilesystemCreationTests(unittest.TestCase):
+    """All mutations stay in disposable roots; existing files must survive."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        self.root = self.base / 'write'
+        self.root.mkdir()
+        self.read_root = self.base / 'read'
+        self.read_root.mkdir()
+        self.config_path = self.base / 'permissions.json'
+        guard = patch.object(filesystem, 'CONFIG_PATH', self.config_path)
+        guard.start()
+        self.addCleanup(guard.stop)
+        self.configure()
+
+    def configure(self, **changes):
+        self.permissions = {'read': {'allowed_roots': [str(self.read_root)],
+                                    'blocked_paths': ['**/.env', '**/.ssh']},
+                            'write': {'enabled': True, 'allowed_roots': [str(self.root)],
+                                      'blocked_paths': ['**/credentials.json'],
+                                      'require_confirmation': True, **changes}}
+        self.config_path.write_text(json.dumps(self.permissions), encoding='utf-8')
+
+    def error_code(self, tool, path, **arguments):
+        result = tool(str(path), **arguments)
+        self.assertTrue(result.is_error, result)
+        return result.structured_content['error']['code']
+
+    def test_creates_empty_and_utf8_files_with_structured_confirmation(self):
+        target = self.root / 'notes.txt'
+        response = filesystem.create_file(str(target), 'café\r\nnext\n')
+        self.assertFalse(response.is_error)
+        self.assertEqual(target.read_bytes(), 'café\r\nnext\n'.encode('utf-8'))
+        self.assertEqual(response.structured_content,
+                         {'kind': 'filesystem_created', 'path': str(target), 'type': 'file'})
+        empty = self.root / 'empty.txt'
+        self.assertFalse(filesystem.create_file(str(empty)).is_error)
+        self.assertEqual(empty.read_bytes(), b'')
+
+    def test_creates_one_directory_without_creating_missing_parents(self):
+        target = self.root / 'notes'
+        response = filesystem.create_directory(str(target))
+        self.assertFalse(response.is_error)
+        self.assertTrue(target.is_dir())
+        self.assertEqual(response.structured_content['type'], 'directory')
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            self.assertEqual(self.error_code(tool, self.root / 'missing' / 'child'), 'not_found')
+            self.assertFalse((self.root / 'missing').exists())
+
+    def test_existing_files_and_directories_are_never_replaced(self):
+        existing_file = self.root / 'keep.txt'
+        existing_file.write_bytes(b'original')
+        existing_directory = self.root / 'keep-dir'
+        existing_directory.mkdir()
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for target in (existing_file, existing_directory):
+                self.assertEqual(self.error_code(tool, target), 'already_exists')
+        self.assertEqual(existing_file.read_bytes(), b'original')
+        self.assertTrue(existing_directory.is_dir())
+
+    def test_file_created_between_validation_and_open_is_preserved(self):
+        target = self.root / 'race.txt'
+        real_open = Path.open
+        def competing_creator(path, mode='r', *args, **kwargs):
+            if path == target and mode == 'xb':
+                with real_open(path, 'wb') as output:
+                    output.write(b'competing file')
+            return real_open(path, mode, *args, **kwargs)
+        with patch.object(Path, 'open', competing_creator):
+            self.assertEqual(self.error_code(filesystem.create_file, target, content='replacement'), 'already_exists')
+        self.assertEqual(target.read_bytes(), b'competing file')
+
+    def test_missing_or_disabled_write_grants_do_not_borrow_read_permissions(self):
+        for write in (None, {}, {'enabled': False}, {'enabled': True, 'allowed_roots': []}):
+            with self.subTest(write=write):
+                if write is None:
+                    self.permissions.pop('write', None)
+                else:
+                    self.permissions['write'] = write
+                self.config_path.write_text(json.dumps(self.permissions), encoding='utf-8')
+                expected = 'outside_allowed_roots' if write and write.get('enabled') else 'write_disabled'
+                for tool in (filesystem.create_file, filesystem.create_directory):
+                    self.assertEqual(self.error_code(tool, self.read_root / 'new'), expected)
+                self.assertFalse((self.read_root / 'new').exists())
+
+    def test_roots_and_both_block_lists_apply_to_creation(self):
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for path, code in ((self.read_root / 'new', 'outside_allowed_roots'),
+                               (self.base / 'write-sibling', 'outside_allowed_roots'),
+                               (self.root / '.env', 'blocked_path'),
+                               (self.root / '.ssh' / 'new', 'blocked_path'),
+                               (self.root / 'credentials.json', 'blocked_path')):
+                self.assertEqual(self.error_code(tool, path), code)
+                self.assertFalse(path.exists())
+
+    def test_invalid_paths_are_rejected_before_creation(self):
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for path in ('', 'relative', self.root / '..' / 'outside', self.root / 'notes.txt:stream',
+                         self.root / 'NUL', self.root / 'trailing.', self.root / 'trailing ', self.root / 'bad\0name'):
+                with self.subTest(tool=tool.__name__, path=path):
+                    self.assertEqual(self.error_code(tool, path), 'invalid_arguments')
+
+    def test_content_limit_counts_utf8_bytes_and_accepts_exact_limit(self):
+        target = self.root / 'maximum.txt'
+        self.assertFalse(filesystem.create_file(str(target), 'x' * (1024 * 1024)).is_error)
+        self.assertEqual(target.stat().st_size, 1024 * 1024)
+        for content in ('x' * (1024 * 1024 + 1), 'é' * (600 * 1024)):
+            too_large = self.root / 'too-large.txt'
+            self.assertEqual(self.error_code(filesystem.create_file, too_large, content=content), 'content_too_large')
+            self.assertFalse(too_large.exists())
+
+    def test_invalid_write_config_and_revocation_fail_closed(self):
+        for changes in ({'enabled': 'true'}, {'allowed_roots': ['relative']},
+                        {'allowed_roots': 'not-an-array'}, {'blocked_paths': [None]},
+                        {'require_confirmation': 'true'}):
+            with self.subTest(changes=changes):
+                self.configure(**changes)
+                self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'configuration_error')
+        self.configure()
+        self.assertFalse(filesystem.create_file(str(self.root / 'first')).is_error)
+        self.configure(enabled=False)
+        self.assertEqual(self.error_code(filesystem.create_file, self.root / 'second'), 'write_disabled')
+        self.assertFalse((self.root / 'second').exists())
+
+    def test_config_read_and_os_failures_are_reported_as_failures(self):
+        self.config_path.unlink()
+        self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'configuration_error')
+        self.configure()
+        with patch.object(filesystem, 'load_config', return_value=self.permissions), \
+             patch.object(Path, 'open', side_effect=PermissionError('denied')):
+            self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'permission_denied')
+        with patch.object(Path, 'mkdir', side_effect=OSError('disk problem')):
+            self.assertEqual(self.error_code(filesystem.create_directory, self.root / 'new'), 'os_error')
+
+    def test_linked_destinations_and_ancestors_are_refused(self):
+        inside = self.root / 'inside'
+        inside.mkdir()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        try:
+            (self.root / 'inside-link').symlink_to(inside, target_is_directory=True)
+            (self.root / 'outside-link').symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('Symbolic links unavailable')
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            self.assertEqual(self.error_code(tool, self.root / 'inside-link' / 'new'), 'blocked_path')
+            self.assertEqual(self.error_code(tool, self.root / 'outside-link' / 'new'), 'outside_allowed_roots')
+        self.assertFalse((inside / 'new').exists())
+        self.assertFalse((outside / 'new').exists())
+
+    def test_write_failures_have_safe_conversational_explanations(self):
+        from ai.tools.models import ToolError, ToolResult
+        from ai.tools.presentation import prepare_tool_response
+        self.configure(enabled=False)
+        raw = filesystem.create_file(str(self.root / 'private-name'))
+        normalized = ToolResult(False, raw.model_dump(mode='json', by_alias=True),
+                                ToolError('mcp_tool_error', 'The MCP tool reported a failure.'))
+        spoken = prepare_tool_response(normalized)
+        self.assertIn('disabled', spoken)
+        self.assertNotIn('private-name', spoken)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows junction behavior')
+    def test_windows_junction_ancestors_cannot_receive_created_entries(self):
+        import subprocess
+        inside = self.root / 'inside'
+        inside.mkdir()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        for destination, expected in ((inside, 'blocked_path'), (outside, 'outside_allowed_roots')):
+            link = self.root / ('junction-' + destination.name + expected)
+            created = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(destination)],
+                                     capture_output=True, text=True, check=False)
+            if created.returncode:
+                self.skipTest('Junction creation unavailable')
+            try:
+                for tool in (filesystem.create_file, filesystem.create_directory):
+                    self.assertEqual(self.error_code(tool, link / 'new'), expected)
+                self.assertFalse((destination / 'new').exists())
+            finally:
+                # Both resolved targets are verified disposable test locations.
+                self.assertTrue(link.resolve().is_relative_to(self.base))
+                link.rmdir()
