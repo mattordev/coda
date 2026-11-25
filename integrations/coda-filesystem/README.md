@@ -1,6 +1,7 @@
 # Filesystem MCP
 
-This is a standalone, read-only MCP server using the same SDK as Coda.
+This is a standalone MCP server using the same SDK as Coda. Reads and creation
+have separate permissions; all creation access is disabled by default.
 `list_directory` returns readable `[FILE]`/`[DIR]` text and a structured
 `directory_listing` result. Expected failures include a machine-readable reason
 so Coda can explain them without speaking private paths.
@@ -111,8 +112,54 @@ Blocked entries are omitted. An empty result means no accessible entries were
 returned, which can include a directory containing only blocked entries.
 Configuration, missing paths, non-directory paths and permission denials have
 distinct structured codes. Unexpected exceptions still use the SDK failure
-path. There are no write tools; the reserved `write` configuration grants no
-write capability.
+path. Creation tools require a separate write grant as described below.
+
+## Create files and folders
+
+`create_file(path, content="")` creates a new UTF-8 file, optionally with up to
+1 MiB of UTF-8 bytes. Omitting content creates an empty file.
+`create_directory(path)` creates one new directory. Both require an absolute
+path with an existing parent and fail when the destination already exists.
+Files are opened in exclusive creation mode, so an existing file is never
+truncated or overwritten, including when another process creates it first.
+These tools do not edit, delete, rename or recursively create parent directories.
+
+To opt in, add a `write` object to your private filesystem configuration:
+
+```json
+"write": {
+  "enabled": true,
+  "allowed_roots": ["D:/Projects/Scratch"],
+  "blocked_paths": ["**/credentials.json"],
+  "require_confirmation": true
+}
+```
+
+Use your own existing directory. Empty or omitted write roots grant no access;
+read roots and workspace roots never grant creation access. Read-side blocked
+paths also apply to creation, alongside any extra write-side blocks. Symlinks,
+Windows junctions, traversal and ambiguous Windows names are rejected.
+
+Explicitly add `create_file` and/or `create_directory` to the MCP definition's
+`allowed_tools`; also list them in `confirm_tools` to document your intent.
+Coda always requires its existing one-use confirmation for these bundled create
+tools, even if `confirm_tools` is empty or the legacy `write.require_confirmation`
+field is false. Creation is not enabled automatically by discovering new tools.
+With another MCP client, configure confirmation in that client: the standalone
+server enforces filesystem permissions but does not present a confirmation UI.
+
+For example, after setup:
+
+```text
+mcp.filesystem.create_directory {"path":"D:/Projects/Scratch/notes"}
+mcp.filesystem.create_file {"path":"D:/Projects/Scratch/notes/todo.txt","content":"Review the draft.\n"}
+```
+
+Existing installations remain read-only until both the write configuration and
+tool allowlist are changed explicitly. No private settings are migrated or
+expanded. These additions are separate from v1.5.5.
+An I/O failure after exclusive file creation can leave a partial new file; the
+tool reports failure, and does not delete it or replay the operation.
 
 This is an application permission check, not an OS sandbox. Resolving/checking
 then opening a path has a filesystem race if another process can replace links

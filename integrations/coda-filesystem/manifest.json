@@ -17,6 +17,19 @@
       "required": ["read"],
       "additionalProperties": true,
       "properties": {
+        "write": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "allowed_roots": {
+              "type": "array", "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\u0000]+$"}
+            },
+            "blocked_paths": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "require_confirmation": {"type": "boolean"}
+          }
+        },
         "read": {
           "type": "object",
           "required": ["allowed_roots", "blocked_paths"],

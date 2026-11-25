@@ -7,6 +7,9 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    "write_disabled": "Creating files and folders is disabled in the filesystem configuration.",
+    "already_exists": "That location already exists. Nothing was overwritten.",
+    "content_too_large": "That content is too large for the file creation tool. The limit is 1 MiB of UTF-8 text.",
     "outside_allowed_roots": "I couldn't access that directory because it isn't in my allowed locations. You can change this in the filesystem configuration.",
     "blocked_path": "I couldn't access that location because it is blocked in the filesystem configuration.",
     "permission_denied": "I don't have permission to access that.",
@@ -28,6 +31,8 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    "write_disabled": "permission_denied", "already_exists": "invalid_arguments",
+    "content_too_large": "invalid_arguments",
     "no_results": "no_results", "not_found": "not_found", "file_not_found": "not_found",
     "workspace_not_found": "not_found", "permission_denied": "permission_denied",
     "outside_allowed_roots": "permission_denied", "blocked_path": "permission_denied",
