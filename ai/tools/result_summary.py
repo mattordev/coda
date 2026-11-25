@@ -75,8 +75,33 @@ def _valid_modified_at(entry):
     )
 
 
+def _filename_search(data):
+    """Recognise filename observations without treating them as directory facts."""
+    payload = _payload(data)
+    if isinstance(payload, dict) and payload.get("kind") == "filesystem_search":
+        matches = payload.get("matches")
+        if isinstance(matches, list) and all(
+            isinstance(match, dict) and isinstance(match.get("name"), str)
+            and match.get("type") == "file" for match in matches
+        ):
+            return matches, payload.get("partial") is True or payload.get("truncated") is True
+    return None
+
+
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
+    search = _filename_search(data)
+    if search is not None:
+        matches, partial = search
+        count = len(matches)
+        answer = (f"The filename search returned {count} matching " + ("file." if count == 1 else "files.")) if count else "No matching filenames were returned."
+        if partial:
+            answer += " This is a partial search."
+        if matches:
+            answer += " Matches include " + _names(matches, 3) + "."
+            if count > 3:
+                answer += " Say show tool output for the other paths."
+        return answer
     directory = _directory_entries(data, text)
     question = _question_text(question)
     if directory is not None:
