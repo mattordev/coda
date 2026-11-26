@@ -30,10 +30,13 @@ references retain at most those ten results. Automatic research uses at most
 5,000 returned text characters per page and 10,000 combined text characters;
 source metadata and normal interpretation budgets remain separately bounded.
 
-An explicit URL or source number overrides automatic selection. If the task is
-only a search, do not upgrade it to research. If the request is unclear, ask
-whether to read a source. More than two requested pages needs a clearly reported
-limit and an explicit follow-up; do not silently claim every result was read.
+An explicit URL or source number overrides automatic selection. Up to three
+explicitly chosen URLs/results can be read, including `compare these three
+websites`. Divide the 10,000-character text budget evenly across those sources,
+never exceeding 5,000 characters per page. If the task is only a search, do not
+upgrade it to research. If the request is unclear, ask whether to read a source.
+More than three explicit pages needs a clearly reported limit and an explicit
+follow-up; do not silently claim every result was read.
 
 ## Examples and references
 
@@ -43,6 +46,7 @@ limit and an explicit follow-up; do not silently claim every result was read.
 | `read the second source` | One current selected URL fetched through normal permissions |
 | `read https://example.com/article` | Direct HTTP retrieval; no search is needed |
 | `research this question using source pages` | One search and at most two bounded page reads |
+| `compare these three websites: URL1, URL2, URL3` | Three explicitly chosen page attempts sharing the total text/time budget |
 | `explain the search snippets only` | Explain retained snippet scope; no fresh network calls |
 
 Only a validated successful search from the configured bundled instance can
@@ -82,10 +86,12 @@ page may authorise local writes, credential use, browser submission or schedulin
 
 ## Bounded execution and optional browser
 
-The fixed read-only research path has at most one search and two page requests,
-a shared cancellation event and a 60-second total tool-action deadline. Normal
+The fixed read-only workflow has at most one search, two automatically selected
+page attempts or up to three explicitly selected page attempts, a shared
+cancellation event and a 60-second total tool-action deadline. Explicit URLs
+or retained source references need no new search. Normal
 intent selection and result interpretation retain their own existing deadlines.
-Do not add retries outside the two page-attempt limit or claim complete evidence
+Do not add retries outside the applicable page-attempt limit or claim complete evidence
 after a deadline/partial response. Each
 step uses normal validated ToolResults and current permissions. No recursive
 link following, arbitrary planning loop or agent delegation is introduced.
