@@ -98,6 +98,7 @@ class WebExtractTests(unittest.TestCase):
     def test_deep_or_unfinished_markup_is_rejected(self):
         for label, text in [('nesting', '<div>' * 129), ('unfinished', '<a href="' + 'x' * 15000),
                             ('quoted-delimiters', '<a href="' + 'x>' * 7500),
+                            ('opaque-end-tag', '<script>x</script' + ' ' * 9000 + '><main>Body</main>'),
                             ('attributes', '<div ' + ' '.join(f'a{i}="x"' for i in range(129)) + '>')]:
             with self.subTest(label=label):
                 with self.assertRaises(NetworkError) as caught:

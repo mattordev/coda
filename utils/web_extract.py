@@ -51,6 +51,8 @@ def _check_markup(text):
             end = _OPAQUE_END[opaque[1].lower()].search(text, offset)
             if end is None:
                 return
+            if end.end() - end.start() > 8192:
+                raise NetworkError('resource_limit', 'The page contains oversized markup.')
             offset = end.end()
 
 
