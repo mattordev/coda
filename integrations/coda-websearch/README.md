@@ -84,3 +84,12 @@ successful live direct and natural-language checks remain separate validation.
 References: [SearXNG search API](https://docs.searxng.org/dev/search_api.html),
 [reference example](https://github.com/jetsonhacks/searxng-search/blob/main/tools/searxng/search_searxng.py),
 [bundled MCP configuration](../../docs/mcp-bundled.md).
+
+## Source-page reading policy
+
+The current search tool returns snippets and does not fetch the linked pages.
+The [web source selection policy](../../docs/web-source-selection.md) defines the
+next release's hybrid search/research behaviour, explicit numbered source choice,
+evidence labels, bounded requests and privacy/approval boundaries. HTTP retrieval
+and optional browser implementation retain their own acceptance gates; this
+policy does not enable either capability or change an existing private grant.
