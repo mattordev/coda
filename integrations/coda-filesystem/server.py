@@ -28,6 +28,7 @@ SEARCH_OUTPUT_CHARS = 32768
 
 # Locate the config file alongside server.py
 CONFIG_PATH = Path(__file__).resolve().parent / "filesystem.config.json"
+OPERATOR_PATHS = ()  # Host registry provenance, supplied only at process launch.
 
 server = MCPServer("coda-filesystem", log_level="ERROR")
 
@@ -1196,7 +1197,7 @@ def _protect_operator_paths(target, *, contains=False):
     """File tools cannot rewrite their own authority or running installation."""
     target = target.resolve()
     server_root = Path(__file__).resolve().parent
-    roots = [server_root]
+    roots = [server_root, *OPERATOR_PATHS]
     installation = server_root.parent.parent
     if (installation / 'coda_runtime.py').is_file() and (installation / 'ai/mcp/runtime.py').is_file():
         roots.append(installation)
@@ -1208,8 +1209,13 @@ def _protect_operator_paths(target, *, contains=False):
             raise FilesystemPermissionError('protected_path', 'The running integration/application is protected from filesystem mutations.')
     # Physical aliases (for example bind mounts) need not resolve to the same
     # spelling. Match existing target/ancestor identities as well as paths.
-    protected_identities = {(metadata.st_dev, metadata.st_ino) for root in roots
-                            for metadata in (root.stat(),)}
+    protected_identities = set()
+    for root in roots:
+        try:
+            metadata = root.stat()
+        except FileNotFoundError:
+            continue
+        protected_identities.add((metadata.st_dev, metadata.st_ino))
     try:
         metadata = protected_file.stat()
         configuration_identity = (metadata.st_dev, metadata.st_ino)
@@ -1226,7 +1232,7 @@ def _protect_operator_paths(target, *, contains=False):
 
 
 def _protect_transaction_paths(target):
-    if any(re.fullmatch(r'\.coda-(?:lock|edit-[0-9a-f]{32}\.tmp|backup-[0-9a-f]{32}|copy-[0-9a-f]{32})', ancestor.name)
+    if any(re.fullmatch(r'\.coda-(?:lock|edit-[0-9a-f]{32}\.tmp|backup-[0-9a-f]{32}|copy-[0-9a-f]{32})', ancestor.name.casefold())
            for ancestor in (target, *target.parents)):
         raise FilesystemPermissionError('protected_path', 'Transaction recovery artifacts require explicit operator inspection.')
 
@@ -1591,7 +1597,20 @@ def move_path(source: str, destination: str, max_entries: int = 1024, max_depth:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="Explicit filesystem permissions file")
+    parser.add_argument('--operator-paths-json', help=argparse.SUPPRESS)
     options = parser.parse_args()
     if options.config is not None:
         CONFIG_PATH = options.config.resolve()
+    if options.operator_paths_json is not None:
+        try:
+            if len(options.operator_paths_json) > 16384:
+                raise ValueError('Oversized operator protection metadata.')
+            protected_paths = json.loads(options.operator_paths_json)
+            if not isinstance(protected_paths, list) or len(protected_paths) > 128 or any(
+                    not isinstance(path, str) or not path or '\0' in path or not Path(path).is_absolute()
+                    for path in protected_paths):
+                raise ValueError('Invalid operator protection paths.')
+            OPERATOR_PATHS = tuple(Path(path).resolve() for path in protected_paths)
+        except (ValueError, TypeError, OSError, RuntimeError) as error:
+            parser.error(str(error))
     server.run(transport="stdio")

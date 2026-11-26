@@ -15,6 +15,7 @@ from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
 from ai.mcp.remote import RemoteServerDefinition
 from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError, _configuration
+from ai.mcp.protection import MUTATIONS, OperatorProtectionError, operator_paths, check_mutation, guarded_launch
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -137,12 +138,19 @@ class LocalMCPManager:
                     runtime.state = ServerState.CONNECTED
 
             try:
+                definition = runtime.definition
+                if getattr(definition, 'bundled_server', None) == 'filesystem':
+                    with self._metadata_lock:
+                        definitions = tuple(server.definition for server in self._servers.values())
+                    definition = guarded_launch(definition, definitions)
                 result = self._transport.request(
-                    runtime.definition, operation, cancel_event=cancel_event,
+                    definition, operation, cancel_event=cancel_event,
                     retire_event=runtime.retire_event, on_connected=connected, **kwargs,
                 )
                 if not isinstance(result, ToolResult):
                     result = failure("mcp_protocol_error", "The MCP response was invalid.")
+            except OperatorProtectionError:
+                result = failure('configuration_error', 'Operator path protection could not be prepared. No filesystem action was started.')
             except Exception as error:
                 result = failure(
                     "mcp_internal_error", "An unexpected error prevented the MCP operation from completing.",
@@ -259,8 +267,17 @@ class LocalMCPManager:
                 return failure("permission_denied", "The MCP tool is not permitted.")
         filesystem_mutation = (
             getattr(definition, "bundled_server", None) == "filesystem"
-            and name in {"create_file", "create_directory", "edit_file", "append_file", "copy_path", "delete_path", "move_path"}
+            and name in MUTATIONS
         )
+        if filesystem_mutation:
+            try:
+                with self._metadata_lock:
+                    definitions = tuple(server.definition for server in self._servers.values())
+                paths, _ = operator_paths(definitions)
+                if check_mutation(name, request.arguments, paths):
+                    return failure('protected_path', 'Operator configuration and the running installation cannot be changed by filesystem tools.')
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+                return failure('configuration_error', 'Operator path protection could not be validated; no mutation was authorised.')
         if (name in definition.confirm_tools or filesystem_mutation) and not confirmed:
             return failure("confirmation_required", "The MCP action requires confirmation.")
         return None

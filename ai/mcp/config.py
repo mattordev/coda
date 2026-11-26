@@ -34,6 +34,8 @@ class LocalServerDefinition:
     bundled_server: str | None = None
     bundle_error: str | None = None
     settings_json: str = "{}"
+    # Discovery provenance is host metadata, never an operator JSON setting.
+    definition_file: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.enabled, bool):
@@ -144,6 +146,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
                 raise ValueError("MCP tool permissions must be unique strings.")
         return RemoteServerDefinition(
             name=value["id"], url=value["url"], header_env_refs=tuple(headers.items()),
+            definition_file=str(path.resolve()),
             trusted=value.get("trusted", False), allowed_tools=frozenset(tools),
             confirm_tools=frozenset(confirmations),
             startup_timeout_seconds=value.get("startup_timeout_seconds", 10.0),
@@ -167,6 +170,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
             raise ValueError("Invalid bundle identity.")
         if not isinstance(value.get("settings", {}), dict):
             raise ValueError("Bundle settings must be an object.")
+        settings_json = json.dumps(value.get('settings', {}), allow_nan=False)
         bundle = discover_bundles().bundles.get(identity)
         command, args = sys.executable or "unavailable-bundled-interpreter", []
         if bundle is None:
@@ -208,6 +212,7 @@ def _read_definition(path: Path) -> LocalServerDefinition:
         enabled=value.get("enabled", False) if "bundled_server" in value else True,
         bundled_server=value.get("bundled_server"), bundle_error=bundle_error,
         settings_json=settings_json,
+        definition_file=str(path.resolve()),
     )
 
 
