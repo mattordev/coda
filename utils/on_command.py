@@ -226,11 +226,14 @@ def _dispatch_intent(
                 target = sanitize_text(str(arguments.get('path', '')))
                 scope = ' including all its contents' if arguments.get('recursive') is True else ' (files and empty folders only)'
                 confirmation = f'Permanently delete "{target}"{scope}? Say confirm or cancel.'
-            if (len(parts) == 3 and parts[2] == 'copy_path'
+            if (len(parts) == 3 and parts[2] in ('copy_path', 'move_path')
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
                 source = sanitize_text(str(arguments.get('source', '')))
                 destination = sanitize_text(str(arguments.get('destination', '')))
-                confirmation = f'Copy "{source}" to the new location "{destination}"? Say confirm or cancel.'
+                if parts[2] == 'move_path':
+                    confirmation = f'Move "{source}" and any folder contents to the new location "{destination}"? Say confirm or cancel.'
+                else:
+                    confirmation = f'Copy "{source}" to the new location "{destination}"? Say confirm or cancel.'
             if (len(parts) == 3 and parts[2] in ('edit_file', 'append_file')
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
                 target = sanitize_text(str(arguments.get('path', '')))

@@ -7,6 +7,8 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'move_incomplete': 'The move outcome is unverified. Inspect both source and destination and say show tool output before any new request.',
+    'cross_device': 'Moving across filesystems is unsupported. The move was refused without a copy-and-delete fallback.',
     'destructive_disabled': 'Deleting and moving files is disabled in the filesystem configuration.',
     'directory_not_empty': 'That folder is not empty. Request recursive deletion explicitly if you want its contents removed too.',
     'delete_incomplete': 'Deletion was interrupted. Some entries may already have been removed. Say show tool output and inspect the remaining target before retrying.',
@@ -43,6 +45,7 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'move_incomplete': 'unknown_error', 'cross_device': 'invalid_arguments',
     'destructive_disabled': 'permission_denied', 'directory_not_empty': 'invalid_arguments',
     'delete_incomplete': 'unknown_error', 'protected_path': 'permission_denied',
     'copy_incomplete': 'unknown_error', 'resource_limit': 'invalid_arguments', 'unsupported_operation': 'unavailable',

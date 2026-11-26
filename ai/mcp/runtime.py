@@ -259,7 +259,7 @@ class LocalMCPManager:
                 return failure("permission_denied", "The MCP tool is not permitted.")
         filesystem_mutation = (
             getattr(definition, "bundled_server", None) == "filesystem"
-            and name in {"create_file", "create_directory", "edit_file", "append_file", "copy_path", "delete_path"}
+            and name in {"create_file", "create_directory", "edit_file", "append_file", "copy_path", "delete_path", "move_path"}
         )
         if (name in definition.confirm_tools or filesystem_mutation) and not confirmed:
             return failure("confirmation_required", "The MCP action requires confirmation.")
