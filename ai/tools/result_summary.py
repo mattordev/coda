@@ -173,20 +173,38 @@ def web_page_summary(data):
     return prefix + ' Ask me to summarise it, or say show tool output to inspect the source text.'
 
 
+def spoken_search_text(text):
+    """Keep speech readable; exact numbered links remain in the visual result."""
+    text = re.sub(r'\[([^\]\n]*)\]\((?:https?|ftp|file)://[^\s)]*\)', r'\1', text, flags=re.IGNORECASE)
+    text = re.sub(r'(?:\b(?:https?|ftp|file)://|\bwww\.)[^\s<>\[\]\"()]+', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\d+(?:\s*,\s*\d+)*\]', '', text)
+    text = re.sub(r'(?m)^\s*(?:[-*\u2022]|\d+[.)])\s+', '', text)
+    text = re.sub(r'(?m)^#{1,6}\s*', '', text)
+    text = re.sub(r'\(\s*\)', '', text).replace('**', '')
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def web_search_summary(data):
+    """A brief grounded fallback when automatic interpretation is unavailable/off."""
     page = _payload(data)
-    if not isinstance(page, dict) or page.get('kind') != 'web_search' or not isinstance(page.get('results'), list):
+    if not isinstance(page, dict):
         return None
-    lines = ['Search snippets only; no result pages were read.']
-    for index, source in enumerate(page['results'][:3], 1):
-        if isinstance(source, dict):
-            title = str(source.get('title') or 'Untitled source')[:80]
-            url = str(source.get('url', ''))[:150]
-            snippet = str(source.get('snippet', ''))[:140]
-            lines.append(f'{index}. {title} ({url}). Snippet: {snippet}')
-    if len(page['results']) > 3:
-        lines.append('Say show tool output for the remaining numbered sources.')
-    return '\n'.join(lines)
+    results = (page.get('results') if page.get('kind') == 'web_search' else
+               page.get('sources') if page.get('kind') == 'web_sources' and page.get('scope') == 'search_snippets_only' else None)
+    if not isinstance(results, list):
+        return None
+    if not results:
+        return "I didn't get any search results for that."
+    for source in results[:10]:
+        snippet = source.get('snippet') if isinstance(source, dict) else None
+        if isinstance(snippet, str) and (snippet := spoken_search_text(snippet)):
+            if len(snippet) > 280:
+                snippet = snippet[:280].rsplit(' ', 1)[0].rstrip('.,;:') + '\N{HORIZONTAL ELLIPSIS}'
+            if not snippet.endswith(('.', '!', '?', '\N{HORIZONTAL ELLIPSIS}')):
+                snippet += '.'
+            return 'The first available search snippet says: ' + snippet + ' The source links are in the tool output.'
+    return "I found some possible sources, but their snippets don't give enough detail to answer yet. The links are in the tool output."
 
 
 def web_sources_summary(data):

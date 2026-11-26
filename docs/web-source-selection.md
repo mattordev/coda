@@ -18,8 +18,10 @@ requests, while an explicit research request can obtain bounded page evidence
 without a compulsory source-selection turn. This policy grants no network access;
 operator configuration and explicit source choices still control execution.
 
-An ordinary search returns a bounded numbered shortlist of titles, source URLs
-and labelled snippets. It fetches no result pages. A request explicitly asking
+An ordinary search retains a bounded numbered shortlist of titles, source URLs
+and labelled snippets in tool output. Its spoken reply gives a short conversational
+overview of the snippets, without reading URLs or the result list aloud. It
+fetches no result pages. A request explicitly asking
 to research, compare using sources, or read pages and explain can perform one
 search followed by at most two relevant page fetches. The initial selection uses
 the search provider's order among usable distinct URLs; it does not claim that
@@ -136,8 +138,16 @@ preserves that shortlist; unrelated URLs begin a separate discussion. Quoted exa
 titles (`read source "Exact returned title"`) must identify one current result.
 Do not mix a numbered old reference with a new URL in one request.
 
-Ordinary search speech labels snippet scope and numbers the first three results;
-`show tool output` retains the complete returned shortlist (up to ten entries).
+Ordinary search speech gives a brief, useful overview grounded only in the returned
+snippets. It identifies that evidence scope naturally, rather than reciting titles,
+URLs or numbered metadata. `show tool output` displays the numbered source titles,
+exact URLs and snippets (up to ten entries, within the normal display limit).
+The complete result remains available through `show full tool output`.
+In automatic interpretation mode this uses one bounded, privacy-controlled model
+step; it does not fetch pages or change source selection. Only supplied snippets
+support its claims. Empty or metadata-only results never invent an overview.
+Direct mode or an unavailable interpretation provider uses a short link-free
+snippet receipt. Source references retain the same indices and expiry in every mode.
 Automatic workflows use the normal tool validation/trust/allowlist path for every
 step. Reader text limits also respect narrower operator ceilings. A shared
 60-second deadline and cancellation stop remaining attempts; failures are not
