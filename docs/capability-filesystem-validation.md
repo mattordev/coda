@@ -51,8 +51,12 @@ direct request bypasses host permission checking to prove the child enforces
 the same exclusions. Tests also cover hard-link aliases, protected ancestors,
 invalid internal metadata, bounded launch data, case-insensitive recovery names,
 normal data mutations, authorised reads and persistent-session exclusion changes.
-Its final complete-suite and platform CI results must be recorded before #267
-is accepted.
+Its final head `cbbb8d62ab035ae64c2b713dc6ef6d253d28a43d` passed **1,221 local
+tests with 19 skips** and all ten Windows/Linux Python 3.11/3.12 regression and
+Pylint checks. This includes fourteen new protection/approval cases and creation
+prompts naming the target for renamed bundled filesystem instances. The earlier
+1,220-test local run also completed successfully; no process was stopped. The
+security gate was accepted in PR #291.
 
 ## Native platform evidence and limits
 

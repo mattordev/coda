@@ -1,7 +1,8 @@
 # Filesystem MCP
 
-This is a standalone MCP server using the same SDK as Coda. Reads and creation
-have separate permissions; all creation access is disabled by default.
+This is a standalone MCP server using the same SDK as Coda. Read, write and
+destructive access have independent grants; writes and destructive actions are
+disabled by default. Start with the [setup, migration and safe test route](../../docs/filesystem-quickstart.md).
 `list_directory` returns readable `[FILE]`/`[DIR]` text and a structured
 `directory_listing` result. Expected failures include a machine-readable reason
 so Coda can explain them without speaking private paths.

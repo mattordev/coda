@@ -17,6 +17,15 @@ path are resolved by Coda, independent of cwd. This is an explicit selection,
 not automatic discovery or enablement. Trust and exact tool permissions still
 default to deny. See the [filesystem setup](../integrations/coda-filesystem/README.md)
 and [feedback behavior](../docs/mcp-feedback.md).
+
+For the complete read/search/edit/copy/move/delete capability set, use the
+[filesystem safe test route and migration guide](../docs/filesystem-quickstart.md).
+Newly discovered tools do not gain allowlist entries or filesystem grants on
+upgrade. All bundled filesystem mutations require action-bound confirmation;
+move/delete additionally need independent destructive authority. Operator
+definitions and declared bundle configuration files remain protected even when
+a broad data grant overlaps them.
+
 ## Web search
 
 `websearch.json.example` is an opt-in template for SearXNG search with DDGS as
