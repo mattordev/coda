@@ -67,7 +67,10 @@ integration alone does not mark a milestone delivered.
 - [v1.5.3 - Incremental Voice Pipeline](https://github.com/mattordev/coda/milestone/14)
 - v1.5.4 - Streaming & Runtime Polish
 - [v1.5.5 - Websearch MCP & Conversational MCP Errors](https://github.com/mattordev/coda/milestone/16)
+- [v1.5.6 - Filesystem Capabilities](https://github.com/mattordev/coda/milestone/17)
 
+See the [v1.5.6 release notes](docs/release-notes-v1.5.6.md) for the filesystem
+capabilities, independent grants, migration, safe testing and recovery limits.
 See the [v1.5.5 release notes](docs/release-notes-v1.5.5.md) for opt-in web search,
 SearXNG configuration, DDGS fallback and conversational tool failures.
 See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
