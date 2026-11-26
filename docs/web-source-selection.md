@@ -1,9 +1,9 @@
 # Web source selection policy
 
 This decision implements the discovery scope of
-[#231](https://github.com/mattordev/coda/issues/231). HTTP retrieval, source
-follow-ups and optional browser capabilities retain their own implementation
-and release gates; this document does not enable them.
+[#231](https://github.com/mattordev/coda/issues/231). HTTP retrieval and source
+follow-ups use the optional bundled reader; browser capabilities retain separate
+implementation and release gates. This document does not enable any instance.
 
 ## Default and alternatives
 
@@ -107,3 +107,76 @@ Implementation is covered by #249 (network policy), #248 (HTTP retrieval), #253
 test/documentation/release gates. Validate indices, stale context, permission
 revocation, partial results, prompt injection, cancellation and missing optional
 infrastructure independently of live external availability.
+
+## Trying the implemented workflow
+
+Configure the existing [web search](../integrations/coda-websearch/README.md) and
+the optional [page reader](../integrations/coda-webread/README.md). Enable only the
+instances and exact tools you intend to use. Source references require a successful
+configured bundled search instance; plain text that resembles a search result
+cannot establish numbered references. Use one eligible search/reader instance for
+automatic workflows. Multiple eligible instances require an explicit MCP command.
+
+With example instance IDs `websearch` and `webread`:
+
+```text
+coda mcp.websearch.search_web {"query":"Python HTMLParser documentation"}
+coda read the second source
+coda read the first source
+coda explain the search snippets only
+coda research Python HTMLParser limitations
+coda explain HTMLParser limitations using web sources
+coda compare these three websites: https://docs.python.org/3/library/html.parser.html https://docs.python.org/3/library/html.html https://docs.python.org/3/library/xml.html
+```
+
+These make real requests to the configured providers/allowed public hosts.
+`explain the search snippets only` uses retained observations and makes no page
+request. Explicit URLs bypass search. A URL already in the current shortlist
+preserves that shortlist; unrelated URLs begin a separate discussion. Quoted exact
+titles (`read source "Exact returned title"`) must identify one current result.
+Do not mix a numbered old reference with a new URL in one request.
+
+Ordinary search speech labels snippet scope and numbers the first three results;
+`show tool output` retains the complete returned shortlist (up to ten entries).
+Automatic workflows use the normal tool validation/trust/allowlist path for every
+step. Reader text limits also respect narrower operator ceilings. A shared
+60-second deadline and cancellation stop remaining attempts; failures are not
+retried outside the attempt budget. Permission changes discard workflow evidence.
+The original shortlist's 120-second expiry is not extended by page reads.
+Changing an exported source-server environment reference (including a custom
+alias for `SEARXNG_BASE_URL`) invalidates references. A persistent instance must
+be retired and rediscovered, or CODA restarted, before using the new environment;
+an old child cannot silently keep serving the previous provider configuration.
+
+The fixed grammar recognises `research ...`, `explain ... using web sources`,
+`compare ... using sources`, explicit page URLs, and numbered/quoted source
+choices. Other questions retain normal intent routing; there is no unrestricted
+research agent. Source comparisons, partial results and article text pass through
+the existing privacy-controlled interpretation path. Direct interpretation mode
+returns a bounded receipt instead. No-readable-text workflows never call a model
+to invent article contents. Generated HTTP/FTP/file citation URLs absent from the
+observed evidence are removed; normal model factual limitations still apply.
+
+Search handoff bounds are 1,000 query characters, 300 title characters, 2,000 snippet
+characters, 4,096 URL characters and 100 candidate entries scanned to produce the
+configured maximum of ten results. Credential-bearing/malformed URLs are omitted.
+SearXNG JSON is capped at 1 MiB, with one byte used to detect overflow; oversized
+responses close and preserve the existing single DDGS fallback. Search configuration
+is capped at 64 KiB. The optional DDGS library's own HTTP machinery remains distinct
+from the page reader's DNS-pinned transport; CODA's MCP operation timeout/cancellation
+is the outer bound for an owned search process.
+
+The workflow retains one combined result in the existing bounded tool-result
+history, rather than storing a second search/page catalogue or persisting memory.
+Host provenance/configuration fingerprints never enter model context. Tests cover
+selection, stale/malformed references, changed grants, partiality, injection,
+deadline/cancellation, ordinary routing, and real SDK/controlled HTTP retrieval
+with owned-process reaping in both session modes. The controlled HTTP fixture uses
+a test-only public-peer socket mapping; production has no private-IP override.
+
+A separate native run exercised that selected-source SDK/HTTP fixture with the
+actual local llama.cpp model in both operation and persistent modes. Both answers
+correctly reported the page's observed value of 42. Cloud providers were disabled,
+and owned MCP children were reaped. This proves selected-source retrieval and local
+interpretation on controlled content; it does not claim a live search-provider
+or public-source research run, or acceptance of the optional browser.

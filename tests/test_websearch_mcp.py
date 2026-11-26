@@ -79,6 +79,42 @@ class WebSearchMCPTests(unittest.TestCase):
         self.assertIn('Clean the bed.', prepare_tool_response(self.normalized(response)))
         self.client.text.assert_called_once_with('bed adhesion', max_results=2)
 
+    def test_provider_text_and_url_fields_have_fixed_bounds(self):
+        raw = [{'url': 'https://user:password@example.com'}, {'url': 'https://bad host'},
+               {'url': 'https://example.com:99999'}, {'url': 'https://example.com/' + 'x' * 4096},
+               {'url': 'https://example.com/valid', 'title': 't' * 1000, 'content': 's' * 10000}]
+        self.searxng_response({'results': raw})
+        result = self.server.search_web('bounded results')
+        pages = result.structured_content['results']
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages[0]['title']), 300)
+        self.assertEqual(len(pages[0]['snippet']), 2000)
+        self.assertEqual(pages[0]['url'], 'https://example.com/valid')
+
+    def test_oversized_primary_response_closes_and_uses_backup_once(self):
+        self.config['search']['searxng_base_url'] = 'https://search.example.org/'
+        self.http.return_value.__enter__.return_value = io.BytesIO(b' ' * 1048577)
+        self.client.text.return_value = [{'href': 'https://example.com/', 'body': 'Backup snippet'}]
+        result = self.server.search_web('bounded results')
+        self.assertEqual(result.structured_content['provider'], 'ddgs')
+        self.assertEqual(self.client.text.call_count, 1)
+        self.http.return_value.__exit__.assert_called_once()
+
+    def test_invalid_query_and_count_never_contact_providers(self):
+        for query, maximum in [('x' * 1001, None), (None, None), ('query', True), ('query', '3')]:
+            with self.subTest(query_type=type(query), maximum=maximum):
+                result = self.server.search_web(query, max_results=maximum)
+                self.assertEqual(result.structured_content['error']['code'], 'invalid_arguments')
+        self.client.text.assert_not_called()
+        self.http.assert_not_called()
+
+    def test_junk_provider_generator_cannot_cause_unbounded_scanning(self):
+        def junk():
+            for _ in range(100):
+                yield {'url': 'file:///private'}
+            raise AssertionError('The candidate scan exceeded its hard limit.')
+        self.assertEqual(self.server.normalize_pages(junk(), 'url', 'content', 5), [])
+
     def test_empty_response_acknowledges_no_results_without_claiming_no_information_exists(self):
         self.client.text.return_value = []
         result = self.normalized(self.server.search_web('bed adhesion'))

@@ -461,6 +461,7 @@ Commands are self-registering modules that own their intent metadata and
 - [Conversational MCP interpretation and follow-up](docs/mcp-conversation.md)
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
 - [Optional public webpage reader](integrations/coda-webread/README.md)
+- [Search results and bounded source research](docs/web-source-selection.md)
 - [Filesystem setup, migration and safe test route](docs/filesystem-quickstart.md)
 - [Filesystem validation and platform evidence](docs/capability-filesystem-validation.md)
 - [Safe filesystem workspace references](docs/mcp-workspaces.md)

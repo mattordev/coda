@@ -16,6 +16,7 @@ from ai.request_context import request_context
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.mcp.conversation import plan_follow_up, focus_is_current, MISSING
+from ai.mcp.web_sources import plan_sources, run_sources
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_display, prepare_full_tool_output
 from ai.tools.diagnostics import record_tool_failure
@@ -336,6 +337,10 @@ def _filesystem_follow_up(message, commands, *, cancel_event=None, debug=False):
     if _mcp_catalog is None:
         return None
     previous = llm_service.get_tool_follow_up_context()
+    web_context = previous is not None and previous.host_context and (
+        previous.host_context.get('bundle') in ('websearch', 'webread') or 'source_seed' in previous.host_context)
+    if web_context:
+        return None
     if previous is not None and previous.host_context and not focus_is_current(previous, _mcp_catalog.manager):
         llm_service.clear_tool_focus()
         previous = None
@@ -357,6 +362,21 @@ def _filesystem_follow_up(message, commands, *, cancel_event=None, debug=False):
     if plan.reply == MISSING:
         llm_service.clear_tool_focus()
     return CommandResult(True, response_text=plan.reply, open_follow_up=True)
+
+
+def _web_sources_reply(message, *, cancel_event=None, debug=False):
+    if _mcp_catalog is None:
+        return None
+    plan = plan_sources(message, llm_service.get_tool_follow_up_context(), _mcp_catalog.manager)
+    if plan is None:
+        return None
+    outcome, reply = run_sources(plan, _mcp_catalog, message, cancel_event=cancel_event)
+    if reply is not None:
+        return CommandResult(True, response_text=reply, open_follow_up=True)
+    from ai.intents.models import Intent, IntentRequest
+    request = IntentRequest(Intent('web.sources', 'Read selected source observations.', source='workflow'),
+                            message, 1.0, 'web_sources')
+    return _tool_outcome(request, outcome, cancel_event=cancel_event, debug=debug)
 
 
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
@@ -414,6 +434,9 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
     )).route(normalized_message)
     native_selected = native_match is not None and native_match.matched and native_match.intent.source == 'native'
+    source_reply = None if native_selected else _web_sources_reply(normalized_message, cancel_event=cancel_event, debug=debug)
+    if source_reply is not None:
+        return source_reply
     filesystem_reply = None if native_selected else _filesystem_follow_up(
         normalized_message, commands, cancel_event=cancel_event, debug=debug)
     if filesystem_reply is not None:

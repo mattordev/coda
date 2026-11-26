@@ -173,9 +173,43 @@ def web_page_summary(data):
     return prefix + ' Ask me to summarise it, or say show tool output to inspect the source text.'
 
 
+def web_search_summary(data):
+    page = _payload(data)
+    if not isinstance(page, dict) or page.get('kind') != 'web_search' or not isinstance(page.get('results'), list):
+        return None
+    lines = ['Search snippets only; no result pages were read.']
+    for index, source in enumerate(page['results'][:3], 1):
+        if isinstance(source, dict):
+            title = str(source.get('title') or 'Untitled source')[:80]
+            url = str(source.get('url', ''))[:150]
+            snippet = str(source.get('snippet', ''))[:140]
+            lines.append(f'{index}. {title} ({url}). Snippet: {snippet}')
+    if len(page['results']) > 3:
+        lines.append('Say show tool output for the remaining numbered sources.')
+    return '\n'.join(lines)
+
+
+def web_sources_summary(data):
+    page = _payload(data)
+    if not isinstance(page, dict) or page.get('kind') != 'web_sources' or not isinstance(page.get('sources'), list):
+        return None
+    if any(not isinstance(source, dict) or not isinstance(source.get('text', ''), str) for source in page['sources']):
+        return None
+    if page.get('scope') == 'search_snippets_only':
+        return 'These are retained search snippets; no result pages have been fetched.'
+    readable = [source for source in page['sources'] if source.get('status') == 'fetched' and source.get('text', '').strip()]
+    if not readable:
+        return 'None of the requested pages returned readable source text. I cannot summarise their article contents from titles or snippets.'
+    text = f"I retrieved readable text from {len(readable)} of {page.get('requested_pages', len(page['sources']))} requested pages."
+    if page.get('partial'):
+        text += ' The evidence is partial.'
+    return text + ' ' + (' '.join(source['text'] for source in readable)[:400] if sum(len(source['text']) for source in readable) <= 400
+                        else 'Say show tool output to inspect the source text and URLs.')
+
+
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
-    page = web_page_summary(data)
+    page = web_page_summary(data) or web_search_summary(data) or web_sources_summary(data)
     if page is not None:
         return page
     facts = filesystem_fact_summary(data, text, question)

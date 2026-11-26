@@ -57,6 +57,40 @@ class InterpretationTestCase(unittest.TestCase):
 
 
 class ToolInterpretationTests(InterpretationTestCase):
+    def test_generated_web_citations_cannot_introduce_unobserved_urls(self):
+        result = ToolResult(True, {'structuredContent': {
+            'kind': 'web_sources', 'scope': 'fetched_pages', 'sources': [
+                {'status': 'fetched', 'url': 'https://example.com/observed', 'text': 'The observed value is 42.'},
+                {'status': 'failed', 'requested_url': 'https://example.com/failed', 'error': {'code': 'http_error'}}],
+            'partial': True, 'requested_pages': 2}})
+        self.generate.side_effect = None
+        self.generate.return_value = ('Observed: https://example.com/observed. Invented: HTTPS://fake.example/claim Failed: https://example.com/failed Local: file:///private', None)
+        answer = service.interpret_result(result, 'Summarise these sources')
+        self.assertTrue(answer.used_llm)
+        self.assertIn('https://example.com/observed', answer.text)
+        self.assertNotIn('fake.example', answer.text)
+        self.assertNotIn('file:///private', answer.text)
+        self.assertNotIn('https://example.com/failed', answer.text)
+        self.assertIn('unverified source omitted', answer.text)
+
+    def test_unreadable_source_workflow_never_generates_article_claims(self):
+        result = ToolResult(True, {'structuredContent': {'kind': 'web_sources', 'scope': 'fetched_pages',
+            'sources': [{'status': 'failed', 'requested_url': 'https://example.com', 'error': {'code': 'http_error'}}],
+            'partial': True, 'requested_pages': 1}})
+        answer = service.interpret_result(result, 'Summarise these sources', force=True)
+        self.assertFalse(answer.used_llm)
+        self.assertIn('None of the requested pages', answer.text)
+        self.assertEqual(self.calls, [])
+
+    def test_ordinary_search_stays_a_numbered_snippet_receipt_without_model_call(self):
+        result = ToolResult(True, {'structuredContent': {'kind': 'web_search', 'results': [
+            {'title': 'A source', 'url': 'https://example.com/observed', 'snippet': 'Excerpt ' * 100}]}})
+        answer = service.interpret_result(result, 'Search for parser documentation')
+        self.assertFalse(answer.used_llm)
+        self.assertIn('1. A source', answer.text)
+        self.assertIn('no result pages were read', answer.text)
+        self.assertEqual(self.calls, [])
+
     def test_webpage_explicit_summary_uses_only_supplied_observations(self):
         result = ToolResult(True, {'structuredContent': {
             'kind': 'web_page', 'text': 'A bounded article excerpt.', 'partial': True,
