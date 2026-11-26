@@ -1,0 +1,4 @@
+# Optional diagnostic only; never installed by CODA or root requirements.
+playwright==1.65.2
+greenlet==3.5.6
+psutil==7.2.2

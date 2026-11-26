@@ -462,6 +462,7 @@ Commands are self-registering modules that own their intent metadata and
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
 - [Optional public webpage reader](integrations/coda-webread/README.md)
 - [Search results and bounded source research](docs/web-source-selection.md)
+- [Optional browser integration evaluation and open gates](docs/browser-integration-plan.md)
 - [Filesystem setup, migration and safe test route](docs/filesystem-quickstart.md)
 - [Filesystem validation and platform evidence](docs/capability-filesystem-validation.md)
 - [Safe filesystem workspace references](docs/mcp-workspaces.md)
