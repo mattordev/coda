@@ -96,6 +96,14 @@ before confirmation. No test operated on real user documents.
 - Move used destructive-source and write-destination authority with no read
   grants. Cancel preserved the tree; a fresh confirmation moved text/binary
   descendants to the exact destination and cleaned relocated locks.
+- A combined disposable workflow on the operator-protection implementation
+  created a folder/report, used a real local-model listing and contextual newest
+  report read, obtained revisions, appended/edited, copied, searched names/text,
+  checked metadata, moved and deleted. Exact effects and lock/server cleanup
+  passed, and a policy self-modification attempt was rejected before approval.
+  Its first listing attempt timed out at 60 seconds without running that request;
+  the retry used a 120-second local provider limit and completed. These were
+  sequential confirmed requests, not autonomous composition.
 
 Owned-server and fixture cleanup passed for the successful runs. A cold deletion
 attempt also timed out before selection with no effects; the warm retry passed.

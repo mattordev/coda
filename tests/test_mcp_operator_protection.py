@@ -191,6 +191,29 @@ class OperatorProtectionTests(unittest.TestCase):
             'Read operator policy under explicit read authority', 1, arguments={'path': str(self.other_policy)}))
         self.assertTrue(result.success, result)
 
+    def test_renamed_filesystem_instance_names_creation_target_before_approval(self):
+        from contextlib import ExitStack
+        import utils.on_command as runtime
+        import utils.llm_service as history
+        manager, _ = self.manager()
+        with ExitStack() as stack:
+            for name in ('_mcp_catalog', '_pending_confirmation', '_intent_registry', '_intent_router'):
+                stack.enter_context(patch.object(runtime, name, None))
+            stack.enter_context(patch.object(runtime, 'create_router', side_effect=lambda registry: runtime.IntentRouter(
+                registry, strategies=(runtime.ExactMatchStrategy(), runtime.CommandPrefixStrategy()))))
+            history._reset_conversation()
+            runtime.configure_intent_router({}, mcp_manager=manager)
+            try:
+                for name, target, extra in (('create_file', self.data / 'new-file', {'content': 'new'}),
+                                             ('create_directory', self.data / 'new-folder', {})):
+                    result = runtime.run('mcp.files.' + name + ' ' + json.dumps({'path': str(target), **extra}), {})
+                    self.assertIn(str(target), result.response_text)
+                    self.assertIn('Create the', result.response_text)
+                    self.assertFalse(target.exists())
+                    runtime.cancel_pending_confirmation()
+            finally:
+                runtime.shutdown_tools()
+                history._reset_conversation()
     def test_launch_metadata_is_not_tool_input_and_is_bounded(self):
         definition = self.definitions[0]
         guarded = guarded_launch(definition, self.definitions)
