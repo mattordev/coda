@@ -2,8 +2,9 @@
 
 This is the v1.5.6 release gate for [#267](https://github.com/mattordev/coda/issues/267),
 updated 26 November 2026. Development integration is not a published release.
-Main and the latest published release remain v1.5.5 until the documentation and
-release cards pass their own gates.
+Promotion, version/tag validation and publication are tracked separately by
+[release gate #269](https://github.com/mattordev/coda/issues/269); milestone closure
+requires verified delivery, not merely a merged feature PR.
 
 ## Traceability
 
