@@ -8,6 +8,7 @@ from pathlib import Path
 import argparse
 import json
 import os
+from itertools import islice
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -17,8 +18,11 @@ from urllib.request import Request, urlopen
 CONFIG_PATH = Path(__file__).resolve().parent / "websearch.config.json"
 
 def load_config() -> dict:
-    with CONFIG_PATH.open("r", encoding="utf-8") as file:
-        config = json.load(file)
+    with CONFIG_PATH.open("rb") as file:
+        raw = file.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("Search configuration exceeds its size limit.")
+    config = json.loads(raw)
     if not isinstance(config, dict) or not isinstance(config.get("search", {}), dict):
         raise ValueError("Search configuration must be an object containing a search object.")
     search = config.get("search", {})
@@ -59,21 +63,23 @@ def search_failure(code: str, message: str, attempts: list | None = None) -> Cal
 def normalize_pages(results: list, url_key: str, snippet_key: str, limit: int) -> list:
     """Keep usable HTTP(S) sources in the shared provider-independent contract."""
     pages = []
-    for result in results:
+    for result in islice(results, 100):
         if not isinstance(result, dict):
             continue
         url = result.get(url_key)
-        if not isinstance(url, str):
+        if not isinstance(url, str) or len(url) > 4096 or any(char.isspace() or ord(char) < 32 for char in url):
             continue
         try:
             parsed = urlsplit(url)
+            if parsed.username is not None or parsed.password is not None or parsed.port == 0:
+                continue
         except ValueError:
             continue
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             continue
-        pages.append({"title": result.get("title") if isinstance(result.get("title"), str) else "",
+        pages.append({"title": result.get("title")[:300] if isinstance(result.get("title"), str) else "",
                       "url": url,
-                      "snippet": result.get(snippet_key) if isinstance(result.get(snippet_key), str) else ""})
+                      "snippet": result.get(snippet_key)[:2000] if isinstance(result.get(snippet_key), str) else ""})
         if len(pages) >= limit:
             break
     return pages
@@ -84,7 +90,10 @@ def search_searxng(base_url: str, query: str, limit: int, timeout: int) -> list:
     url = f"{base_url.rstrip('/')}/search?{urlencode({'q': query, 'format': 'json'})}"
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "coda-websearch/1.0"})
     with urlopen(request, timeout=timeout) as response:
-        payload = json.load(response)
+        raw = response.read(1048577)
+    if len(raw) > 1048576:
+        raise ValueError("SearXNG response exceeds its size limit.")
+    payload = json.loads(raw)
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
         raise ValueError("SearXNG response must contain a results list.")
     return normalize_pages(payload["results"], "url", "content", limit)
@@ -93,8 +102,10 @@ def search_searxng(base_url: str, query: str, limit: int, timeout: int) -> list:
 @server.tool(structured_output=False)
 def search_web(query: str, max_results: int | None = None) -> CallToolResult:
     """Search the web and return matching pages."""
-    if not query.strip():
-        return search_failure("invalid_arguments", "Search query cannot be empty.")
+    if not isinstance(query, str) or not query.strip() or len(query) > 1000:
+        return search_failure("invalid_arguments", "Search query must contain from 1 to 1000 characters.")
+    if max_results is not None and type(max_results) is not int:
+        return search_failure("invalid_arguments", "Search result count must be an integer.")
     try:
         config = load_config()
     except (OSError, ValueError) as error:

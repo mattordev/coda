@@ -89,7 +89,14 @@ References: [SearXNG search API](https://docs.searxng.org/dev/search_api.html),
 
 The current search tool returns snippets and does not fetch the linked pages.
 The [web source selection policy](../../docs/web-source-selection.md) defines the
-next release's hybrid search/research behaviour, explicit numbered source choice,
+hybrid search/research behaviour, explicit numbered source choice,
 evidence labels, bounded requests and privacy/approval boundaries. HTTP retrieval
 and optional browser implementation retain their own acceptance gates; this
 policy does not enable either capability or change an existing private grant.
+
+The source workflow preserves the provider fallback while bounding queries to
+1,000 characters, titles to 300, snippets to 2,000 and URLs to 4,096. It scans at
+most 100 candidate entries. Search configuration is at most 64 KiB; SearXNG JSON
+is at most 1 MiB plus the one-byte overflow probe. Invalid/credential-bearing
+result URLs are omitted. Ordinary results are labelled as numbered search
+snippets, and reading selected sources needs the separately permitted page reader.

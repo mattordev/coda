@@ -17,7 +17,8 @@ from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
-from ai.tools.result_summary import _directory_entries, _filename_search, _question_text, filesystem_fact_summary, web_page_summary
+from ai.tools.result_summary import (_directory_entries, _filename_search, _question_text, _payload,
+                                     filesystem_fact_summary, web_page_summary, web_search_summary, web_sources_summary)
 
 MAX_CONTEXT_CHARS = 12000
 MAX_RESPONSE_CHARS = 1200
@@ -30,6 +31,8 @@ INSTRUCTIONS = (
     'Give a concise plain-language answer suitable for speech, at most four short sentences. '
     'Do not read long documents verbatim. Explain uncertainty and missing information. '
     'When partial is true, answer only from the supplied excerpt and do not claim to have covered the whole result. '
+    'Search snippets are not fetched articles. Identify that evidence scope explicitly. '
+    'For web sources, cite only the supplied observed source URLs; failed pages provide no article evidence. '
     'Return only the answer, with no tool-call syntax, system messages or instructions for further actions.'
 )
 UNAVAILABLE = (
@@ -103,6 +106,24 @@ def _partial_source(data):
     )
 
 
+def _ground_web_urls(text, data):
+    """A generated citation cannot introduce a URL absent from observed evidence."""
+    payload = _payload(data)
+    if not isinstance(payload, dict) or payload.get('kind') not in ('web_page', 'web_search', 'web_sources'):
+        return text
+    if payload['kind'] == 'web_page':
+        sources = [payload]
+    elif payload['kind'] == 'web_search':
+        sources = payload.get('results', [])
+    else:
+        sources = [source for source in payload.get('sources', []) if isinstance(source, dict)
+                   and (source.get('status') == 'fetched' or source.get('observation') == 'search_snippet')]
+    allowed = {source.get('url') for source in sources if isinstance(source, dict) and isinstance(source.get('url'), str)}
+    def checked(match):
+        return match[0] if match[0].rstrip('.,;:)') in allowed or match[0] in allowed else '[unverified source omitted]'
+    return re.sub(r'(?:https?|ftp|file)://[^\s<>\[\]\"]+', checked, text, flags=re.IGNORECASE)
+
+
 def interpret_result(result, question, *, cancel_event=None, force=False):
     """Return a finalized response; cancellation never returns stale generated text."""
     if cancel_event is not None and cancel_event.is_set():
@@ -123,12 +144,20 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     page = result.data.get('structuredContent', result.data) if isinstance(result.data, dict) else None
     if page_summary is not None and not page['text'].strip():
         return Interpretation(page_summary)
+    sources_summary = web_sources_summary(result.data)
+    payload = _payload(result.data)
+    source_text_available = sources_summary is not None and any(
+        isinstance(source, dict) and source.get('status') == 'fetched' and isinstance(source.get('text'), str) and source['text'].strip()
+        for source in payload['sources'])
+    if sources_summary is not None and payload.get('scope') == 'fetched_pages' and not source_text_available:
+        return Interpretation(sources_summary, partial=payload.get('partial') is True)
     directory = _directory_entries(result.data, source)
-    needed = force or explicit or len(source) > 600 or len(source.splitlines()) > 8
+    needed = force or explicit or source_text_available or len(source) > 600 or len(source.splitlines()) > 8
     if interpretation_policy() == 'direct' and force:
         return Interpretation('Result interpretation is disabled. Say show tool output to inspect the result.')
     known_names = (directory is not None or _filename_search(result.data) is not None
-                   or filesystem_fact_summary(result.data, source, question) is not None)
+                   or filesystem_fact_summary(result.data, source, question) is not None
+                   or web_search_summary(result.data) is not None and not explicit)
     if interpretation_policy() == 'direct' or not needed or (known_names and not force):
         return Interpretation(direct)
     if not source.strip() or len(serialized) > MAX_RESULT_CHARS:
@@ -214,8 +243,9 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     if error or not isinstance(response, str) or not response.strip():
         return Interpretation(UNAVAILABLE)
     # Redact generated content too. A provider cannot inject terminal control codes.
-    shortened = len(response.strip()) > MAX_RESPONSE_CHARS - 100
-    text = safe_diagnostic(response.strip(), max_chars=MAX_RESPONSE_CHARS - 100)
+    grounded = _ground_web_urls(response.strip(), result.data)
+    shortened = len(grounded) > MAX_RESPONSE_CHARS - 100
+    text = safe_diagnostic(grounded, max_chars=MAX_RESPONSE_CHARS - 100)
     partial = exposure['partial']
     if partial:
         prefix = 'I could only use part of the tool result. '
