@@ -511,6 +511,24 @@ valid UTF-8, at most 32,768 characters and 128 components, alongside the existin
 portable-name rules. Operator configuration must be changed outside these tools;
 no existing private grant is expanded automatically.
 
+CODA also derives mutation exclusions from the operator MCP registry: the
+running installation, complete definition directories (including future JSON
+files), and each bundle's declared configuration files are protected, including
+custom absolute paths outside the installation and disabled bundles. Definition
+provenance and bundle manifests supply this information; a tool cannot grant
+itself permission or supply replacement exclusions. Host checks reject these
+targets before confirmation. The same bounded exclusions are passed privately
+at server launch so descendant and physical-alias checks also run inside the
+server. Authorised reads remain subject to normal read policy.
+
+The launch metadata is limited to 128 nonredundant paths and 16,384 ASCII JSON
+characters; exceeding the limit refuses launch rather than omitting protection.
+If operator configuration changes the exclusion set while a filesystem process
+is persistent, retire/refresh that session or restart CODA before further use.
+The SDK refuses to reuse a process with stale launch metadata. A standalone
+server launched outside CODA knows its own permissions and installation paths;
+it does not discover other applications' operator registries automatically.
+
 ## Move and rename
 
 `move_path` moves a file or a complete, bounded directory tree to a new absolute

@@ -26,6 +26,7 @@ class RemoteServerDefinition:
     idle_timeout_seconds: float | None = None
     max_sse_event_bytes: int | None = 4 * 1024 * 1024
     reconnect_backoff_seconds: float = 0.0
+    definition_file: str | None = None
 
     def __post_init__(self):
         # Reuse existing trust/lifecycle validation without exposing SDK models.

@@ -217,10 +217,11 @@ def _dispatch_intent(
         if outcome.error is not None and outcome.error.code == "confirmation_required":
             _pending_confirmation = (deepcopy(request), executor, time.monotonic() + 60)
             confirmation = f"Confirm the action {request.intent.name}? Say confirm or cancel."
-            if request.intent.name in ('mcp.filesystem.create_file', 'mcp.filesystem.create_directory'):
-                kind = 'file' if request.intent.name.endswith('.create_file') else 'folder'
-                confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
             parts = request.intent.name.split('.', 2)
+            if (len(parts) == 3 and parts[2] in ('create_file', 'create_directory')
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                kind = 'file' if parts[2] == 'create_file' else 'folder'
+                confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
             if (len(parts) == 3 and parts[2] == 'delete_path'
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
                 target = sanitize_text(str(arguments.get('path', '')))
