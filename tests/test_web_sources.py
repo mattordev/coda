@@ -4,6 +4,7 @@ from copy import deepcopy
 from collections import deque
 from dataclasses import replace
 import json
+import math
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -78,8 +79,16 @@ class SourceTests(unittest.TestCase):
     def test_no_provenance_stale_or_revoked_sources_never_guess(self):
         forged = replace(self.previous, host_context=None)
         self.assertEqual(self.plan('read second source', forged).kind, 'clarify')
-        with patch.object(web.time, 'monotonic', return_value=self.previous.host_context['observed_at'] + 120):
-            self.assertEqual(self.plan('read second source').kind, 'clarify')
+        original_observed = self.previous.host_context['observed_at']
+        for observed in (9.7, 127.789, 1000000.17, original_observed):
+            self.previous.host_context['observed_at'] = observed
+            deadline = observed + 120
+            for now, expected in ((math.nextafter(deadline, -math.inf), 'read'),
+                                  (deadline, 'clarify'), (math.nextafter(deadline, math.inf), 'clarify'),
+                                  (observed - 1, 'clarify')):
+                with self.subTest(observed=observed, now=now), patch.object(web.time, 'monotonic', return_value=now):
+                    self.assertEqual(self.plan('read second source').kind, expected)
+        self.previous.host_context['observed_at'] = original_observed
         self.tokens['search'] = ('search', 2)
         self.assertEqual(self.plan('read second source').kind, 'clarify')
         self.assertEqual(self.calls, [])

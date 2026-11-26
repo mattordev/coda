@@ -86,9 +86,10 @@ def source_seed(result, manager):
         seed = {'server': context.get('server'), 'token': context.get('token'),
                 'observed_at': context.get('observed_at'), 'sources': sources}
     try:
-        elapsed = time.monotonic() - seed['observed_at']
+        now = time.monotonic()
+        observed = seed['observed_at']
         token = manager.source_focus_token(seed['server'])
-        if not 0 <= elapsed < SOURCE_SECONDS or token is None or token != seed['token']:
+        if not observed <= now < observed + SOURCE_SECONDS or token is None or token != seed['token']:
             return None
         for server, expected in seed.get('readers', {}).items():
             if manager.source_focus_token(server) != expected:
