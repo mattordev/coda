@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from copy import deepcopy
 from enum import Enum
 import re
@@ -14,7 +14,8 @@ from ai.intents.models import Intent, IntentParameter, IntentRequest
 from ai.intents.registry import IntentRegistry
 from ai.mcp.config import LocalServerDefinition, discover_definitions
 from ai.mcp.remote import RemoteServerDefinition
-from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError
+from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError, _configuration
+from ai.mcp.protection import MUTATIONS, OperatorProtectionError, operator_paths, check_mutation, guarded_launch
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
@@ -137,12 +138,19 @@ class LocalMCPManager:
                     runtime.state = ServerState.CONNECTED
 
             try:
+                definition = runtime.definition
+                if getattr(definition, 'bundled_server', None) == 'filesystem':
+                    with self._metadata_lock:
+                        definitions = tuple(server.definition for server in self._servers.values())
+                    definition = guarded_launch(definition, definitions)
                 result = self._transport.request(
-                    runtime.definition, operation, cancel_event=cancel_event,
+                    definition, operation, cancel_event=cancel_event,
                     retire_event=runtime.retire_event, on_connected=connected, **kwargs,
                 )
                 if not isinstance(result, ToolResult):
                     result = failure("mcp_protocol_error", "The MCP response was invalid.")
+            except OperatorProtectionError:
+                result = failure('configuration_error', 'Operator path protection could not be prepared. No filesystem action was started.')
             except Exception as error:
                 result = failure(
                     "mcp_internal_error", "An unexpected error prevented the MCP operation from completing.",
@@ -221,6 +229,21 @@ class LocalMCPManager:
             self._servers[server_id].state = ServerState.AVAILABLE
         return ToolResult(success=True, data=tuple(deepcopy(tool[2]) for tool in pending.values()))
 
+    def filesystem_focus_token(self, server_id):
+        """Bind ephemeral focus to this manager and the current read policy."""
+        with self._metadata_lock:
+            runtime = self._servers.get(server_id)
+            if self._closed or runtime is None or getattr(runtime.definition, 'bundled_server', None) != 'filesystem':
+                return None
+            definition, revision = runtime.definition, runtime.configuration_revision
+        if not definition.enabled or not definition.trusted:
+            return None
+        try:
+            policy = _configuration(definition)
+        except WorkspaceReferenceError:
+            return None
+        return id(self), revision, repr(definition), repr(policy)
+
     def executor(self, intent_name: str, *, cancel_event: Event | None = None) -> MCPToolExecutor:
         """Resolve a discovered capability without starting a process."""
         with self._metadata_lock:
@@ -242,7 +265,20 @@ class LocalMCPManager:
                 return failure("confirmation_required", "The MCP action requires confirmation.")
             if decision not in ("allow", "confirm"):
                 return failure("permission_denied", "The MCP tool is not permitted.")
-        if name in definition.confirm_tools and not confirmed:
+        filesystem_mutation = (
+            getattr(definition, "bundled_server", None) == "filesystem"
+            and name in MUTATIONS
+        )
+        if filesystem_mutation:
+            try:
+                with self._metadata_lock:
+                    definitions = tuple(server.definition for server in self._servers.values())
+                paths, _ = operator_paths(definitions)
+                if check_mutation(name, request.arguments, paths):
+                    return failure('protected_path', 'Operator configuration and the running installation cannot be changed by filesystem tools.')
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+                return failure('configuration_error', 'Operator path protection could not be validated; no mutation was authorised.')
+        if (name in definition.confirm_tools or filesystem_mutation) and not confirmed:
             return failure("confirmation_required", "The MCP action requires confirmation.")
         return None
 
@@ -344,11 +380,19 @@ class MCPToolExecutor:
                 arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
             except WorkspaceReferenceError as error:
                 return failure(error.code, str(error))
-            return self._manager._request(
+            token = self._manager.filesystem_focus_token(self._server_id)
+            outcome = self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
             )
+            if outcome.success and token is not None and token == self._manager.filesystem_focus_token(self._server_id):
+                outcome = replace(outcome, host_context={
+                    'server': self._server_id, 'tool': self._tool_name,
+                    'arguments': deepcopy(arguments), 'token': token,
+                    'observed_at': time.monotonic(),
+                })
+            return outcome
 
         adapter = ExternalToolAdapter(
             self._intent,

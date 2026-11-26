@@ -7,6 +7,23 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'move_incomplete': 'The move outcome is unverified. Inspect both source and destination and say show tool output before any new request.',
+    'cross_device': 'Moving across filesystems is unsupported. The move was refused without a copy-and-delete fallback.',
+    'destructive_disabled': 'Deleting and moving files is disabled in the filesystem configuration.',
+    'directory_not_empty': 'That folder is not empty. Request recursive deletion explicitly if you want its contents removed too.',
+    'delete_incomplete': 'Deletion was interrupted. Some entries may already have been removed. Say show tool output and inspect the remaining target before retrying.',
+    'protected_path': 'That location is protected and cannot be changed by file tools. Say show tool output for the reason.',
+    'copy_incomplete': 'The copy did not finish. Partial staging may remain; say show tool output before retrying.',
+    'resource_limit': 'The operation reached its configured limits. Please narrow its scope or use the documented bounded options.',
+    'unsupported_operation': 'This platform or filesystem does not support the required safe operation.',
+    'content_changed': 'The requested file or folder changed. Inspect its current state before making a new request.',
+    'ambiguous_edit': 'The text to replace must occur exactly once. Nothing was changed.',
+    'mutation_in_progress': 'Another edit or an interrupted transaction is locking that file. Please inspect its recovery files before retrying.',
+    'mutation_incomplete': 'The mutation did not finish safely. The file may have changed and recovery files were retained. Say show tool output before retrying.',
+    'unsafe_path': "That location has a link, alias or unsupported entry type, so I can't safely use it.",
+    "write_disabled": "Writing files and folders is disabled in the filesystem configuration.",
+    "already_exists": "That location already exists. Nothing was overwritten.",
+    "content_too_large": "That content exceeds the tool's limit of 1 MiB of UTF-8 text.",
     "outside_allowed_roots": "I couldn't access that directory because it isn't in my allowed locations. You can change this in the filesystem configuration.",
     "blocked_path": "I couldn't access that location because it is blocked in the filesystem configuration.",
     "permission_denied": "I don't have permission to access that.",
@@ -28,6 +45,14 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'move_incomplete': 'unknown_error', 'cross_device': 'invalid_arguments',
+    'destructive_disabled': 'permission_denied', 'directory_not_empty': 'invalid_arguments',
+    'delete_incomplete': 'unknown_error', 'protected_path': 'permission_denied',
+    'copy_incomplete': 'unknown_error', 'resource_limit': 'invalid_arguments', 'unsupported_operation': 'unavailable',
+    'content_changed': 'invalid_arguments', 'ambiguous_edit': 'invalid_arguments',
+    'mutation_in_progress': 'unavailable', 'mutation_incomplete': 'unknown_error', 'unsafe_path': 'permission_denied',
+    "write_disabled": "permission_denied", "already_exists": "invalid_arguments",
+    "content_too_large": "invalid_arguments",
     "no_results": "no_results", "not_found": "not_found", "file_not_found": "not_found",
     "workspace_not_found": "not_found", "permission_denied": "permission_denied",
     "outside_allowed_roots": "permission_denied", "blocked_path": "permission_denied",

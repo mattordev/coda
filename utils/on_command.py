@@ -1,4 +1,5 @@
 import os
+import json
 from utils.console import print_line as print
 from copy import deepcopy
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from ai.llm_router.core import route_request
 from ai.request_context import request_context
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
+from ai.mcp.conversation import plan_follow_up, focus_is_current, MISSING
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_display, prepare_full_tool_output
 from ai.tools.diagnostics import record_tool_failure
@@ -22,6 +24,7 @@ from ai.tools.interpretation import interpret_result, is_result_follow_up
 from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStrategy, CommandPrefixStrategy
 from ai.privacy.sanitizer import sanitize_text, sanitize_structure
 from ai.tools.error_feedback import safe_diagnostic
+from ai.tools.result_summary import _presentation_style, _question_text
 
 
 _intent_router = None
@@ -75,6 +78,7 @@ def start_tools():
 def shutdown_tools(*, timeout_seconds=10):
     global _pending_confirmation
     _pending_confirmation = None
+    llm_service.clear_tool_focus()
     if _mcp_catalog is not None:
         return _mcp_catalog.close(timeout_seconds=timeout_seconds)
     return {}
@@ -85,6 +89,7 @@ def cancel_pending_confirmation():
     global _pending_confirmation
     had_pending = _pending_confirmation is not None
     _pending_confirmation = None
+    llm_service.clear_tool_focus()
     return had_pending
 
 
@@ -120,6 +125,7 @@ def _dispatch_intent(
     commands,
     debug=False,
     cancel_event=None,
+    user_message=None,
 ) -> CommandResult | None:
     """Route and dispatch an accepted intent or return None."""
     global _intent_router
@@ -198,7 +204,7 @@ def _dispatch_intent(
                 print(f"[DEBUG - MCP ARGUMENTS] {sanitize_structure(arguments)!r}")
         except Exception:
             return CommandResult(handled=True, response_text="The tool arguments are invalid or incomplete. Please provide the required values.", open_follow_up=True)
-        request = result.to_request(message, arguments=arguments)
+        request = result.to_request(user_message or message, arguments=arguments)
         if _mcp_catalog is None:
             return CommandResult(handled=True, response_text="The tool is unavailable.")
         try:
@@ -210,8 +216,38 @@ def _dispatch_intent(
         outcome = dispatcher.execute(request)
         if outcome.error is not None and outcome.error.code == "confirmation_required":
             _pending_confirmation = (deepcopy(request), executor, time.monotonic() + 60)
+            confirmation = f"Confirm the action {request.intent.name}? Say confirm or cancel."
+            parts = request.intent.name.split('.', 2)
+            if (len(parts) == 3 and parts[2] in ('create_file', 'create_directory')
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                kind = 'file' if parts[2] == 'create_file' else 'folder'
+                confirmation = f'Create the {kind} at "{sanitize_text(str(arguments.get("path", "")))}"? Say confirm or cancel.'
+            if (len(parts) == 3 and parts[2] == 'delete_path'
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                target = sanitize_text(str(arguments.get('path', '')))
+                scope = ' including all its contents' if arguments.get('recursive') is True else ' (files and empty folders only)'
+                confirmation = f'Permanently delete "{target}"{scope}? Say confirm or cancel.'
+            if (len(parts) == 3 and parts[2] in ('copy_path', 'move_path')
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                source = sanitize_text(str(arguments.get('source', '')))
+                destination = sanitize_text(str(arguments.get('destination', '')))
+                if parts[2] == 'move_path':
+                    confirmation = f'Move "{source}" and any folder contents to the new location "{destination}"? Say confirm or cancel.'
+                else:
+                    confirmation = f'Copy "{source}" to the new location "{destination}"? Say confirm or cancel.'
+            if (len(parts) == 3 and parts[2] in ('edit_file', 'append_file')
+                    and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):
+                target = sanitize_text(str(arguments.get('path', '')))
+                content = str(arguments.get('new_text' if parts[2] == 'edit_file' else 'content', ''))
+                preview = sanitize_text(content[:120]).replace('\r', '\\r').replace('\n', '\\n')
+                suffix = ' (excerpt)' if len(content) > 120 else ''
+                if parts[2] == 'edit_file':
+                    old = sanitize_text(str(arguments.get('old_text', ''))[:120]).replace('\r', '\\r').replace('\n', '\\n')
+                    confirmation = f'Replace one occurrence of "{old}" with "{preview}"{suffix} in "{target}"? Say confirm or cancel.'
+                else:
+                    confirmation = f'Append "{preview}"{suffix} to "{target}"? Say confirm or cancel.'
             return CommandResult(
-                handled=True, response_text=f"Confirm the action {request.intent.name}? Say confirm or cancel.",
+                handled=True, response_text=confirmation,
                 open_follow_up=True, tool_result=outcome,
             )
         return _tool_outcome(request, outcome, cancel_event=cancel_event, debug=debug)
@@ -242,6 +278,10 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
         return CommandResult(handled=False)
     response = interpreted.text
+    if (outcome.success and outcome.host_context and outcome.host_context.get('tool') == 'list_directory'
+            and _presentation_style(_question_text(request.message)) == 'overview'
+            and not any(word in request.message.casefold() for word in ('how many', 'count', 'number of'))):
+        response += ' Would you like the filenames or the most recently modified files?'
     display = prepare_tool_display(outcome)
     if not llm_service.record_tool_exchange(request.message, outcome, response, cancel_event=cancel_event):
         return CommandResult(handled=False)
@@ -292,11 +332,39 @@ def _retained_tool_reply(message, *, cancel_event=None, debug=False):
                          display_text=prepare_tool_display(result) if result.success else interpreted.text)
 
 
+def _filesystem_follow_up(message, commands, *, cancel_event=None, debug=False):
+    if _mcp_catalog is None:
+        return None
+    previous = llm_service.get_tool_follow_up_context()
+    if previous is not None and previous.host_context and not focus_is_current(previous, _mcp_catalog.manager):
+        llm_service.clear_tool_focus()
+        previous = None
+    plan = plan_follow_up(message, previous, _mcp_catalog.manager)
+    if plan is None:
+        return None
+    if plan.tool:
+        server = previous.host_context['server']
+        command = f'mcp.{server}.{plan.tool} ' + json.dumps(plan.arguments)
+        return _dispatch_intent(command, commands, cancel_event=cancel_event, debug=debug, user_message=message)
+    if plan.result is not None:
+        from ai.tools.presentation import prepare_tool_response
+        question = message if _presentation_style(message.casefold()) == 'recent_files' else 'list all filenames'
+        response = plan.reply + prepare_tool_response(plan.result, question=question)
+        if not llm_service.record_tool_exchange(message, plan.result, response, cancel_event=cancel_event):
+            return CommandResult(False)
+        return CommandResult(True, response_text=response, open_follow_up=True, tool_result=plan.result,
+                             display_text=prepare_tool_display(plan.result))
+    if plan.reply == MISSING:
+        llm_service.clear_tool_focus()
+    return CommandResult(True, response_text=plan.reply, open_follow_up=True)
+
+
 def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     """Emit the single finalized response used by every input and speech path."""
     with request_context(cancel_event=cancel_event) as context:
         result = _on_command(msg, commands, debug=debug, cancel_event=cancel_event)
     if cancel_event is not None and cancel_event.is_set():
+        llm_service.clear_tool_focus()
         return CommandResult(handled=False)
     if result.response_text and not (context.display_stream is not None and context.display_stream.started):
         print(f"CODA: {result.response_text}")
@@ -310,6 +378,7 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     cancelled_result = _get_cancellation_result(cancel_event, debug)
     if cancelled_result is not None:
         _pending_confirmation = None
+        llm_service.clear_tool_focus()
         return cancelled_result
 
     if debug:
@@ -334,6 +403,7 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         request, executor, expires = pending
         answer = normalized_message.lower().rstrip(".!?")
         if answer in ("cancel", "no", "deny"):
+            llm_service.clear_tool_focus()
             return CommandResult(handled=True, response_text="Action cancelled.")
         if answer in ("confirm", "yes", "approve"):
             if time.monotonic() >= expires:
@@ -344,6 +414,10 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
     )).route(normalized_message)
     native_selected = native_match is not None and native_match.matched and native_match.intent.source == 'native'
+    filesystem_reply = None if native_selected else _filesystem_follow_up(
+        normalized_message, commands, cancel_event=cancel_event, debug=debug)
+    if filesystem_reply is not None:
+        return filesystem_reply
     retained_reply = None if native_selected else _retained_tool_reply(normalized_message, cancel_event=cancel_event, debug=debug)
     if retained_reply is not None:
         return retained_reply

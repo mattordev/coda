@@ -223,6 +223,22 @@ return adapter.execute(request)
 point for context-sensitive policy; JSON configuration does not execute policy
 code and no automatic destructive-action scoring is implemented.
 
+Bundled filesystem mutation names have an additional mandatory confirmation
+gate, independent of `confirm_tools`. `ai/mcp/protection.py` derives mutation
+exclusions from discovered definition provenance and manifest-declared
+configuration files. The host rejects protected targets before approval. The
+same bounded exclusions travel as private process-launch metadata to the
+standalone server, which checks descendants and physical aliases against them.
+These exclusions grant no filesystem access. A changed launch exclusion set
+requires retiring the persistent session before reuse.
+
+`ai/mcp/workspace.py` resolves only bounded relative bundled read/list references;
+`ai/mcp/conversation.py` resolves the documented ephemeral filesystem follow-up
+grammar. Both feed fresh actions back through normal argument validation and
+permissions. Server-side read/write/destructive policy remains authoritative.
+`ai/tools/result_summary.py` reports known filesystem result shapes directly;
+provider interpretation is reserved for results/questions that need it.
+
 If confirmation is needed, the runtime stores a deep-copied validated request,
 its executor and a monotonic expiry 60 seconds ahead. It asks the user to
 confirm/cancel. Approval is consumed once, rechecks current permissions and

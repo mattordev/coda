@@ -200,3 +200,362 @@ class FilesystemMCPTests(unittest.TestCase):
         inside.write_text("inside", encoding="utf-8")
         (self.root / ".env").symlink_to(inside)
         self.assertEqual(self.read_code(self.root / ".env"), "blocked_path")
+
+    def range_text(self, result):
+        """Remove only the server's explicit scope notice, preserving source text."""
+        self.assertFalse(result.is_error, result)
+        text = result.content[0].text
+        return text.split("\n", 1)[1] if result.structured_content["partial"] else text
+
+    def test_large_file_ranges_seek_directly_and_bound_actual_io(self):
+        from unittest.mock import MagicMock
+
+        source = self.root / "large.txt"
+        source.write_bytes(b"a" * (2 * 1024 * 1024) + b"tail")
+        self.assertEqual(self.read_code(source), "file_too_large")
+        real_open = Path.open
+        # Windows runners can spell TEMP through an alias/short path, while
+        # authorisation opens the canonical spelling. Observe that same file.
+        canonical_source = source.resolve()
+        reads = []
+        handles = []
+
+        def tracked_open(path, mode="r", *args, **kwargs):
+            handle = real_open(path, mode, *args, **kwargs)
+            if path == canonical_source and mode == "rb":
+                tracked = MagicMock(wraps=handle)
+                tracked.__enter__.return_value = tracked
+                tracked.__exit__.side_effect = lambda *unused: handle.close()
+                reads.append(tracked)
+                handles.append(handle)
+                return tracked
+            return handle
+
+        with patch.object(Path, "open", tracked_open), \
+             patch.object(filesystem, "read_safe_file", side_effect=AssertionError("No whole-file read")):
+            result = filesystem.read_file(str(source), offset_bytes=2 * 1024 * 1024, max_bytes=4)
+        self.assertEqual(self.range_text(result), "tail")
+        self.assertTrue(result.structured_content["partial"])
+        self.assertFalse(result.structured_content["has_more"])
+        self.assertIsNone(result.structured_content["next_offset_bytes"])
+        self.assertEqual(len(reads), 1, "The canonical file read must be observed.")
+        reads[0].read.assert_called_once_with(5)
+        self.assertEqual(reads[0].seek.call_args_list[-1].args, (2 * 1024 * 1024,))
+        self.assertTrue(handles[0].closed)
+
+    def test_range_continuations_preserve_multibyte_text_and_newlines(self):
+        source = self.root / "unicode.txt"
+        raw = "a\u00e9\U0001f680\r\nnext\rlast\n".encode("utf-8")
+        source.write_bytes(raw)
+        for budget in range(4, 11):
+            with self.subTest(budget=budget):
+                offset, pieces = 0, []
+                while offset is not None:
+                    result = filesystem.read_file(str(source), offset_bytes=offset, max_bytes=budget)
+                    pieces.append(self.range_text(result))
+                    metadata = result.structured_content
+                    self.assertLessEqual(metadata["bytes_read"], budget)
+                    following = metadata["next_offset_bytes"]
+                    if following is not None:
+                        self.assertGreater(following, offset)
+                        self.assertEqual(following, offset + metadata["bytes_read"])
+                        self.assertTrue(metadata["has_more"])
+                    offset = following
+                self.assertEqual("".join(pieces), "a\u00e9\U0001f680\nnext\nlast\n")
+
+    def test_ranges_disclose_omitted_prefix_and_suffix(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"abcdef")
+        result = filesystem.read_file(str(source), max_bytes=3)
+        self.assertEqual(self.range_text(result), "abc")
+        self.assertEqual(result.structured_content, {
+            "kind": "file_contents", "partial": True, "offset_bytes": 0,
+            "bytes_read": 3, "has_more": True, "next_offset_bytes": 3,
+        })
+        self.assertIn("Partial file content", result.content[0].text)
+        self.assertIn("Continue at byte 3", result.content[0].text)
+        final = filesystem.read_file(str(source), offset_bytes=3)
+        self.assertEqual(self.range_text(final), "def")
+        self.assertTrue(final.structured_content["partial"])
+        self.assertFalse(final.structured_content["has_more"])
+        self.assertIn("End of file", final.content[0].text)
+        complete = filesystem.read_file(str(source), max_bytes=6)
+        self.assertFalse(complete.structured_content["partial"])
+        self.assertEqual(self.range_text(complete), "abcdef")
+
+    def test_range_default_budget_and_exact_maximum_are_bounded(self):
+        source = self.root / "large.txt"
+        source.write_bytes(b"x" * (2 * filesystem.MAX_READ_BYTES))
+        default = filesystem.read_file(str(source), offset_bytes=1)
+        self.assertEqual(default.structured_content["bytes_read"], 65536)
+        maximum = filesystem.read_file(str(source), max_bytes=filesystem.MAX_READ_BYTES)
+        self.assertEqual(maximum.structured_content["bytes_read"], filesystem.MAX_READ_BYTES)
+        self.assertTrue(maximum.structured_content["has_more"])
+
+    def test_invalid_range_arguments_fail_without_opening_file(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"valid")
+        for arguments in ({"offset_bytes": -1}, {"offset_bytes": True}, {"offset_bytes": 1.5},
+                          {"offset_bytes": "1"}, {"offset_bytes": 2**63},
+                          {"max_bytes": 0}, {"max_bytes": -1}, {"max_bytes": True},
+                          {"max_bytes": 1.5}, {"max_bytes": "1"},
+                          {"max_bytes": filesystem.MAX_READ_BYTES + 1}):
+            with self.subTest(arguments=arguments), \
+                 patch.object(filesystem, "load_config", side_effect=AssertionError("Validate first")):
+                result = filesystem.read_file(str(source), **arguments)
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "invalid_arguments")
+
+    def test_empty_file_eof_and_beyond_eof_have_explicit_range_semantics(self):
+        source = self.root / "empty.txt"
+        source.touch()
+        self.assertEqual(self.range_text(filesystem.read_file(str(source), max_bytes=1)), "")
+        source.write_bytes(b"abc")
+        at_end = filesystem.read_file(str(source), offset_bytes=3, max_bytes=1)
+        self.assertEqual(self.range_text(at_end), "")
+        self.assertTrue(at_end.structured_content["partial"])
+        beyond = filesystem.read_file(str(source), offset_bytes=4, max_bytes=1)
+        self.assertEqual(beyond.structured_content["error"]["code"], "invalid_arguments")
+
+    def test_range_rejects_split_start_tiny_budget_and_malformed_utf8(self):
+        source = self.root / "unicode.txt"
+        source.write_bytes("\u00e9\r\nx".encode("utf-8"))
+        for arguments in ({"offset_bytes": 1, "max_bytes": 4}, {"max_bytes": 1},
+                          {"offset_bytes": 2, "max_bytes": 1}):
+            result = filesystem.read_file(str(source), **arguments)
+            self.assertEqual(result.structured_content["error"]["code"], "invalid_arguments")
+        for raw in (b"\xffbad", b"\xc3", b"x\xc3z"):
+            source.write_bytes(raw)
+            result = filesystem.read_file(str(source), max_bytes=8)
+            self.assertEqual(result.structured_content["error"]["code"], "invalid_encoding")
+
+    def test_ranges_use_current_roots_blocks_and_error_policy(self):
+        source = self.root / "notes.txt"
+        source.write_bytes(b"facts")
+        self.assertFalse(filesystem.read_file(str(source), max_bytes=2).is_error)
+        self.configure(allowed_roots=[])
+        result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "outside_allowed_roots")
+        self.configure(blocked_paths=["**/notes.txt"])
+        result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "blocked_path")
+        self.configure()
+        with patch.object(filesystem, "read_file_range", side_effect=PermissionError("denied")):
+            result = filesystem.read_file(str(source), max_bytes=2)
+        self.assertEqual(result.structured_content["error"]["code"], "os_error")
+
+    def test_partial_ranges_are_recognised_by_existing_interpretation_policy(self):
+        from ai.tools.interpretation import _partial_source
+
+        source = self.root / "notes.txt"
+        source.write_bytes(b"some observed facts")
+        result = filesystem.read_file(str(source), max_bytes=4)
+        self.assertTrue(_partial_source(result.model_dump(mode="json", by_alias=True)))
+
+    def test_concurrent_ranges_keep_offsets_and_contents_independent(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        source = self.root / "concurrent.txt"
+        raw = b"first " + b"a" * 1000 + b" last"
+        source.write_bytes(raw)
+        offsets = (0, 2, 500, 1006)
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            results = list(workers.map(lambda offset: filesystem.read_file(
+                str(source), offset_bytes=offset, max_bytes=4), offsets))
+        for offset, result in zip(offsets, results):
+            self.assertEqual(self.range_text(result), raw[offset:offset + 4].decode("utf-8"))
+            self.assertEqual(result.structured_content["offset_bytes"], offset)
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows file alias semantics")
+    def test_windows_range_reads_do_not_bypass_blocks_with_file_aliases(self):
+        (self.root / ".env").write_text("disposable private fixture", encoding="utf-8")
+        for alias in (".env", ".env.", ".env::$DATA"):
+            with self.subTest(alias=alias):
+                result = filesystem.read_file(str(self.root / alias), max_bytes=4)
+                self.assertTrue(result.is_error)
+                self.assertEqual(result.structured_content["error"]["code"], "blocked_path")
+
+class FilesystemCreationTests(unittest.TestCase):
+    """All mutations stay in disposable roots; existing files must survive."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        self.root = self.base / 'write'
+        self.root.mkdir()
+        self.read_root = self.base / 'read'
+        self.read_root.mkdir()
+        self.config_path = self.base / 'permissions.json'
+        guard = patch.object(filesystem, 'CONFIG_PATH', self.config_path)
+        guard.start()
+        self.addCleanup(guard.stop)
+        self.configure()
+
+    def configure(self, **changes):
+        self.permissions = {'read': {'allowed_roots': [str(self.read_root)],
+                                    'blocked_paths': ['**/.env', '**/.ssh']},
+                            'write': {'enabled': True, 'allowed_roots': [str(self.root)],
+                                      'blocked_paths': ['**/credentials.json'],
+                                      'require_confirmation': True, **changes}}
+        self.config_path.write_text(json.dumps(self.permissions), encoding='utf-8')
+
+    def error_code(self, tool, path, **arguments):
+        result = tool(str(path), **arguments)
+        self.assertTrue(result.is_error, result)
+        return result.structured_content['error']['code']
+
+    def test_creates_empty_and_utf8_files_with_structured_confirmation(self):
+        target = self.root / 'notes.txt'
+        response = filesystem.create_file(str(target), 'café\r\nnext\n')
+        self.assertFalse(response.is_error)
+        self.assertEqual(target.read_bytes(), 'café\r\nnext\n'.encode('utf-8'))
+        self.assertEqual(response.structured_content,
+                         {'kind': 'filesystem_created', 'path': str(target), 'type': 'file'})
+        empty = self.root / 'empty.txt'
+        self.assertFalse(filesystem.create_file(str(empty)).is_error)
+        self.assertEqual(empty.read_bytes(), b'')
+
+    def test_creates_one_directory_without_creating_missing_parents(self):
+        target = self.root / 'notes'
+        response = filesystem.create_directory(str(target))
+        self.assertFalse(response.is_error)
+        self.assertTrue(target.is_dir())
+        self.assertEqual(response.structured_content['type'], 'directory')
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            self.assertEqual(self.error_code(tool, self.root / 'missing' / 'child'), 'not_found')
+            self.assertFalse((self.root / 'missing').exists())
+
+    def test_existing_files_and_directories_are_never_replaced(self):
+        existing_file = self.root / 'keep.txt'
+        existing_file.write_bytes(b'original')
+        existing_directory = self.root / 'keep-dir'
+        existing_directory.mkdir()
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for target in (existing_file, existing_directory):
+                self.assertEqual(self.error_code(tool, target), 'already_exists')
+        self.assertEqual(existing_file.read_bytes(), b'original')
+        self.assertTrue(existing_directory.is_dir())
+
+    def test_file_created_between_validation_and_open_is_preserved(self):
+        target = self.root / 'race.txt'
+        real_open = Path.open
+        def competing_creator(path, mode='r', *args, **kwargs):
+            if path == target and mode == 'xb':
+                with real_open(path, 'wb') as output:
+                    output.write(b'competing file')
+            return real_open(path, mode, *args, **kwargs)
+        with patch.object(Path, 'open', competing_creator):
+            self.assertEqual(self.error_code(filesystem.create_file, target, content='replacement'), 'already_exists')
+        self.assertEqual(target.read_bytes(), b'competing file')
+
+    def test_missing_or_disabled_write_grants_do_not_borrow_read_permissions(self):
+        for write in (None, {}, {'enabled': False}, {'enabled': True, 'allowed_roots': []}):
+            with self.subTest(write=write):
+                if write is None:
+                    self.permissions.pop('write', None)
+                else:
+                    self.permissions['write'] = write
+                self.config_path.write_text(json.dumps(self.permissions), encoding='utf-8')
+                expected = 'outside_allowed_roots' if write and write.get('enabled') else 'write_disabled'
+                for tool in (filesystem.create_file, filesystem.create_directory):
+                    self.assertEqual(self.error_code(tool, self.read_root / 'new'), expected)
+                self.assertFalse((self.read_root / 'new').exists())
+
+    def test_roots_and_both_block_lists_apply_to_creation(self):
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for path, code in ((self.read_root / 'new', 'outside_allowed_roots'),
+                               (self.base / 'write-sibling', 'outside_allowed_roots'),
+                               (self.root / '.env', 'blocked_path'),
+                               (self.root / '.ssh' / 'new', 'blocked_path'),
+                               (self.root / 'credentials.json', 'blocked_path')):
+                self.assertEqual(self.error_code(tool, path), code)
+                self.assertFalse(path.exists())
+
+    def test_invalid_paths_are_rejected_before_creation(self):
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            for path in ('', 'relative', self.root / '..' / 'outside', self.root / 'notes.txt:stream',
+                         self.root / 'NUL', self.root / 'trailing.', self.root / 'trailing ', self.root / 'bad\0name'):
+                with self.subTest(tool=tool.__name__, path=path):
+                    self.assertEqual(self.error_code(tool, path), 'invalid_arguments')
+
+    def test_content_limit_counts_utf8_bytes_and_accepts_exact_limit(self):
+        target = self.root / 'maximum.txt'
+        self.assertFalse(filesystem.create_file(str(target), 'x' * (1024 * 1024)).is_error)
+        self.assertEqual(target.stat().st_size, 1024 * 1024)
+        for content in ('x' * (1024 * 1024 + 1), 'é' * (600 * 1024)):
+            too_large = self.root / 'too-large.txt'
+            self.assertEqual(self.error_code(filesystem.create_file, too_large, content=content), 'content_too_large')
+            self.assertFalse(too_large.exists())
+
+    def test_invalid_write_config_and_revocation_fail_closed(self):
+        for changes in ({'enabled': 'true'}, {'allowed_roots': ['relative']},
+                        {'allowed_roots': 'not-an-array'}, {'blocked_paths': [None]},
+                        {'require_confirmation': 'true'}):
+            with self.subTest(changes=changes):
+                self.configure(**changes)
+                self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'configuration_error')
+        self.configure()
+        self.assertFalse(filesystem.create_file(str(self.root / 'first')).is_error)
+        self.configure(enabled=False)
+        self.assertEqual(self.error_code(filesystem.create_file, self.root / 'second'), 'write_disabled')
+        self.assertFalse((self.root / 'second').exists())
+
+    def test_config_read_and_os_failures_are_reported_as_failures(self):
+        self.config_path.unlink()
+        self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'configuration_error')
+        self.configure()
+        with patch.object(filesystem, 'load_config', return_value=self.permissions), \
+             patch.object(Path, 'open', side_effect=PermissionError('denied')):
+            self.assertEqual(self.error_code(filesystem.create_file, self.root / 'new'), 'permission_denied')
+        with patch.object(Path, 'mkdir', side_effect=OSError('disk problem')):
+            self.assertEqual(self.error_code(filesystem.create_directory, self.root / 'new'), 'os_error')
+
+    def test_linked_destinations_and_ancestors_are_refused(self):
+        inside = self.root / 'inside'
+        inside.mkdir()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        try:
+            (self.root / 'inside-link').symlink_to(inside, target_is_directory=True)
+            (self.root / 'outside-link').symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest('Symbolic links unavailable')
+        for tool in (filesystem.create_file, filesystem.create_directory):
+            self.assertEqual(self.error_code(tool, self.root / 'inside-link' / 'new'), 'blocked_path')
+            self.assertEqual(self.error_code(tool, self.root / 'outside-link' / 'new'), 'outside_allowed_roots')
+        self.assertFalse((inside / 'new').exists())
+        self.assertFalse((outside / 'new').exists())
+
+    def test_write_failures_have_safe_conversational_explanations(self):
+        from ai.tools.models import ToolError, ToolResult
+        from ai.tools.presentation import prepare_tool_response
+        self.configure(enabled=False)
+        raw = filesystem.create_file(str(self.root / 'private-name'))
+        normalized = ToolResult(False, raw.model_dump(mode='json', by_alias=True),
+                                ToolError('mcp_tool_error', 'The MCP tool reported a failure.'))
+        spoken = prepare_tool_response(normalized)
+        self.assertIn('disabled', spoken)
+        self.assertNotIn('private-name', spoken)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows junction behavior')
+    def test_windows_junction_ancestors_cannot_receive_created_entries(self):
+        import subprocess
+        inside = self.root / 'inside'
+        inside.mkdir()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        for destination, expected in ((inside, 'blocked_path'), (outside, 'outside_allowed_roots')):
+            link = self.root / ('junction-' + destination.name + expected)
+            created = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(destination)],
+                                     capture_output=True, text=True, check=False)
+            if created.returncode:
+                self.skipTest('Junction creation unavailable')
+            try:
+                for tool in (filesystem.create_file, filesystem.create_directory):
+                    self.assertEqual(self.error_code(tool, link / 'new'), expected)
+                self.assertFalse((destination / 'new').exists())
+            finally:
+                # Both resolved targets are verified disposable test locations.
+                self.assertTrue(link.resolve().is_relative_to(self.base))
+                link.rmdir()

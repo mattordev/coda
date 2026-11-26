@@ -17,7 +17,7 @@ from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
-from ai.tools.result_summary import _directory_entries, _question_text
+from ai.tools.result_summary import _directory_entries, _filename_search, _question_text, filesystem_fact_summary
 
 MAX_CONTEXT_CHARS = 12000
 MAX_RESPONSE_CHARS = 1200
@@ -123,7 +123,9 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     needed = force or explicit or len(source) > 600 or len(source.splitlines()) > 8
     if interpretation_policy() == 'direct' and force:
         return Interpretation('Result interpretation is disabled. Say show tool output to inspect the result.')
-    if interpretation_policy() == 'direct' or not needed or (directory is not None and not force):
+    known_names = (directory is not None or _filename_search(result.data) is not None
+                   or filesystem_fact_summary(result.data, source, question) is not None)
+    if interpretation_policy() == 'direct' or not needed or (known_names and not force):
         return Interpretation(direct)
     if not source.strip() or len(serialized) > MAX_RESULT_CHARS:
         return Interpretation(UNAVAILABLE)

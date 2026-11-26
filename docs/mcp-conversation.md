@@ -64,7 +64,8 @@ CODA_MCP_INTERPRET_TIMEOUT_SECONDS=30
 ```
 
 `auto` leaves failures, short natural text, small readable structured results and
-known directory summaries deterministic. Long/complex successful results or an
+known filesystem result shapes deterministic, including listings, metadata,
+search counts, partial-read scope and confirmed mutation outcomes. Long/complex successful results or an
 explicit explanation/summarization request can use an LLM. No filesystem-server
 name checks or per-integration command modules are required. `direct` disables
 interpretation, retaining the existing deterministic summaries and inspection
@@ -144,14 +145,54 @@ reconfiguration/reload and reset invalidate implicit focus. Follow-up does not
 duplicate full snapshots. No durable threads, cross-session memory, ambiguous
 filename matching or implicit workspace search are added.
 
-Relative `readme` arguments remain subject to the server's absolute-path contract.
-Workspace-aware resolution and ambiguity handling are tracked separately in #170.
+Relative references for bundled read/list calls use the implemented
+[workspace resolver](mcp-workspaces.md); the server receives an authorised
+absolute path. Other tools require concrete absolute paths.
 Explicit `mcp.<server>.<tool> {JSON}` calls still bypass natural-language selection
 and retain validated tool results. Long results now default to interpretation;
 choose `direct` or inspect retained output when deterministic/raw presentation is
 preferred. Short responses and question-aware directory styles retain their
 existing behavior.
 
-Implementation and deterministic tests are tracked in #169. Tests use fake provider
-responses and disposable standard-MCP servers; CI needs no cloud credentials,
-real user files, live model service, audio device or filesystem server modifications.
+## Bounded filesystem follow-ups
+
+The bundled filesystem has a separate host resolver for bounded contextual
+actions. This resolver can request a new validated tool invocation; result
+interpretation itself still has no tools. It works for renamed bundled instance
+IDs and keeps the originating directory in host-only provenance.
+
+After a listing or filename search, try:
+
+```text
+coda show filenames
+coda show recent files
+coda find all the Markdown files in that folder
+coda read the newest report
+```
+
+Filename/extension filtering uses only the retained returned entries and says
+when they describe an immediate directory or a previous filename search. It does
+not silently scan descendants. `search that folder for Markdown files` requests
+a new bounded filename search; `find every file containing "Exact text" in that
+folder` requests a new literal content search. Every fresh search/read goes
+through current discovery, schema, allowlist and filesystem permissions.
+
+`read the first file` follows the displayed order, while newest/latest selection
+uses actual returned file timestamps. Missing/tied timestamps, partial scope,
+multiple matching reports or an ambiguous `that one` ask for a concrete file.
+The resolver never guesses a workspace or invents a path from file content.
+After an explicit partial read, `read the next part` uses its continuation offset
+and byte budget rather than reading an entire large file.
+
+Context expires after 120 seconds. Cancellation, unrelated/native conversation,
+reset, manager reconfiguration or changed filesystem read policy invalidates
+the focus. Filtering retained names and explaining a retained result remain
+distinct from obtaining fresh file data. No persistent context, write follow-up
+grammar or autonomous multi-tool plan is implied. See the
+[safe filesystem route](filesystem-quickstart.md) for explicit mutation examples.
+
+Result interpretation is tracked in #169; bounded filesystem follow-ups are
+accepted in #232. Tests use fake provider responses and disposable standard-MCP
+and bundled filesystem servers. CI needs no cloud credentials, real user files
+or live model service. Actual local-model runs and native platform limitations
+are recorded separately in the [filesystem validation report](capability-filesystem-validation.md).

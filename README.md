@@ -28,6 +28,8 @@ eventually revived as the assistant it is today.
 - Discover and invoke trusted MCP tools over local stdio or remote Streamable HTTP.
 - Reuse optional persistent MCP sessions with idle retirement and explicit cleanup.
 - Validate tool arguments and require explicit confirmation for configured actions.
+- Use the opt-in filesystem integration for bounded reads/searches, conversational
+  folder results, conflict-checked edits, copying and separately approved moves/deletion.
 - Report live runtime state and transcripts through the dashboard.
 
 ### Commands
@@ -45,6 +47,9 @@ eventually revived as the assistant it is today.
 
 The active roadmap is maintained in the
 [CODA GitHub project](https://github.com/users/mattordev/projects/1/views/1).
+The [capability expansion programme](docs/capability-expansion-programme.md)
+tracks the v1.5.6–v1.5.9 filesystem, web, system and multi-tool releases; development
+integration alone does not mark a milestone delivered.
 
 ### Completed Milestones
 
@@ -62,7 +67,10 @@ The active roadmap is maintained in the
 - [v1.5.3 - Incremental Voice Pipeline](https://github.com/mattordev/coda/milestone/14)
 - v1.5.4 - Streaming & Runtime Polish
 - [v1.5.5 - Websearch MCP & Conversational MCP Errors](https://github.com/mattordev/coda/milestone/16)
+- [v1.5.6 - Filesystem Capabilities](https://github.com/mattordev/coda/milestone/17)
 
+See the [v1.5.6 release notes](docs/release-notes-v1.5.6.md) for the filesystem
+capabilities, independent grants, migration, safe testing and recovery limits.
 See the [v1.5.5 release notes](docs/release-notes-v1.5.5.md) for opt-in web search,
 SearXNG configuration, DDGS fallback and conversational tool failures.
 See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
@@ -452,6 +460,8 @@ Commands are self-registering modules that own their intent metadata and
 - [MCP display, speech and failure feedback](docs/mcp-feedback.md)
 - [Conversational MCP interpretation and follow-up](docs/mcp-conversation.md)
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
+- [Filesystem setup, migration and safe test route](docs/filesystem-quickstart.md)
+- [Filesystem validation and platform evidence](docs/capability-filesystem-validation.md)
 - [Safe filesystem workspace references](docs/mcp-workspaces.md)
 - [Bundled MCP catalog, settings and update lifecycle](docs/mcp-bundled.md)
 - [Optional model pre-warming](docs/model-prewarming.md)
