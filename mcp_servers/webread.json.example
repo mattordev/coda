@@ -1,0 +1,11 @@
+{
+  "id": "webread",
+  "transport": "stdio",
+  "bundled_server": "webread",
+  "enabled": false,
+  "trusted": false,
+  "allowed_tools": [],
+  "session_mode": "operation",
+  "startup_mode": "lazy",
+  "timeout_seconds": 40
+}

@@ -159,8 +159,25 @@ def filesystem_fact_summary(data, text, question):
     return None
 
 
+def web_page_summary(data):
+    """Describe the observation, including empty/partial text, without inventing content."""
+    page = _payload(data)
+    if not isinstance(page, dict) or page.get('kind') != 'web_page' or not isinstance(page.get('text'), str):
+        return None
+    text = page['text'].strip()
+    if not text:
+        return 'The page returned no readable text. Its title or search snippet cannot establish what the article says.'
+    prefix = 'I retrieved part of the webpage.' if page.get('partial') is True else 'I retrieved the webpage text.'
+    if len(text) <= 400:
+        return prefix + ' ' + text
+    return prefix + ' Ask me to summarise it, or say show tool output to inspect the source text.'
+
+
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
+    page = web_page_summary(data)
+    if page is not None:
+        return page
     facts = filesystem_fact_summary(data, text, question)
     if facts is not None:
         return facts
