@@ -96,10 +96,13 @@ class WebExtractTests(unittest.TestCase):
                 self.assertEqual(caught.exception.code, code)
 
     def test_deep_or_unfinished_markup_is_rejected(self):
-        for text in ('<div>' * 129, '<a href="' + 'x' * 15000, '<div ' + ' '.join(f'a{i}="x"' for i in range(129)) + '>'):
-            with self.assertRaises(NetworkError) as caught:
-                extract_page(response(text))
-            self.assertEqual(caught.exception.code, 'resource_limit')
+        for label, text in [('nesting', '<div>' * 129), ('unfinished', '<a href="' + 'x' * 15000),
+                            ('quoted-delimiters', '<a href="' + 'x>' * 7500),
+                            ('attributes', '<div ' + ' '.join(f'a{i}="x"' for i in range(129)) + '>')]:
+            with self.subTest(label=label):
+                with self.assertRaises(NetworkError) as caught:
+                    extract_page(response(text))
+                self.assertEqual(caught.exception.code, 'resource_limit')
 
     def test_empty_page_does_not_invent_article_text(self):
         page = extract_page(response('<head><title>Only a title</title></head><script>hello</script>'))

@@ -13,6 +13,45 @@ _VOID = frozenset('area base br col embed hr img input link meta param source tr
 _IGNORE = frozenset('script style template svg canvas iframe object nav footer aside'.split())
 _BLOCK = frozenset('address article aside blockquote div dl dt dd fieldset footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table tr td th ul br'.split())
 _ENCODINGS = frozenset(('utf-8', 'utf-8-sig', 'utf-16', 'utf-16-le', 'utf-16-be', 'cp1252', 'iso8859-1', 'ascii'))
+_TAG = re.compile(r'<(?:/?[a-zA-Z]|[!?])')
+_OPAQUE = re.compile(r'<(script|style)(?=[\s/>])', re.IGNORECASE)
+_OPAQUE_END = {tag: re.compile(r'</' + tag + r'\s*>', re.IGNORECASE) for tag in ('script', 'style')}
+
+
+def _check_markup(text):
+    """Enforce a token ceiling independent of HTMLParser patch-level repair rules."""
+    offset = 0
+    while (start := text.find('<', offset)) >= 0:
+        if text.startswith('<!--', start):
+            end = text.find('-->', start + 4)
+            if end < 0:
+                return
+            offset = end + 3
+            continue
+        if not _TAG.match(text, start):
+            offset = start + 1
+            continue
+        quote = None
+        cursor = start + 1
+        while cursor < len(text):
+            if cursor - start >= 8192:
+                raise NetworkError('resource_limit', 'The page contains oversized markup.')
+            character = text[cursor]
+            if quote:
+                if character == quote:
+                    quote = None
+            elif character in ('"', "'"):
+                quote = character
+            elif character == '>':
+                break
+            cursor += 1
+        offset = cursor + 1
+        opaque = _OPAQUE.match(text, start)
+        if opaque and cursor < len(text) and text[cursor - 1] != '/':
+            end = _OPAQUE_END[opaque[1].lower()].search(text, offset)
+            if end is None:
+                return
+            offset = end.end()
 
 
 def _clean(text):
@@ -180,6 +219,7 @@ class _Page(HTMLParser):
             self.anchor = None
 
     def feed_bounded(self, text):
+        _check_markup(text)
         for offset in range(0, len(text), 4096):
             self.feed(text[offset:offset + 4096])
             if len(self.rawdata) > 8192:

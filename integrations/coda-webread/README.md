@@ -38,6 +38,8 @@ return empty or imperfect text. Plain text, Markdown, and JSON are also supporte
 PDFs and other binary formats are refused. Supported encodings are UTF-8, UTF-16,
 Windows-1252, Latin-1 and ASCII. An incomplete multibyte suffix at a byte ceiling is
 omitted. Byte-limited, character-limited and server-partial responses are labelled.
+Markup tokens have an independent 8 KiB ceiling, with a 128-element nesting and
+128-attribute ceiling, so limits do not depend on Python patch-version HTML repair.
 
 Explicit requests to summarise use CODA's existing privacy-controlled, read-only
 interpretation path. A title, search snippet, or empty response never substitutes
