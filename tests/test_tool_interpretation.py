@@ -57,6 +57,26 @@ class InterpretationTestCase(unittest.TestCase):
 
 
 class ToolInterpretationTests(InterpretationTestCase):
+    def test_webpage_explicit_summary_uses_only_supplied_observations(self):
+        result = ToolResult(True, {'structuredContent': {
+            'kind': 'web_page', 'text': 'A bounded article excerpt.', 'partial': True,
+            'url': 'https://example.com/article', 'observation': 'fetched_text'}, 'content': []})
+        answer = service.interpret_result(result, 'Summarise this webpage')
+        self.assertTrue(answer.used_llm)
+        self.assertTrue(answer.partial)
+        self.assertIn('A bounded article excerpt.', json.dumps(self.calls))
+
+    def test_webpage_receipt_and_empty_text_do_not_generate_an_article(self):
+        for text in ('A short observation.', ''):
+            with self.subTest(text=text):
+                result = ToolResult(True, {'structuredContent': {
+                    'kind': 'web_page', 'text': text, 'title': 'An unsupported article claim'}, 'content': []})
+                answer = service.interpret_result(result, 'Read this webpage' if text else 'Summarise this webpage', force=not text)
+                self.assertFalse(answer.used_llm)
+                self.assertIn(text or 'no readable text', answer.text)
+                self.assertNotIn('unsupported article claim', answer.text)
+        self.assertEqual(self.calls, [])
+
     def test_exhausted_output_budget_reports_incomplete_and_never_returns_fragment(self):
         from ai.providers.completion import OUTPUT_LIMIT_ERROR
         self.generate.side_effect = lambda *args, **kwargs: (None, OUTPUT_LIMIT_ERROR)

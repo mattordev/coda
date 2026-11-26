@@ -7,6 +7,17 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'network_disabled': 'Public webpage reading is disabled in the reader configuration.',
+    'invalid_url': 'Please provide an ordinary absolute public HTTP or HTTPS URL without credentials.',
+    'network_denied': 'That web destination is not allowed by the current network configuration.',
+    'network_timeout': 'The webpage request exceeded its time limit.',
+    'network_busy': 'An earlier hostname lookup is still finishing. Please try again shortly.',
+    'network_error': 'The webpage connection failed.',
+    'tls_error': 'The secure webpage connection could not be verified.',
+    'http_error': 'The website returned an unsuccessful HTTP response.',
+    'redirect_limit': 'The webpage exceeded the allowed number of redirects.',
+    'unsupported_content': 'That response format is not supported by the webpage text reader.',
+    'page_invalid_encoding': 'The webpage did not contain supported, valid text.',
     'move_incomplete': 'The move outcome is unverified. Inspect both source and destination and say show tool output before any new request.',
     'cross_device': 'Moving across filesystems is unsupported. The move was refused without a copy-and-delete fallback.',
     'destructive_disabled': 'Deleting and moving files is disabled in the filesystem configuration.',
@@ -45,6 +56,11 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'network_disabled': 'permission_denied', 'network_denied': 'permission_denied',
+    'invalid_url': 'invalid_arguments', 'network_timeout': 'timeout', 'network_busy': 'unavailable',
+    'network_error': 'unavailable', 'tls_error': 'unavailable', 'http_error': 'unavailable',
+    'redirect_limit': 'invalid_arguments', 'unsupported_content': 'invalid_arguments',
+    'page_invalid_encoding': 'invalid_arguments',
     'move_incomplete': 'unknown_error', 'cross_device': 'invalid_arguments',
     'destructive_disabled': 'permission_denied', 'directory_not_empty': 'invalid_arguments',
     'delete_incomplete': 'unknown_error', 'protected_path': 'permission_denied',

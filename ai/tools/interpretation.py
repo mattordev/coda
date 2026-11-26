@@ -17,7 +17,7 @@ from ai.providers.workloads import explicit_reasoning_request, options_for
 from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
-from ai.tools.result_summary import _directory_entries, _filename_search, _question_text, filesystem_fact_summary
+from ai.tools.result_summary import _directory_entries, _filename_search, _question_text, filesystem_fact_summary, web_page_summary
 
 MAX_CONTEXT_CHARS = 12000
 MAX_RESPONSE_CHARS = 1200
@@ -119,6 +119,10 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     if isinstance(result.data, dict) and result.data.get('structuredContent') == {'kind': 'file_contents'} and not source.strip():
         return Interpretation('The file contains no readable text.')
     explicit = bool(re.search(r'\b(summar[iy][sz]e|summar[yi]|explain|interpret|meaning)\b', _question_text(question)))
+    page_summary = web_page_summary(result.data)
+    page = result.data.get('structuredContent', result.data) if isinstance(result.data, dict) else None
+    if page_summary is not None and not page['text'].strip():
+        return Interpretation(page_summary)
     directory = _directory_entries(result.data, source)
     needed = force or explicit or len(source) > 600 or len(source.splitlines()) > 8
     if interpretation_policy() == 'direct' and force:

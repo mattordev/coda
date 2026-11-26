@@ -15,3 +15,4 @@ logs/speech/
 mcp_servers/*.json
 integrations/*/filesystem.config.json
 integrations/*/websearch.config.json
+integrations/*/webread.config.json

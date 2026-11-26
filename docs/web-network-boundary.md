@@ -121,3 +121,8 @@ a missing issuer; supplementing the existing CA bundle succeeded without changin
 verification requirements. The final transport returned example.com's real 200
 response and complete bounded body; larger source pages returned labelled prefixes.
 This evidence does not claim browser isolation or a completed web MCP release.
+
+The [optional page reader](../integrations/coda-webread/README.md) now consumes this
+transport. Its own network/configuration and MCP allowlist gates default to off;
+the transport itself grants no access. Browser request routing remains a separate
+integration with its own containment requirements.
