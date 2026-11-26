@@ -77,7 +77,11 @@ def prepare_tool_display(result: ToolResult, *, max_chars: int = 12000) -> str:
         text = error_display(result)
     else:
         data = result.data
-        if isinstance(data, dict) and ("content" in data or "structuredContent" in data):
+        payload = data.get('structuredContent', data) if isinstance(data, dict) else None
+        if isinstance(payload, dict) and payload.get('kind') == 'web_search' and isinstance(payload.get('results'), list):
+            text = '\n\n'.join(f"{index}. {source.get('title', '')}\n{source.get('url', '')}\n{source.get('snippet', '')}"
+                               for index, source in enumerate(payload['results'][:10], 1) if isinstance(source, dict))
+        elif isinstance(data, dict) and ("content" in data or "structuredContent" in data):
             blocks = data.get("content")
             parts = [
                 _readable(block.get("text"), max_items=None)

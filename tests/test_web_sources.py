@@ -351,7 +351,8 @@ class SourceConversationTests(unittest.TestCase):
 
     def test_search_read_and_another_choice_keep_original_sources(self):
         searched = runtime.run('mcp.search.search_web {"query":"parser"}', {})
-        self.assertIn('no result pages were read', searched.response_text)
+        self.assertIn('search snippet', searched.response_text)
+        self.assertNotIn('https://', searched.response_text)
         read = runtime.run('read second source', {})
         self.assertTrue(read.tool_result.success)
         self.assertEqual(self.calls[-1], ('read_url', {'url': 'https://example.com/2', 'max_chars': 5000, 'max_links': 0}))
@@ -370,7 +371,8 @@ class SourceConversationTests(unittest.TestCase):
     def test_retained_snippets_make_no_page_request(self):
         runtime.run('mcp.search.search_web {"query":"parser"}', {})
         result = runtime.run('explain the search snippets only', {})
-        self.assertIn('no result pages have been fetched', result.response_text)
+        self.assertIn('search snippet', result.response_text)
+        self.assertNotIn('https://', result.response_text)
         self.assertEqual([name for name, _ in self.calls], ['search_web'])
 
     def test_reset_removes_numbered_source_authority(self):

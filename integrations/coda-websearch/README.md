@@ -98,5 +98,9 @@ The source workflow preserves the provider fallback while bounding queries to
 1,000 characters, titles to 300, snippets to 2,000 and URLs to 4,096. It scans at
 most 100 candidate entries. Search configuration is at most 64 KiB; SearXNG JSON
 is at most 1 MiB plus the one-byte overflow probe. Invalid/credential-bearing
-result URLs are omitted. Ordinary results are labelled as numbered search
-snippets, and reading selected sources needs the separately permitted page reader.
+result URLs are omitted. Ordinary spoken results give a brief conversational
+overview of the snippets. Numbered titles, complete links and snippets remain in
+tool output; URLs are not read aloud. Automatic interpretation uses the existing
+privacy-controlled model path, while direct mode/unavailable interpretation gives
+a short snippet receipt. Neither mode fetches result pages. Reading selected
+sources needs the separately permitted page reader.
