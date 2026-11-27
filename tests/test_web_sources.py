@@ -328,10 +328,18 @@ class SourceSDKTests(unittest.TestCase):
                         search = LocalServerDefinition('search', sys.executable, trusted=True, bundled_server='websearch',
                             allowed_tools=frozenset({'search_web'}), settings_json=json.dumps({'config_file': str(search_config)}))
                         manager = LocalMCPManager([search, reader], transport=FixtureSearch())
+                        # Search is a controlled host fixture, not a DDGS
+                        # installation. Keep the real reader/config boundary.
+                        original_token = manager.source_focus_token
+                        manager.source_focus_token = lambda server: ('fixture-search', 1) if server == 'search' else original_token(server)
                         try:
                             question = 'HTMLParser limitations'
-                            result, reply = web.run_sources(web.SourcePlan('research', query=question),
-                                                           MCPRuntimeCatalog(manager), question)
+                            from ai.mcp import bundled
+                            find_spec = bundled.importlib.util.find_spec
+                            with patch.object(bundled.importlib.util, 'find_spec', side_effect=lambda name, *args, **kwargs:
+                                              None if name == 'ddgs' else find_spec(name, *args, **kwargs)):
+                                result, reply = web.run_sources(web.SourcePlan('research', query=question),
+                                                               MCPRuntimeCatalog(manager), question)
                             self.assertIsNone(reply)
                             self.assertTrue(result.success, result.error)
                             pages = result.data['structuredContent']['sources']
@@ -339,10 +347,12 @@ class SourceSDKTests(unittest.TestCase):
                             self.assertTrue(all(page['status'] == 'fetched' for page in pages), pages)
                             self.assertTrue(all('end tags match start tags' in page['text'] for page in pages))
                             self.assertTrue(all(len(page['text']) <= 400 and page['partial'] for page in pages))
+                            self.assertTrue(config.with_suffix('.pid').exists())
                         finally:
                             self.assertTrue(all(outcome.success for outcome in manager.close().values()))
-                            pid = int(config.with_suffix('.pid').read_text(encoding='ascii'))
-                            self.assertFalse(psutil.pid_exists(pid), 'Owned reader process remains alive.')
+                            if config.with_suffix('.pid').exists():
+                                pid = int(config.with_suffix('.pid').read_text(encoding='ascii'))
+                                self.assertFalse(psutil.pid_exists(pid), 'Owned reader process remains alive.')
                 self.assertEqual(requested, ['/parser', '/reference', '/parser', '/reference'])
         finally:
             http.shutdown()
