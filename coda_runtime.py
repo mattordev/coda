@@ -13,6 +13,7 @@ import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
 from ai.request_context import current_request, request_context
 from runtime import model_warmup
+from runtime.schedule_worker import SchedulerService
 
 import os
 import sys
@@ -73,8 +74,27 @@ speech_worker = SpeechWorker(
 )
 shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
+scheduler_service = None
 latest_request_lock = threading.Lock()
 latest_request_id = None
+
+
+def start_scheduler():
+    """Opt into scheduling using an absolute operator policy path."""
+    global scheduler_service
+    configured = os.environ.get("CODA_SYSTEM_POLICY")
+    if not configured:
+        return
+    policy = Path(configured)
+    if not policy.is_absolute() or not policy.is_file():
+        print("Scheduler disabled: CODA_SYSTEM_POLICY must point to an existing absolute file.")
+        return
+    policy = policy.resolve()
+    with shutdown_lock:
+        if shutdown_started.is_set() or scheduler_service is not None:
+            return
+        scheduler_service = SchedulerService(policy.with_suffix(".schedules.sqlite"), policy)
+        scheduler_service.start()
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -746,6 +766,8 @@ def shutdown_runtime(timeout_seconds=4.0):
     stop_voice_thread(timeout_seconds=timeout_seconds)
 
     active_request_state.cancel_active()
+    if scheduler_service is not None and not scheduler_service.close(timeout=timeout_seconds):
+        print("Scheduler cleanup has not finished.")
     stop_execution_thread(timeout_seconds=timeout_seconds)
     command.shutdown_tools(timeout_seconds=timeout_seconds)
     model_warmup.shutdown(timeout_seconds=timeout_seconds)
@@ -816,6 +838,7 @@ def _run_runtime(skip_update_check=False):
     from utils.update_bootstrap import acknowledge_handoff
     acknowledge_handoff(Path(__file__).resolve().parent)
     command.start_tools()
+    start_scheduler()
     stt_service.start()
     warmup = model_warmup.start()
     startup_models = warmup.snapshot()

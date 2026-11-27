@@ -60,6 +60,11 @@ handles are opaque, scoped to the service and cannot address unrelated PIDs.
 
 ## Durable schedules
 
+To enable the scheduler service, set `CODA_SYSTEM_POLICY` to the absolute path
+of an operator-owned JSON policy. Keep it in a private directory outside the
+installation so the policy and its adjacent `.schedules.sqlite` database survive
+updates. The service starts with CODA and stops when CODA closes.
+
 Use the standard-library [SQLite interface](https://docs.python.org/3.11/library/sqlite3.html)
 for bounded task/run/attention records, schema migration and atomic occurrence
 claims. Keep durable task storage separate from browser/MCP observations and
