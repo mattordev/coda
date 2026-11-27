@@ -313,6 +313,8 @@ typing-inspection==0.4.4
     #   fastapi
     #   mcp
     #   pydantic
+tzdata==2026.6
+    # via -r requirements.in
 urllib3==2.8.0
     # via
     #   -r requirements.in
