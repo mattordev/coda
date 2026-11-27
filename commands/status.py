@@ -5,6 +5,7 @@ import os
 import time
 import math
 import re
+from pathlib import Path
 import utils.runtime_state as runtime_state
 
 from ai.intents import Intent, IntentRequest
@@ -156,7 +157,10 @@ def format_processor_name_for_speech(processor_name: str) -> str:
 
 def get_system_ram_usage() -> dict[str, float] | None:
     """Return total_gb, used_gb and percent for system memory."""
-    memory = psutil.virtual_memory()
+    try:
+        memory = psutil.virtual_memory()
+    except (OSError, psutil.Error, NotImplementedError):
+        return None
     
     # convert to GB
     total_gb = round(memory.total / (1024 ** 3), 1)
@@ -193,6 +197,20 @@ def get_system_uptime() -> str:
     return format_uptime(calculated_time)
 
 
+def get_resource_usage() -> dict[str, object]:
+    """Measure CPU and the volume containing CODA."""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+    except (OSError, psutil.Error, NotImplementedError):
+        cpu_percent = None
+    try:
+        disk = psutil.disk_usage(str(Path(__file__).resolve().parent))
+        disk_usage = {"total_bytes": disk.total, "free_bytes": disk.free}
+    except (OSError, psutil.Error, NotImplementedError):
+        disk_usage = None
+    return {"cpu_usage_percent": cpu_percent, "coda_volume": disk_usage}
+
+
 def get_system_status_data() -> dict[str, object]:
     """Collect the values used in the system status report."""
     architecture, executable_format = platform.architecture()
@@ -206,6 +224,7 @@ def get_system_status_data() -> dict[str, object]:
         "ram_usage": get_system_ram_usage(),
         "battery": get_battery_status(),
         "system_uptime": get_system_uptime(),
+        **get_resource_usage(),
     }
 
 
@@ -253,6 +272,16 @@ def print_system_status(status: dict[str, object]) -> None:
 
     print(f"This system machine type is: {status['machine']}")
     print(f"System RAM usage is: {ram_status}")
+    if "cpu_usage_percent" in status:
+        cpu_percent = status["cpu_usage_percent"]
+        print("CPU usage is unavailable." if cpu_percent is None else f"CPU usage is {cpu_percent:g}%.")
+    if "coda_volume" in status:
+        disk = status["coda_volume"]
+        if disk is None:
+            print("CODA volume usage is unavailable.")
+        else:
+            print(f"CODA volume has {disk['free_bytes'] / 1024**3:.1f} GiB free of "
+                  f"{disk['total_bytes'] / 1024**3:.1f} GiB.")
     print(f"System uptime is: {system_uptime}")
     print(f"Battery status is: {battery_status}")
 
