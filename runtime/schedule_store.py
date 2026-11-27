@@ -79,6 +79,12 @@ class ScheduleStore:
                 "SELECT id, action, timezone, due, interval, status FROM tasks ORDER BY rowid"
             )]
 
+    def current_binding(self, task_id):
+        """Read the revision privately for a conditional edit."""
+        with self._write() as db:
+            row = db.execute("SELECT binding FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            return row["binding"] if row is not None else None
+
     def pause(self, task_id):
         return self._change_status(task_id, "paused", ("active",))
 
