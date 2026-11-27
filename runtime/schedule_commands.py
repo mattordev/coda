@@ -9,6 +9,7 @@ import sqlite3
 
 from runtime.schedule_approval import propose_schedule, save_confirmed_schedule
 from runtime.schedule_store import ScheduleStore
+from runtime.schedule_time import ScheduleTimeError
 
 
 def configured_policy_path():
@@ -71,5 +72,7 @@ def schedule_command(message):
         target = f" for task {proposal.task_id}" if proposal.task_id else ""
         return (f"Confirm {verb}{target}: run {proposal.action} {interval}, starting at {due}? "
                 "Say confirm or cancel."), partial(_save, store, policy, proposal)
+    except ScheduleTimeError as exc:
+        return str(exc), None
     except (OSError, OverflowError, TypeError, ValueError, sqlite3.Error):
         return "Could not prepare the schedule command. Check its fields, time, and policy.", None

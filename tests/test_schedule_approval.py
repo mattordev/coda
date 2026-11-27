@@ -87,6 +87,15 @@ class ScheduleApprovalTests(unittest.TestCase):
             self.assertFalse(cancel_pending_confirmation())
             self.assertEqual(len(store.list_tasks()), 1)
 
+    def test_ambiguous_local_time_prompts_for_offset_without_pending_confirmation(self):
+        from utils.on_command import _on_command, cancel_pending_confirmation
+
+        self.addCleanup(cancel_pending_confirmation)
+        message = 'schedule create {"action":"probe","local_time":"2026-10-25T01:30","timezone":"Europe/London"}'
+        with patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}):
+            self.assertIn("Specify its UTC offset", _on_command(message, {}).response_text)
+            self.assertFalse(cancel_pending_confirmation())
+
     @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
     def test_interactive_action_revalidates_then_returns_real_process_output(self):
         from utils.on_command import _on_command, cancel_pending_confirmation
