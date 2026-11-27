@@ -161,6 +161,9 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     direct = safe_diagnostic(prepare_tool_response(result, question=question), max_chars=MAX_RESPONSE_CHARS)
     if not result.success:
         return Interpretation(direct)
+    browser_page = result.data.get('structuredContent', {}) if isinstance(result.data, dict) else {}
+    if isinstance(browser_page, dict) and browser_page.get('kind') == 'browser_page' and browser_page.get('capture'):
+        return Interpretation(direct)
     try:
         source = _source_text(result.data)
         envelope = {'success': result.success, 'data': result.data}
@@ -183,7 +186,7 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     source_text_available = sources_summary is not None and any(
         isinstance(source, dict) and source.get('status') == 'fetched' and isinstance(source.get('text'), str) and source['text'].strip()
         for source in payload['sources'])
-    grounded_web = isinstance(payload, dict) and payload.get('kind') in ('web_page', 'web_sources') and not is_search
+    grounded_web = isinstance(payload, dict) and payload.get('kind') in ('web_page', 'web_sources', 'browser_page') and not is_search
     if sources_summary is not None and payload.get('scope') == 'fetched_pages' and not source_text_available:
         return Interpretation(sources_summary, partial=payload.get('partial') is True)
     directory = _directory_entries(result.data, source)

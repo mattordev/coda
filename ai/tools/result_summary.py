@@ -162,8 +162,11 @@ def filesystem_fact_summary(data, text, question):
 def web_page_summary(data):
     """Describe the observation, including empty/partial text, without inventing content."""
     page = _payload(data)
-    if not isinstance(page, dict) or page.get('kind') != 'web_page' or not isinstance(page.get('text'), str):
+    if not isinstance(page, dict) or page.get('kind') not in ('web_page', 'browser_page') or not isinstance(page.get('text'), str):
         return None
+    if page.get('kind') == 'browser_page' and page.get('capture'):
+        return 'I captured the rendered page. The image is in the tool result. ' + (
+            'Some page resources were blocked or omitted.' if page.get('partial') else 'The disposable browser session is closed.')
     text = page['text'].strip()
     if not text:
         return 'The page returned no readable text. Its title or search snippet cannot establish what the article says.'

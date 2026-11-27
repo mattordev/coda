@@ -50,6 +50,43 @@ class MemorySocket:
 
 
 class PublicHTTPTests(unittest.TestCase):
+    def test_form_post_sends_exact_body_without_ambient_headers_and_never_follows_redirect(self):
+        connection = MemorySocket(b'HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/private\r\nContent-Length: 0\r\n\r\n')
+        with patch.object(web.socket,'getaddrinfo',side_effect=answer) as dns, patch.object(web.socket,'socket',return_value=connection):
+            result=web.post_form('http://public.example/submit',b'message=approved',self.policy)
+        self.assertEqual(result.status,302)
+        self.assertEqual(result.redirects,0)
+        self.assertEqual(dns.call_count,1)
+        self.assertTrue(connection.sent.startswith(b'POST /submit HTTP/1.1\r\n'))
+        self.assertTrue(connection.sent.endswith(b'\r\n\r\nmessage=approved'))
+        self.assertIn(b'Content-Length: 16\r\n',connection.sent)
+        self.assertNotIn(b'Cookie:',connection.sent)
+        self.assertNotIn(b'Authorization:',connection.sent)
+        self.assertTrue(connection.closed)
+
+    def test_form_post_does_not_retry_a_failed_send(self):
+        connection=MemorySocket()
+        connection.sendall=Mock(side_effect=OSError('private transport diagnostic'))
+        with patch.object(web.socket,'getaddrinfo',side_effect=answer), patch.object(web.socket,'socket',return_value=connection), self.assertRaises(web.NetworkError):
+            web.post_form('http://public.example/submit',b'message=approved',self.policy)
+        self.assertEqual(connection.sendall.call_count,1)
+        self.assertTrue(connection.closed)
+
+    def test_browser_redirect_handoff_preserves_origin_and_rejects_unsafe_destinations(self):
+        raw = b'HTTP/1.1 302 Found\r\nLocation: https://other.example/final\r\nContent-Length: 0\r\n\r\n'
+        result, connection, dns = self.fetch(raw, follow_redirects=False)
+        self.assertEqual(result.status, 302)
+        self.assertEqual(result.final_url, 'http://public.example/page')
+        self.assertEqual(result.headers, (('Location', 'https://other.example/final'),))
+        self.assertEqual(dns.call_count, 1)
+        self.assertTrue(connection.closed)
+        for location in ('http://127.0.0.1/private', 'http://public.example/down'):
+            raw = ('HTTP/1.1 302 Found\r\nLocation: ' + location + '\r\nContent-Length: 0\r\n\r\n').encode()
+            tls = Mock()
+            tls.wrap_socket.side_effect = lambda connection, **_: connection
+            with patch.object(web.ssl, 'create_default_context', return_value=tls), self.assertRaises(web.NetworkError):
+                self.fetch(raw, url='https://public.example/page', follow_redirects=False)
+
     def setUp(self):
         self.policy = web.NetworkPolicy(allowed_hosts=('*',))
         resolver = patch.object(web, '_RESOLVER', web.Resolver())

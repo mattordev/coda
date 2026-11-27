@@ -1,0 +1,47 @@
+{
+  "id": "browser",
+  "version": "1.0.0",
+  "entrypoint": "server.py",
+  "dependencies": [
+    "mcp",
+    "idna",
+    "certifi"
+  ],
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "config_file": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "additionalProperties": false
+  },
+  "setting_arguments": {
+    "config_file": "--config"
+  },
+  "configuration_files": [
+    {
+      "setting": "config_file",
+      "default": "browser.config.json",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "actions_enabled": {
+            "type": "boolean"
+          },
+          "network": {
+            "type": "object"
+          },
+          "limits": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

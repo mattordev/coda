@@ -17,6 +17,9 @@ PHRASES = (
 ACTION_MESSAGES = {
     'search_web': "I'm searching the web now.",
     'read_url': "I'm reading the webpage now.",
+    'inspect_page': "I'm opening an isolated browser to inspect the page.",
+    'prepare_action': "I'm inspecting the form before asking for approval.",
+    'execute_action': "I'm sending the form you approved.",
     'list_directory': "I'm checking the folder now.",
     'read_file': "I'm reading the file now.",
     'get_file_metadata': "I'm checking the file details now.",
