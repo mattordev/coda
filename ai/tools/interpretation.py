@@ -162,6 +162,8 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     if not result.success:
         return Interpretation(direct)
     browser_page = result.data.get('structuredContent', {}) if isinstance(result.data, dict) else {}
+    if isinstance(browser_page,dict) and browser_page.get('kind') in ('browser_proposal','browser_action'):
+        return Interpretation(direct)
     if isinstance(browser_page, dict) and browser_page.get('kind') == 'browser_page' and browser_page.get('capture'):
         return Interpretation(direct)
     try:

@@ -30,6 +30,8 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
         mutations=[]
         form_version=['v1']
         ambient=[]
+        slow_started=Event()
+        release_slow=Event()
         udp = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         udp.bind(('127.0.0.1',0));udp.settimeout(.1)
         udp_port=udp.getsockname()[1]
@@ -54,6 +56,9 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     self.send_response(302); self.send_header('Location', '/page'); self.end_headers(); return
                 if self.path == '/redirect-script':
                     self.send_response(302);self.send_header('Location',f'http://127.0.0.1:{self.server.server_port}/redirect-private');self.end_headers();return
+                if self.path == '/slow-script':
+                    slow_started.set();release_slow.wait(5)
+                    self.send_response(200);self.send_header('Content-Length','0');self.end_headers();return
                 body = (f'''<html><head><title>Controlled browser fixture</title></head><body>
                   <main><h1 id="result">Before JavaScript</h1><p>A literal source observation.</p></main>
                   <form id="test-form" method="post" action="/submit">
@@ -79,6 +84,8 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 if self.path == '/script.js':
                     body = b'document.querySelector("#result").textContent="Rendered value 42";'
                     mime = 'application/javascript'
+                if self.path == '/slow':
+                    body=b'<main>Slow fixture</main><script src="/slow-script"></script>'
                 self.send_response(200); self.send_header('Content-Type', mime)
                 self.send_header('Set-Cookie', 'must_not_forward=secret')
                 self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -198,6 +205,23 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(not psutil.pid_exists(pid) for pid in pids))
                 self.assertFalse(datagrams)
                 self.assertFalse(ambient,'Browser cookies/authorization must not enter brokered requests.')
+            with patch.object(web.Resolver,'lookup',resolve),patch.object(web,'_open_socket',MappedSocket):
+                pending=asyncio.create_task(browser.render(f'http://public.example:{port}/slow',
+                    web.NetworkPolicy(allowed_hosts=('public.example',),allowed_ports=(port,))))
+                try:
+                    for _ in range(150):
+                        if slow_started.is_set():
+                            break
+                        await asyncio.sleep(.05)
+                    self.assertTrue(slow_started.is_set(),'Cancellation must happen during actual browser work.')
+                    pending.cancel()
+                    release_slow.set()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await pending
+                finally:
+                    release_slow.set()
+                    pending.cancel()
+                    await asyncio.gather(pending,return_exceptions=True)
         finally:
             observer.cancel()
             await asyncio.gather(observer, return_exceptions=True)

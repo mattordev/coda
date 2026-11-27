@@ -128,23 +128,26 @@ SNAPSHOT = """({chars, count, selectors}) => {
  let text = '', node, visited = 0;
  while ((node = walker.nextNode()) && text.length <= chars && visited++ < 20000) {
    const p = node.parentElement;
-   if (p && !p.closest('script,style,noscript,template,input,textarea,select,[hidden]'))
+   if (p && p.getClientRects().length && !p.closest('script,style,noscript,template,input,textarea,select,[hidden]'))
      text += node.textContent.slice(0, chars + 1 - text.length) + ' ';
  }
  const elements = [];
- for (const e of document.querySelectorAll('a[href],button,input:not([type=password]),textarea,select')) {
+ const allElements = document.querySelectorAll('a[href],button,input:not([type=password]),textarea,select');
+ for (const e of allElements) {
    if (elements.length >= count) break;
    elements.push({tag:e.tagName.toLowerCase(), text:(e.innerText || e.getAttribute('aria-label') || '').slice(0,160),
      name:(e.getAttribute('name') || '').slice(0,100), type:(e.getAttribute('type') || '').slice(0,30),
      href:e.tagName === 'A' ? e.href.slice(0,4096) : null});
  }
- const fields = {};
+ const fields = Object.create(null);
+ let fieldPartial = false;
  for (const [key, selector] of Object.entries(selectors)) {
    const e = document.querySelector(selector);
+   if (e && (e.textContent || '').length > 1000) fieldPartial = true;
    fields[key] = e ? (e.textContent || '').slice(0,1000) : null;
  }
  return {title:document.title.slice(0,300), text:text.slice(0,chars), elements, fields,
-   partial:text.length > chars || visited >= 20000};
+   partial:text.length > chars || visited >= 20000 || fieldPartial || allElements.length > count};
 }"""
 
 

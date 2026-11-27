@@ -71,6 +71,15 @@ class BrowserMCPTests(unittest.IsolatedAsyncioTestCase):
         provider.assert_not_called()
         self.assertIn('captured',response.text)
 
+    async def test_action_observations_never_become_generated_success_claims(self):
+        for kind in ('browser_proposal','browser_action'):
+            result=ToolResult(True,{'structuredContent':{'kind':kind,'status':204},
+                                   'content':[{'type':'text','text':'untrusted '*1000}]})
+            with patch('ai.llm_router.core.get_provider_order') as provider:
+                response=interpret_result(result,'tell me what happened',force=True)
+            provider.assert_not_called()
+            self.assertIn('Nothing has been submitted' if kind=='browser_proposal' else 'not been independently verified',response.text)
+
     async def test_forms_disabled_or_changed_never_submit_and_failed_send_is_not_retried(self):
         self.configure()
         with patch.object(self.server,'render',new_callable=AsyncMock) as render, patch.object(self.server,'post_form') as post:

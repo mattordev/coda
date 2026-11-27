@@ -19,13 +19,20 @@ def configuration_token(definition):
         path = Path(settings.get('config_file', INSTALL_ROOT/'integrations/coda-browser/browser.config.json'))
         if not path.is_absolute():
             return None
-        raw = path.read_bytes()
+        with path.open('rb') as source:
+            raw = source.read(65537)
+        if len(raw) > 65536:
+            return None
         config = json.loads(raw)
-        if len(raw) > 65536 or config.get('enabled') is not True or config.get('actions_enabled') is not True:
+        if config.get('enabled') is not True or config.get('actions_enabled') is not True:
             return None
         identity = repr(definition).encode() + raw + json.dumps(definition.environment(),sort_keys=True).encode()
         if definition.definition_file:
-            identity += Path(definition.definition_file).read_bytes()
+            with Path(definition.definition_file).open('rb') as source:
+                definition_bytes = source.read(65537)
+            if len(definition_bytes) > 65536:
+                return None
+            identity += definition_bytes
         return hashlib.sha256(identity).hexdigest()
     except (OSError, ValueError, TypeError, AttributeError):
         return None

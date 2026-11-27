@@ -5,6 +5,8 @@ one viewport capture, and explicitly confirmed native form submissions. Ordinary
 search and HTTP reading need no browser and remain available if this bundle fails.
 Both the MCP example and browser policy default to disabled. Startup, discovery
 and an ordinary search never install or launch Chromium.
+The MCP schemas can be discovered without Playwright installed; an enabled
+rendering call then reports a missing dependency rather than installing it.
 
 ## Explicit setup
 

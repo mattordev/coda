@@ -162,6 +162,12 @@ def filesystem_fact_summary(data, text, question):
 def web_page_summary(data):
     """Describe the observation, including empty/partial text, without inventing content."""
     page = _payload(data)
+    if isinstance(page,dict) and page.get('kind') == 'browser_proposal':
+        return "I've inspected the form and prepared its exact fields. Nothing has been submitted. Review the proposed destination and body in the tool output before requesting execution."
+    if isinstance(page,dict) and page.get('kind') == 'browser_action':
+        status=page.get('status')
+        return ('The approved form request received HTTP status ' + str(status) +
+                '. The website action itself has not been independently verified.')
     if not isinstance(page, dict) or page.get('kind') not in ('web_page', 'browser_page') or not isinstance(page.get('text'), str):
         return None
     if page.get('kind') == 'browser_page' and page.get('capture'):
