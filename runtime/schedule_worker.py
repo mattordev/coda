@@ -68,14 +68,16 @@ def scheduler_ownership(database_path):
         yield
 
 
-def run_scheduler(store, policy_path, execute, stop, *, grace=30):
+def run_scheduler(store, policy_path, execute, stop, *, grace=30, notify=None):
     """Run on a service thread, recovering interrupted work once per ownership."""
     with scheduler_ownership(store.path):
         if stop.is_set():
             return
         store.recover_interrupted()
         while not stop.is_set():
-            run_due_schedule(store, policy_path, execute, now=int(time()), grace=grace)
+            outcome = run_due_schedule(store, policy_path, execute, now=int(time()), grace=grace)
+            if outcome is not None and notify is not None:
+                notify(outcome)
             stop.wait(0.25)
 
 
@@ -86,21 +88,21 @@ def _execute_scheduled_action(action, secrets, stop):
 class SchedulerService:
     """Own the scheduler thread and its shutdown signal."""
 
-    def __init__(self, database_path, policy_path, execute=_execute_scheduled_action):
+    def __init__(self, database_path, policy_path, execute=_execute_scheduled_action, *, notify=None):
         self._stop = Event()
         self._thread = Thread(
-            target=self._run, args=(database_path, policy_path, execute),
+            target=self._run, args=(database_path, policy_path, execute, notify),
             name="coda-scheduler", daemon=True,
         )
         self.failure = None
 
-    def _run(self, database_path, policy_path, execute):
+    def _run(self, database_path, policy_path, execute, notify):
         try:
             store = ScheduleStore(database_path)
             run_scheduler(
                 store, policy_path,
                 lambda action, secrets: execute(action, secrets, self._stop),
-                self._stop,
+                self._stop, notify=notify,
             )
         except SchedulerAlreadyRunning:
             self.failure = "Scheduler ownership is unavailable."

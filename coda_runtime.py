@@ -35,6 +35,7 @@ import time
 import threading
 import re
 from pathlib import Path
+from queue import Empty, Full, Queue
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
@@ -77,6 +78,7 @@ speech_worker = SpeechWorker(
 shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
 scheduler_service = None
+schedule_notices = Queue(maxsize=8)
 latest_request_lock = threading.Lock()
 latest_request_id = None
 
@@ -94,8 +96,18 @@ def start_scheduler():
     with shutdown_lock:
         if shutdown_started.is_set() or scheduler_service is not None:
             return
-        scheduler_service = SchedulerService(policy.with_suffix(".schedules.sqlite"), policy)
+        scheduler_service = SchedulerService(
+            policy.with_suffix(".schedules.sqlite"), policy, notify=_queue_schedule_notice,
+        )
         scheduler_service.start()
+
+
+def _queue_schedule_notice(outcome):
+    try:
+        schedule_notices.put_nowait(outcome)
+    except Full:
+        # The occurrence remains available in durable scheduler history.
+        pass
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -561,6 +573,13 @@ def _execution_loop(stop_event):
 def _event_loop(stop_event):
     """Process runtime results until shutdown"""
     while not stop_event.is_set():
+        try:
+            notice = schedule_notices.get_nowait()
+        except Empty:
+            pass
+        else:
+            state = notice["state"].replace("_", " ")
+            print(f"CODA: Scheduled task {notice['id']} {state}. Say schedule history for details.")
         runtime_event = runtime_queues.events.get(timeout=0.1)
 
         if runtime_event is None:
