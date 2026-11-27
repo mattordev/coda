@@ -24,7 +24,6 @@ def capture_output(stream, limit, secrets=()):
     if values:
         # Truncation can cut a secret before a complete match is possible.
         # Include only the longest matching partial suffix in the redaction.
-        # A full match still wins over a partial match at the same position.
         retained = bytes(prefix)
         partial = []
         if dropped:
@@ -34,8 +33,12 @@ def capture_output(stream, limit, secrets=()):
                     if retained.endswith(encoded[:size]):
                         partial.append(encoded[:size])
                         break
-        patterns = [re.escape(value.encode("utf-8")) for value in values]
+        matches = [(value.encode("utf-8"), False) for value in values]
         if partial:
-            patterns.append(re.escape(max(partial, key=len)) + rb"\Z")
+            matches.append((max(partial, key=len), True))
+        patterns = [
+            re.escape(value) + (rb"\Z" if suffix else b"")
+            for value, suffix in sorted(matches, key=lambda match: len(match[0]), reverse=True)
+        ]
         text = re.sub(b"|".join(patterns), b"[redacted]", retained).decode("utf-8", errors="replace")
     return ProcessOutput(text, dropped)

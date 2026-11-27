@@ -5,6 +5,11 @@ from runtime.process_output import capture_output
 
 
 class ProcessOutputTests(unittest.TestCase):
+    def test_truncated_secret_takes_precedence_over_a_shorter_match(self):
+        result = capture_output(io.BytesIO(b"abcdef"), 4, ("abc", "abcdef"))
+        self.assertEqual(result.text, "[redacted]")
+        self.assertEqual(result.dropped_bytes, 2)
+
     def test_drains_beyond_capture_limit_and_redacts_a_cut_off_secret(self):
         data = b"prefix private-token" + b"!" * 20000
         stream = io.BytesIO(data)
