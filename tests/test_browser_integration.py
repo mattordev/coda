@@ -157,7 +157,7 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 definition=discover_definitions(definitions).servers[0]
                 self.assertIsNone(definition.bundle_error)
                 fixture_script=Path(__file__).with_name('mcp_browser_fixture.py')
-                refs=tuple((key,key) for key in ('PYTHONPATH','PLAYWRIGHT_BROWSERS_PATH') if key in os.environ)
+                refs=tuple((key,key) for key in ('PYTHONPATH','PLAYWRIGHT_BROWSERS_PATH','CHROME_DEVEL_SANDBOX') if key in os.environ)
                 for mode in ('operation','persistent'):
                     manager=LocalMCPManager([replace(definition,session_mode=mode,
                         args=(str(fixture_script),'--config',str(config),'--port',str(port)),env_refs=refs)])

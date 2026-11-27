@@ -29,6 +29,16 @@ jobs:
           mcp jsonschema psutil idna certifi requests python-dotenv
       - name: Install matched managed browser and operating-system dependencies
         run: python -m playwright install chromium --only-shell --with-deps
+      - name: Use the installed Chrome sandbox helper on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # Chromium's documented alternative when Ubuntu restricts user namespaces.
+          # Keep both Chromium sandboxing and the host's AppArmor policy enabled.
+          sandbox_helper=/opt/google/chrome/chrome-sandbox
+          test -u "$sandbox_helper"
+          test "$(stat -c %u "$sandbox_helper")" = 0
+          echo "CHROME_DEVEL_SANDBOX=$sandbox_helper" >> "$GITHUB_ENV"
       - name: Exercise real Chromium and MCP without external test destinations
         env:
           CODA_RUN_BROWSER_SMOKE: '1'
