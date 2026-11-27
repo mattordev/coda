@@ -24,8 +24,33 @@ overview of the snippets, without reading URLs or the result list aloud. It
 fetches no result pages. A request explicitly asking
 to research, compare using sources, or read pages and explain can perform one
 search followed by at most two relevant page fetches. The initial selection uses
-the search provider's order among usable distinct URLs; it does not claim that
-ranking proves credibility. Preserve the actual chosen sources in the response.
+bounded query matching over titles, snippets and URL paths, retaining provider
+order for ties and avoiding generic changelogs unless requested. Explicit
+site filters are respected. Ranking does not prove credibility. Preserve the
+actual chosen sources and the original numbering for later explicit choices.
+
+Research reads pass the bounded question to the local extractor. It selects
+query-relevant windows before the returned-character limit discards later text.
+The same HTTP byte/time ceilings apply, and noncontiguous excerpts remain
+marked partial. The question is not sent to the remote website.
+
+Fetched-page interpretation uses numbered literal evidence excerpts. The model
+selects at most two IDs; CODA validates the response and renders those observed
+passages, rather than accepting unchecked generated factual claims. Unsupported
+IDs or free text fall back to labelled retrieved evidence. Empty selections or
+missing topical evidence abstain. This deliberately limits free paraphrasing;
+it is evidence extraction, not independent verification that a website is true.
+Ordinary snippet searches keep their conversational overview. Original results,
+URLs, failed observations and privacy checks over the entire result are retained.
+
+Search-snippet interpretation shares the configured
+`CODA_MCP_INTERPRET_TIMEOUT_SECONDS` budget across fallback providers, just like
+document interpretation. A slow local model can use the operator's longer
+budget, up to 120 seconds. Voice requests announce once when at least two
+providers have failed and another is tried, without reading internal errors aloud. If summarisation ultimately
+times out or fails, the reply explains that and returns deterministic snippet
+feedback while retaining the result list. Intent classification, searching and
+speech preparation have separate timings.
 
 Keep the existing search default of five results and maximum of ten. Numbered
 references retain at most those ten results. Automatic research uses at most
@@ -54,9 +79,19 @@ follow-up; do not silently claim every result was read.
 Only a validated successful search from the configured bundled instance can
 seed numbered source references. Keep host-only originating server/configuration
 provenance and exact returned URLs, not invented URLs extracted from prose.
-References expire after 120 seconds and invalidate on cancellation, unrelated
-conversation, reset, reconfiguration or changed source policy. Preserve the
+References expire after 120 seconds and invalidate on unrelated
+conversation, reset, reconfiguration or changed source policy. Stopping a
+request or playback preserves already completed source observations, with their
+original expiry; it cancels pending actions and offers. Preserve the
 originating shortlist across related page reads, with its original expiry.
+
+After a successful snippet search, CODA can explicitly offer to read the first
+source. That offer is host-owned and pins the observed URL and source provenance.
+"Yes please" or "Oh yeah, go for it" executes that one read through normal tool
+permissions, then consumes the offer. Declining, stopping or an intervening
+request cancels it. Agreement rechecks the original source expiry and current
+configuration. Generated conversation text cannot create a pending action.
+Saying "read the second source" always makes an explicit new selection.
 
 Missing, expired, out-of-range, ambiguous title/name or mixed old/new references
 ask for a specific current source or URL. Never reuse an ordinal from another

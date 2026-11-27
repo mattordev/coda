@@ -123,6 +123,21 @@ class SourceTests(unittest.TestCase):
         self.assertEqual([call[2].get('max_chars') for call in self.calls[1:]], [5000, 5000])
         self.assertEqual(result.host_context['source_seed']['observed_at'], self.previous.host_context['observed_at'])
 
+    def test_research_prefers_relevant_documentation_and_keeps_original_numbering(self):
+        self.previous.data['structuredContent']['results'] = [
+            {'title': 'Python changelog', 'url': 'https://docs.python.org/3/whatsnew/changelog.html',
+             'snippet': 'Changes to Python and HTMLParser.'},
+            {'title': 'HTMLParser limitations', 'url': 'https://docs.python.org/3/library/html.parser.html',
+             'snippet': 'HTMLParser does not check matching end tags.'},
+            {'title': 'HTMLParser implementation', 'url': 'https://docs.python.org/3/reference/parser.html',
+             'snippet': 'HTMLParser implementation limitations.'}]
+        result, _ = self.run_plan('research site:docs.python.org HTMLParser limitations')
+        selected = [call[2] for call in self.calls if call[1] == 'read_url']
+        self.assertEqual(selected[0]['url'], 'https://docs.python.org/3/library/html.parser.html')
+        self.assertNotIn('changelog', ' '.join(item['url'] for item in selected))
+        self.assertTrue(all(item['query'] == 'site:docs.python.org HTMLParser limitations' for item in selected))
+        self.assertIn('changelog', result.host_context['source_seed']['sources'][0]['url'])
+
     def test_explicit_evidence_requests_and_url_override(self):
         self.assertEqual(self.plan('explain parser behaviour using web sources').kind, 'research')
         explicit = self.plan('research parser behaviour at https://example.com/2')
@@ -261,6 +276,79 @@ class SourcePolicyTests(unittest.TestCase):
 class SourceSDKTests(unittest.TestCase):
     """Actual SDK plus actual HTTP, with test-only numeric peer mapping (no private grant)."""
 
+    def test_research_ranking_and_query_extraction_use_real_reader_in_both_modes(self):
+        from ai.mcp.transport import SDKStdioTransport
+        requested = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.append(self.path)
+                body = ('<title>HTMLParser reference</title><main>' + '<p>Unrelated introduction.</p>' * 500 +
+                        '<p>HTMLParser does not check that end tags match start tags.</p></main>').encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        http = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        worker = Thread(target=http.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                base, port = Path(directory), http.server_address[1]
+                config = base / 'reader.json'
+                config.write_text(json.dumps({'network': {'enabled': True, 'allowed_hosts': ['public.example'],
+                    'allowed_ports': [port]}, 'extraction': {'max_chars': 400}}), encoding='utf-8')
+                search_config = base / 'search.json'
+                search_config.write_text('{}', encoding='utf-8')
+                fixture = Path(__file__).with_name('mcp_webread_fixture.py')
+
+                class FixtureSearch(SDKStdioTransport):
+                    def request(self, definition, operation, **options):
+                        if definition.name != 'search':
+                            return super().request(definition, operation, **options)
+                        if operation == 'discover':
+                            return ToolResult(True, {'tools': [{'name': 'search_web', 'inputSchema': {
+                                'type': 'object', 'properties': {'query': {'type': 'string'}}, 'required': ['query']}}]})
+                        return ToolResult(True, {'kind': 'web_search', 'results': [
+                            {'url': f'http://public.example:{port}/changelog', 'title': 'Python changelog', 'snippet': 'Older updates.'},
+                            {'url': f'http://public.example:{port}/parser', 'title': 'HTMLParser limitations', 'snippet': 'HTMLParser limitations and end tags.'},
+                            {'url': f'http://public.example:{port}/reference', 'title': 'HTMLParser reference', 'snippet': 'HTMLParser limitations.'}]})
+
+                for mode in ('operation', 'persistent'):
+                    with self.subTest(mode=mode):
+                        reader = LocalServerDefinition('reader', sys.executable,
+                            (str(fixture), '--config', str(config), '--port', str(port)), trusted=True,
+                            bundled_server='webread', allowed_tools=frozenset({'read_url'}), session_mode=mode,
+                            settings_json=json.dumps({'config_file': str(config)}))
+                        search = LocalServerDefinition('search', sys.executable, trusted=True, bundled_server='websearch',
+                            allowed_tools=frozenset({'search_web'}), settings_json=json.dumps({'config_file': str(search_config)}))
+                        manager = LocalMCPManager([search, reader], transport=FixtureSearch())
+                        try:
+                            question = 'HTMLParser limitations'
+                            result, reply = web.run_sources(web.SourcePlan('research', query=question),
+                                                           MCPRuntimeCatalog(manager), question)
+                            self.assertIsNone(reply)
+                            self.assertTrue(result.success, result.error)
+                            pages = result.data['structuredContent']['sources']
+                            self.assertEqual(len(pages), 2)
+                            self.assertTrue(all(page['status'] == 'fetched' for page in pages), pages)
+                            self.assertTrue(all('end tags match start tags' in page['text'] for page in pages))
+                            self.assertTrue(all(len(page['text']) <= 400 and page['partial'] for page in pages))
+                        finally:
+                            self.assertTrue(all(outcome.success for outcome in manager.close().values()))
+                            pid = int(config.with_suffix('.pid').read_text(encoding='ascii'))
+                            self.assertFalse(psutil.pid_exists(pid), 'Owned reader process remains alive.')
+                self.assertEqual(requested, ['/parser', '/reference', '/parser', '/reference'])
+        finally:
+            http.shutdown()
+            http.server_close()
+            worker.join(2)
+
     def test_selected_source_is_fetched_before_grounding_in_both_modes(self):
         requests = []
         class Handler(BaseHTTPRequestHandler):
@@ -346,7 +434,8 @@ class SourceConversationTests(unittest.TestCase):
             name = 'search_web' if definition.name == 'search' else 'read_url'
             if operation == 'discover':
                 properties = {'query': {'type': 'string'}} if name == 'search_web' else {
-                    'url': {'type': 'string'}, 'max_chars': {'type': 'integer'}, 'max_links': {'type': 'integer'}}
+                    'url': {'type': 'string'}, 'max_chars': {'type': 'integer'}, 'max_links': {'type': 'integer'},
+                    'query': {'type': 'string'}}
                 return ToolResult(True, {'tools': [{'name': name, 'description': 'Fixture tool', 'inputSchema': {
                     'type': 'object', 'properties': properties, 'required': ['query' if name == 'search_web' else 'url'],
                     'additionalProperties': False}}]})
@@ -390,6 +479,91 @@ class SourceConversationTests(unittest.TestCase):
         result = runtime.run('read second source', {})
         self.assertIn('expired or ambiguous', result.response_text)
         self.assertEqual([name for name, _ in self.calls], ['search_web'])
+
+    def test_stop_preserves_completed_sources_but_cancels_the_offer(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        self.assertIsNotNone(runtime._pending_source_read)
+        runtime.cancel_pending_confirmation()
+        self.assertIsNone(runtime._pending_source_read)
+        self.assertIsNotNone(history.get_tool_follow_up_context())
+        with patch.object(runtime, 'route_request') as conversational:
+            stopped_offer = runtime.run('go ahead', {})
+        conversational.assert_not_called()
+        self.assertIn("isn't a pending page read", stopped_offer.response_text)
+        self.assertEqual(len(self.calls), 1)
+        runtime.run('summarise the first source', {})
+        self.assertEqual(self.calls[-1][1]['url'], 'https://example.com/1')
+
+    def test_cancelled_request_does_not_discard_previous_completed_sources(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        cancel = Event()
+        cancel.set()
+        result = runtime.run('read second source', {}, cancel_event=cancel)
+        self.assertFalse(result.handled)
+        runtime.run('read second source', {})
+        self.assertEqual(self.calls[-1][1]['url'], 'https://example.com/2')
+
+    def test_agreement_executes_only_the_offered_read_and_only_once(self):
+        searched = runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        self.assertIn('Would you like me to read the first source?', searched.response_text)
+        with patch.object(runtime, 'route_request') as conversational:
+            read = runtime.run('Oh yeah, go for it.', {})
+        conversational.assert_not_called()
+        self.assertTrue(read.tool_result.success)
+        self.assertEqual(self.calls, [('search_web', {'query': 'parser'}),
+                                     ('read_url', {'url': 'https://example.com/1', 'max_chars': 5000, 'max_links': 0})])
+        self.assertIsNone(runtime._pending_source_read)
+        with patch.object(runtime, 'route_request', return_value=('No action.', None)):
+            runtime.run('yes', {})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_spoken_search_wrapper_reads_selected_source_without_llm_fallback(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        with patch.object(runtime, 'route_request') as conversational:
+            result = runtime.run('Um, use the search result about AI in 2026 and summarize the first source.', {})
+        conversational.assert_not_called()
+        self.assertTrue(result.tool_result.success)
+        self.assertEqual(self.calls[-1][1]['url'], 'https://example.com/1')
+
+    def test_decline_retains_source_references_without_fetching(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        response = runtime.run('No thanks.', {})
+        self.assertIn("won't read", response.response_text)
+        self.assertEqual(len(self.calls), 1)
+        runtime.run('read second source', {})
+        self.assertEqual(self.calls[-1][1]['url'], 'https://example.com/2')
+
+    def test_offer_rechecks_expiry_reset_and_configuration_before_reading(self):
+        for reason in ('expiry', 'reset', 'configuration'):
+            with self.subTest(reason=reason):
+                runtime.run('mcp.search.search_web {"query":"parser"}', {})
+                offered = runtime._pending_source_read
+                count = len(self.calls)
+                if reason == 'reset':
+                    history._reset_conversation()
+                with (patch.object(web.time, 'monotonic', return_value=offered.seed['observed_at'] + 120)
+                      if reason == 'expiry' else patch.object(self.manager, 'source_focus_token', return_value=None)
+                      if reason == 'configuration' else patch.object(runtime, '_llm_fallback_enabled', return_value=False)):
+                    result = runtime.run('yes please', {})
+                self.assertIn('expired or ambiguous', result.response_text)
+                self.assertEqual(len(self.calls), count)
+
+    def test_agreement_uses_normal_tool_permission_checks(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        with patch.object(self.manager, 'executor', side_effect=ValueError('reader unavailable')):
+            result = runtime.run('yes', {})
+        self.assertIsNotNone(result.tool_result)
+        self.assertEqual(len(self.calls), 1)
+        self.assertNotIn('Observed article text', result.response_text)
+
+    def test_intervening_native_command_discards_old_read_offer(self):
+        runtime.run('mcp.search.search_web {"query":"parser"}', {})
+        with (patch.object(runtime, '_dispatch_intent', return_value=runtime.CommandResult(True)),
+              patch.object(runtime, 'route_request', return_value=('No tool action.', None))):
+            runtime.run('something unrelated', {})
+            runtime.run('yes', {})
+        self.assertIsNone(runtime._pending_source_read)
+        self.assertEqual(len(self.calls), 1)
 
 
 if __name__ == '__main__':

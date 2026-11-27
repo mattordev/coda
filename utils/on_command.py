@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from utils.console import print_line as print
 from copy import deepcopy
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from ai.request_context import request_context
 import utils.llm_service as llm_service
 from ai.mcp.catalog import MCPRuntimeCatalog
 from ai.mcp.conversation import plan_follow_up, focus_is_current, MISSING
-from ai.mcp.web_sources import plan_sources, run_sources
+from ai.mcp.web_sources import plan_sources, run_sources, source_seed, MISSING_SOURCE
 from ai.tools.arguments import prepare_arguments
 from ai.tools.presentation import prepare_tool_display, prepare_full_tool_output
 from ai.tools.diagnostics import record_tool_failure
@@ -32,6 +33,20 @@ _intent_router = None
 _intent_registry = None
 _mcp_catalog = None
 _pending_confirmation = None
+_pending_source_read = None
+
+
+def _cancel_source_offer():
+    global _pending_source_read
+    _pending_source_read = None
+
+
+def _clear_non_web_focus():
+    """Stopping work preserves completed web observations, not pending actions."""
+    previous = llm_service.get_tool_follow_up_context()
+    context = previous.host_context if previous is not None else None
+    if not isinstance(context, dict) or not (context.get('bundle') == 'websearch' or context.get('source_seed')):
+        llm_service.clear_tool_focus()
 
 
 @dataclass
@@ -79,6 +94,7 @@ def start_tools():
 def shutdown_tools(*, timeout_seconds=10):
     global _pending_confirmation
     _pending_confirmation = None
+    _cancel_source_offer()
     llm_service.clear_tool_focus()
     if _mcp_catalog is not None:
         return _mcp_catalog.close(timeout_seconds=timeout_seconds)
@@ -90,13 +106,15 @@ def cancel_pending_confirmation():
     global _pending_confirmation
     had_pending = _pending_confirmation is not None
     _pending_confirmation = None
-    llm_service.clear_tool_focus()
+    _cancel_source_offer()
+    _clear_non_web_focus()
     return had_pending
 
 
 def reload_config():
     global _intent_router
 
+    _cancel_source_offer()
     llm_service.reload_config()
     if _intent_registry is None:
         raise RuntimeError("Intent router has not been configured.")
@@ -273,12 +291,21 @@ def _dispatch_intent(
 
 
 def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
+    global _pending_source_read
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
     interpreted = interpret_result(outcome, request.message, cancel_event=cancel_event)
     if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
         return CommandResult(handled=False)
     response = interpreted.text
+    offer = None
+    payload = outcome.data.get('structuredContent', outcome.data) if isinstance(outcome.data, dict) else None
+    if (outcome.success and _mcp_catalog is not None and isinstance(payload, dict)
+            and (payload.get('kind') == 'web_search' or payload.get('scope') == 'search_snippets_only')):
+        candidate = plan_sources('read the first source', outcome, _mcp_catalog.manager)
+        if candidate is not None and candidate.kind == 'read':
+            offer = candidate
+            response += ' Would you like me to read the first source?'
     if (outcome.success and outcome.host_context and outcome.host_context.get('tool') == 'list_directory'
             and _presentation_style(_question_text(request.message)) == 'overview'
             and not any(word in request.message.casefold() for word in ('how many', 'count', 'number of'))):
@@ -286,6 +313,8 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     display = prepare_tool_display(outcome)
     if not llm_service.record_tool_exchange(request.message, outcome, response, cancel_event=cancel_event):
         return CommandResult(handled=False)
+    if offer is not None and not (cancel_event is not None and cancel_event.is_set()):
+        _pending_source_read = offer
     if not outcome.success:
         record_tool_failure(request.intent.name, display)
     if debug:
@@ -370,6 +399,10 @@ def _web_sources_reply(message, *, cancel_event=None, debug=False):
     plan = plan_sources(message, llm_service.get_tool_follow_up_context(), _mcp_catalog.manager)
     if plan is None:
         return None
+    return _execute_source_plan(plan, message, cancel_event=cancel_event, debug=debug)
+
+
+def _execute_source_plan(plan, message, *, cancel_event=None, debug=False):
     outcome, reply = run_sources(plan, _mcp_catalog, message, cancel_event=cancel_event)
     if reply is not None:
         return CommandResult(True, response_text=reply, open_follow_up=True)
@@ -384,7 +417,8 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     with request_context(cancel_event=cancel_event) as context:
         result = _on_command(msg, commands, debug=debug, cancel_event=cancel_event)
     if cancel_event is not None and cancel_event.is_set():
-        llm_service.clear_tool_focus()
+        _cancel_source_offer()
+        _clear_non_web_focus()
         return CommandResult(handled=False)
     if result.response_text and not (context.display_stream is not None and context.display_stream.started):
         print(f"CODA: {result.response_text}")
@@ -393,12 +427,14 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
 
 def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     global _pending_confirmation
+    global _pending_source_read
     normalized_message = msg.strip()
 
     cancelled_result = _get_cancellation_result(cancel_event, debug)
     if cancelled_result is not None:
         _pending_confirmation = None
-        llm_service.clear_tool_focus()
+        _cancel_source_offer()
+        _clear_non_web_focus()
         return cancelled_result
 
     if debug:
@@ -417,6 +453,8 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
 
         return CommandResult(handled=False)
 
+    source_offer = _pending_source_read
+    _pending_source_read = None
     pending = _pending_confirmation
     _pending_confirmation = None
     if pending is not None:
@@ -429,6 +467,24 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             if time.monotonic() >= expires:
                 return CommandResult(handled=True, response_text="That confirmation expired. Please request the action again.")
             return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+
+    answer = normalized_message.casefold().rstrip('.!?')
+    answer = ' '.join(answer.replace(',', ' ').split())
+    answer = re.sub(r'^(?:(?:oh|um|uh|okay|ok)[,\s]+)+', '', answer)
+    source_agreement = answer in ('yes', 'yeah', 'yep', 'sure', 'please do', 'go ahead', 'go for it',
+                                 'yes please', 'yeah go for it', 'yes go ahead', 'sure go ahead')
+    if source_offer is not None:
+        if answer in ('no', 'no thanks', 'cancel', 'never mind', 'nevermind'):
+            return CommandResult(True, response_text="Okay, I won't read that page.", open_follow_up=True)
+        if source_agreement:
+            current = source_seed(llm_service.get_tool_follow_up_context(), _mcp_catalog.manager) if _mcp_catalog else None
+            if current != source_offer.seed:
+                return CommandResult(True, response_text=MISSING_SOURCE, open_follow_up=True)
+            return _execute_source_plan(source_offer, msg, cancel_event=cancel_event, debug=debug)
+    elif source_agreement and _mcp_catalog is not None:
+        if source_seed(llm_service.get_tool_follow_up_context(), _mcp_catalog.manager) is not None:
+            return CommandResult(True, response_text="There isn't a pending page read. Say which source to read, such as read the first source.",
+                                 open_follow_up=True)
 
     native_match = None if _intent_registry is None else IntentRouter(_intent_registry, strategies=(
         ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),

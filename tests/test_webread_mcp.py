@@ -50,7 +50,8 @@ class WebReadMCPTests(unittest.TestCase):
                 fetch.assert_not_called()
 
     def test_arguments_can_only_narrow_operator_limits(self):
-        for args in ({'max_chars': 101}, {'max_chars': True}, {'max_links': 3}, {'max_links': -1}):
+        for args in ({'max_chars': 101}, {'max_chars': True}, {'max_links': 3}, {'max_links': -1},
+                     {'query': True}, {'query': 'x' * 1001}):
             with self.subTest(args=args), patch.object(self.reader, 'get') as fetch:
                 self.assertEqual(self.code(self.reader.read_url('https://example.com', **args)), 'invalid_arguments')
                 fetch.assert_not_called()

@@ -5,6 +5,13 @@ title, description, language, final URL, observation time, and a bounded link li
 It uses the existing Python environment and does not require a browser or paid
 service. Search remains a separate capability and does not implicitly fetch pages.
 
+An optional `query` (at most 1,000 characters) selects relevant text windows
+before clipping to `max_chars`. It is processed locally, never sent to the
+website. HTTP byte/time limits still bound the input; selected/noncontiguous
+text is marked partial with `query_excerpt`. Omit it for the existing prefix
+extraction behaviour. Fetched-page interpretation now selects validated literal
+evidence excerpts; it does not accept unsupported model-generated statements.
+
 Copy `webread.config.json.example` to `webread.config.json`, enable its network
 section, and set `allowed_hosts` to the exact public hosts you intend to read.
 For a first test, use `["example.com"]`. Redirect destinations must also be

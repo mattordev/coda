@@ -13,6 +13,7 @@ from ai.mcp import bundled
 from ai.tools.result_summary import _payload
 from ai.intents.models import IntentRequest
 from ai.tools.models import ToolError, ToolResult
+from utils.retrieval_evidence import ranked_source_urls
 
 SOURCE_SECONDS = 120
 MISSING_SOURCE = 'Please choose a current search result or provide its full URL; that source reference is missing, expired or ambiguous.'
@@ -113,6 +114,13 @@ def plan_sources(message, previous, manager):
     if not isinstance(message, str) or len(message) > 5000:
         return None
     text = message.strip()
+    # Accept a small spoken wrapper only when the remaining request matches
+    # the fixed source grammar. Never derive actions from arbitrary dialogue.
+    text = re.sub(r'^(?:(?:um|uh|err|oh|okay|ok)[,\s]+)+', '', text, flags=re.IGNORECASE)
+    wrapped = re.fullmatch(r'use the search results? about .{1,1000}? and ((?:read|open|fetch|summari[sz]e|compare) .+)',
+                          text, re.IGNORECASE)
+    if wrapped:
+        text = wrapped[1]
     research = re.fullmatch(r'research(?: (?:this question|the following):)?\s+(.{1,1000})', text, re.IGNORECASE)
     if research is None:
         research = re.fullmatch(r'(?:explain|compare) (.{1,1000}?) (?:using|with) (?:web |online )?(?:sources|source pages|webpages)[.!?]?', text, re.IGNORECASE)
@@ -235,7 +243,7 @@ def run_sources(plan, catalog, message, *, cancel_event=None):
         seed = source_seed(search, manager)
         if seed is None:
             return _failure('permission_denied', 'The search source provenance or current permissions could not be verified.'), None
-        urls = tuple(dict.fromkeys(entry['url'] for entry in seed['sources']))[:2]
+        urls = tuple(ranked_source_urls(seed['sources'], plan.query))[:2]
     else:
         urls = plan.urls
     if len(urls) > 3:
@@ -260,7 +268,10 @@ def run_sources(plan, catalog, message, *, cancel_event=None):
             break
         if manager.source_focus_token(server) != reader_token:
             return _failure('permission_denied', 'Webpage reader permissions changed during source retrieval.'), None
-        outcome = _invoke(catalog, server, 'read_url', {'url': url, 'max_chars': chars, 'max_links': 0}, message, budget)
+        arguments = {'url': url, 'max_chars': chars, 'max_links': 0}
+        if plan.kind == 'research':
+            arguments['query'] = plan.query
+        outcome = _invoke(catalog, server, 'read_url', arguments, message, budget)
         if manager.source_focus_token(server) != reader_token:
             return _failure('permission_denied', 'Webpage reader permissions changed during source retrieval.'), None
         payload = _payload(outcome.data)
