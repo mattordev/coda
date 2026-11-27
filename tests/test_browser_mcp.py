@@ -37,6 +37,7 @@ class BrowserMCPTests(unittest.IsolatedAsyncioTestCase):
         before = {n for n in sys.modules if n.startswith('playwright')}
         for raw, code in [('{}','browser_disabled'), ('{','configuration_error'),
                           ('{"enabled":true,"enabled":false}','configuration_error'),
+                          (' '*65537,'configuration_error'),
                           ('{"network":{"allowed_hosts":"*"}}','configuration_error'),
                           ('{"limits":{"max_requests":true}}','configuration_error')]:
             self.server.CONFIG_PATH.write_text(raw)

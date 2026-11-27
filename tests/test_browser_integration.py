@@ -58,7 +58,11 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     self.send_response(302);self.send_header('Location',f'http://127.0.0.1:{self.server.server_port}/redirect-private');self.end_headers();return
                 if self.path == '/slow-script':
                     slow_started.set();release_slow.wait(5)
-                    self.send_response(200);self.send_header('Content-Length','0');self.end_headers();return
+                    try:
+                        self.send_response(200);self.send_header('Content-Length','0');self.end_headers()
+                    except OSError:
+                        pass  # A deliberately cancelled/timed-out reader closed its socket.
+                    return
                 body = (f'''<html><head><title>Controlled browser fixture</title></head><body>
                   <main><h1 id="result">Before JavaScript</h1><p>A literal source observation.</p></main>
                   <form id="test-form" method="post" action="/submit">
@@ -222,6 +226,15 @@ class BrowserIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     release_slow.set()
                     pending.cancel()
                     await asyncio.gather(pending,return_exceptions=True)
+                slow_started.clear();release_slow.clear()
+                try:
+                    with self.assertRaises(web.NetworkError) as timed_out:
+                        await browser.render(f'http://public.example:{port}/slow',
+                            web.NetworkPolicy(allowed_hosts=('public.example',),allowed_ports=(port,)),
+                            browser.BrowserLimits(timeout_seconds=2))
+                    self.assertEqual(timed_out.exception.code,'network_timeout')
+                finally:
+                    release_slow.set()
         finally:
             observer.cancel()
             await asyncio.gather(observer, return_exceptions=True)

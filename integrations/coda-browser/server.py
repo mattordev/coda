@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent
-from ai.mcp.bundled import read_json
 from utils.browser_session import BrowserLimits, render
 from utils.public_http import NetworkError, NetworkPolicy, post_form
 
@@ -23,9 +22,18 @@ server = MCPServer('coda-browser', log_level='ERROR')
 
 
 def load_config():
-    if CONFIG_PATH.stat().st_size > 65536:
+    with CONFIG_PATH.open('rb') as source:
+        encoded = source.read(65537)
+    if len(encoded) > 65536:
         raise ValueError('Oversized browser configuration.')
-    raw = read_json(CONFIG_PATH)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate browser configuration key.')
+            result[key] = value
+        return result
+    raw = json.loads(encoded,object_pairs_hook=unique)
     if not isinstance(raw, dict) or set(raw) - {'enabled', 'actions_enabled', 'network', 'limits'}:
         raise ValueError('Invalid browser configuration.')
     enabled = raw.get('enabled', False)
