@@ -10,8 +10,10 @@ def run_due_schedule(store, policy_path, execute, *, now, grace):
     a definitive terminal state. An exception leaves the external effect unknown.
     """
     occurrence = store.claim(now, grace=grace)
-    if occurrence is None or occurrence["state"] == "missed":
-        return occurrence
+    if occurrence is None:
+        return None
+    if occurrence["state"] == "missed":
+        return {key: occurrence[key] for key in ("id", "due", "state")}
 
     try:
         policy = load_system_policy(policy_path)

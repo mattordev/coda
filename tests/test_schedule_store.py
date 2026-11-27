@@ -7,6 +7,21 @@ from runtime.schedule_store import ScheduleStore
 
 
 class ScheduleStoreTests(unittest.TestCase):
+    def test_attention_survives_restart_and_acknowledgement_does_not_replay(self):
+        task = self.store.create("probe", "binding", "UTC", 100)
+        self.store.claim(100, grace=0)
+        self.assertEqual(self.store.pending_attention(), [])
+        self.assertFalse(self.store.acknowledge(task, 100))
+        self.assertTrue(self.store.finish(task, 100, "failed"))
+        reopened = ScheduleStore(self.path)
+        notice = {"task_id": task, "due": 100, "state": "failed"}
+        self.assertEqual(reopened.pending_attention(), [notice])
+        self.assertTrue(reopened.acknowledge(task, 100))
+        self.assertFalse(reopened.acknowledge(task, 100))
+        self.assertEqual(ScheduleStore(self.path).pending_attention(), [])
+        self.assertEqual(reopened.history(), [notice])
+        self.assertIsNone(reopened.claim(100, grace=0))
+
     def test_replacement_invalidates_old_definition_and_keeps_pause(self):
         task = self.store.create("probe", "old", "UTC", 100)
         self.assertTrue(self.store.pause(task))

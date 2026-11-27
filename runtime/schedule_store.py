@@ -23,8 +23,10 @@ class ScheduleStore:
             if version in (0, 1):
                 db.execute("""ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'paused', 'cancelled'))""")
-                db.execute("PRAGMA user_version = 2")
-            elif version != 2:
+            if version in (0, 1, 2):
+                db.execute("ALTER TABLE runs ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0")
+                db.execute("PRAGMA user_version = 3")
+            elif version != 3:
                 raise ValueError("Unsupported schedule database version.")
 
     @contextmanager
@@ -118,7 +120,8 @@ class ScheduleStore:
                 # Select the latest elapsed occurrence without replaying backlog.
                 due += ((now - due) // interval) * interval
             state = "missed" if now - due > grace else "claimed"
-            db.execute("INSERT INTO runs VALUES (?, ?, ?)", (task["id"], due, state))
+            db.execute("INSERT INTO runs (task_id, due, state) VALUES (?, ?, ?)",
+                       (task["id"], due, state))
             db.execute("UPDATE tasks SET due = ? WHERE id = ?",
                        (None if interval is None else due + interval, task["id"]))
             self._prune(db)
@@ -146,6 +149,21 @@ class ScheduleStore:
             return [dict(row) for row in db.execute(
                 "SELECT task_id, due, state FROM runs ORDER BY rowid DESC"
             )]
+
+    def pending_attention(self):
+        """Return a bounded batch of terminal occurrences awaiting acknowledgement."""
+        with self._write() as db:
+            return [dict(row) for row in db.execute("""SELECT task_id, due, state
+                FROM runs WHERE state != 'claimed' AND acknowledged = 0
+                ORDER BY rowid LIMIT 25""")]
+
+    def acknowledge(self, task_id, due):
+        """Mark a reported outcome as seen without changing its execution history."""
+        with self._write() as db:
+            result = db.execute("""UPDATE runs SET acknowledged = 1
+                WHERE task_id = ? AND due = ? AND state != 'claimed' AND acknowledged = 0""",
+                (task_id, due))
+            return result.rowcount == 1
 
     @staticmethod
     def _prune(db):
