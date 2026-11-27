@@ -94,4 +94,5 @@ def start_owned_process(action):
             yield process
         finally:
             with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+                # These members exist only on the Linux path above.
+                os.killpg(process.pid, signal.SIGKILL)  # pylint: disable=no-member
