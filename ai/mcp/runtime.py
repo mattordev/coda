@@ -20,6 +20,7 @@ from ai.mcp.transport import SDKStdioTransport, failure
 from ai.mcp.web_sources import source_configuration, source_environment_token
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
+from ai.tools.progress import report_tool
 
 
 class ServerState(str, Enum):
@@ -411,11 +412,14 @@ class MCPToolExecutor:
             source_bundle = getattr(definition, 'bundled_server', None) in ('websearch', 'webread')
             focus_token = self._manager.source_focus_token if source_bundle else self._manager.filesystem_focus_token
             token = focus_token(self._server_id)
+            report_tool('action', self._intent.name)
             outcome = self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
             )
+            if outcome.success:
+                report_tool('completed', self._intent.name, result=outcome)
             if outcome.success and token is not None and token == focus_token(self._server_id):
                 outcome = replace(outcome, host_context={
                     'server': self._server_id, 'tool': self._tool_name,
@@ -428,5 +432,6 @@ class MCPToolExecutor:
         adapter = ExternalToolAdapter(
             self._intent,
             invoke,
+            feedback=False,
         )
         return adapter.execute(request)

@@ -8,6 +8,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 
 from utils.public_http import NetworkError
+from utils.retrieval_evidence import query_excerpt
 
 _VOID = frozenset('area base br col embed hr img input link meta param source track wbr'.split())
 _IGNORE = frozenset('script style template svg canvas iframe object nav footer aside'.split())
@@ -284,10 +285,12 @@ def _decode(response, content_type):
     return mime, encoding, text
 
 
-def extract_page(response, *, max_chars=12000, max_links=10):
+def extract_page(response, *, max_chars=12000, max_links=10, query=None):
     """Return only bounded readable source observations, not the raw document."""
     if type(max_chars) is not int or not 1 <= max_chars <= 32000 or type(max_links) is not int or not 0 <= max_links <= 20:
         raise NetworkError('invalid_arguments', 'Supply bounded integer page text/link limits.')
+    if query is not None and (not isinstance(query, str) or len(query) > 1000):
+        raise NetworkError('invalid_arguments', 'Supply at most 1000 query characters.')
     values = [value for name, value in response.headers if name.lower() == 'content-type']
     if len(set(values)) > 1 or any(len(value) > 1024 for value in values):
         raise NetworkError('unsupported_content', 'The page content type is ambiguous or oversized.')
@@ -301,7 +304,9 @@ def extract_page(response, *, max_chars=12000, max_links=10):
     title = description = language = ''
     links, links_truncated = [], False
     if mime in ('text/html', 'application/xhtml+xml'):
-        parser = _Page(response.final_url, max_chars + 1, max_links)
+        # The HTTP response is already byte-bounded. Query selection must see
+        # its readable text before the returned-character ceiling removes it.
+        parser = _Page(response.final_url, len(text) + 1 if query else max_chars + 1, max_links)
         parser.feed_bounded(text)
         buffer, method = ((parser.main, 'html_main') if parser.main.value() else
                           (parser.article, 'html_article') if parser.article.value() else (parser.body, 'html_body'))
@@ -317,6 +322,9 @@ def extract_page(response, *, max_chars=12000, max_links=10):
             reasons.append('character_limit')
     else:
         raise NetworkError('unsupported_content', 'That page format is not supported by the text reader.')
+    if query and len(text) > max_chars:
+        text = query_excerpt(text, query, max_chars)
+        reasons.append('query_excerpt')
     return {'kind': 'web_page', 'observation': 'fetched_text', 'requested_url': response.requested_url,
             'url': response.final_url, 'title': title, 'description': description, 'language': language,
             'content_type': mime, 'encoding': encoding, 'status': response.status, 'text': text[:max_chars],

@@ -1,4 +1,4 @@
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 import inspect
 from typing import Callable
 from tts.spoken_text import normalise_spoken_text
@@ -25,6 +25,26 @@ TextNormaliser = Callable[[str], str]
 TextSegmenter = Callable[[str], list[str]]
 
 
+class _FeedbackDisplay:
+    """Publish a short utterance once when its provider starts playback."""
+
+    def __init__(self, task, publish):
+        self._task = task
+        self._publish = publish
+        self._lock = Lock()
+        self._published = False
+
+    def publish(self):
+        with self._lock:
+            if self._published or self._task.cancel_event.is_set():
+                return
+            self._published = True
+        try:
+            self._publish(self._task)
+        except Exception:
+            runtime_state.debug_print('[VOICE] Could not display spoken feedback.')
+
+
 class SpeechTaskProcessor:
     """Process speech tasks through the available TTS providers."""
     
@@ -34,11 +54,13 @@ class SpeechTaskProcessor:
         playback_controller: SpeechPlaybackController,
         normalise_text: TextNormaliser = normalise_spoken_text,
         segment_text: TextSegmenter = split_spoken_text,
+        on_feedback: Callable[[SpeechTask], None] | None = None,
     ) -> None:
         self._resolve_providers = resolve_providers
         self._playback_controller = playback_controller
         self._normalise_text = normalise_text
         self._segment_text = segment_text
+        self._on_feedback = on_feedback
         
     def process(self, task: SpeechTask) -> WorkerEvent:
         try:
@@ -72,6 +94,8 @@ class SpeechTaskProcessor:
 
         providers = self._resolve_providers()
         provider_start_index = 0
+        feedback = (_FeedbackDisplay(task, self._on_feedback)
+                    if task.is_acknowledgement and self._on_feedback is not None else None)
 
         for segment in segments:
             errors = []
@@ -92,6 +116,7 @@ class SpeechTaskProcessor:
                         segment,
                         task.cancel_event,
                         **({"metrics": task.metrics} if task.metrics is not None else {}),
+                        **({"on_playback_start": feedback.publish} if feedback is not None else {}),
                     )
                 except Exception as error:
                     provider_error = f"{provider.name}: {error}"
@@ -105,6 +130,10 @@ class SpeechTaskProcessor:
                     return self._event(task, WorkerEventType.CANCELLED)
 
                 if played:
+                    if feedback is not None:
+                        # Older injected providers may lack a playback hook.
+                        # Confirmed playback still permits a truthful transcript.
+                        feedback.publish()
                     if provider_index > provider_start_index:
                         runtime_state.debug_print(
                             f"[TTS] Fallback provider {provider.name} succeeded."
@@ -213,6 +242,7 @@ class SpeechTaskProcessor:
             event_type=event_type,
             request_id=task.request_id,
             error=error,
+            is_acknowledgement=task.is_acknowledgement,
             open_follow_up=(
                 task.open_follow_up
                 if event_type == WorkerEventType.COMPLETED
@@ -273,6 +303,7 @@ class SpeechWorker:
                         worker=WorkerName.SPEECH,
                         event_type=WorkerEventType.STARTED,
                         request_id=task.request_id,
+                        is_acknowledgement=task.is_acknowledgement,
                     )
                 )
 
@@ -284,6 +315,7 @@ class SpeechWorker:
                         event_type=WorkerEventType.FAILED,
                         request_id=task.request_id,
                         error=str(error),
+                        is_acknowledgement=task.is_acknowledgement,
                     )
 
                 self._event_queue.put(result)

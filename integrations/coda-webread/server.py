@@ -65,7 +65,8 @@ def failure(code, message):
 
 
 @server.tool(structured_output=False, annotations={'readOnlyHint': True, 'openWorldHint': True})
-def read_url(url: str, max_chars: int | None = None, max_links: int | None = None) -> CallToolResult:
+def read_url(url: str, max_chars: int | None = None, max_links: int | None = None,
+             query: str | None = None) -> CallToolResult:
     """Read bounded text from one allowed public HTTP(S) URL; never execute page code."""
     try:
         snapshot = load_config()
@@ -78,6 +79,8 @@ def read_url(url: str, max_chars: int | None = None, max_links: int | None = Non
     links = ceiling_links if max_links is None else max_links
     if type(chars) is not int or not 1 <= chars <= ceiling_chars or type(links) is not int or not 0 <= links <= ceiling_links:
         return failure('invalid_arguments', 'Requested text and link limits must fit the configured ceilings.')
+    if query is not None and (not isinstance(query, str) or len(query) > 1000):
+        return failure('invalid_arguments', 'Supply at most 1000 query characters.')
 
     def current():
         try:
@@ -87,7 +90,7 @@ def read_url(url: str, max_chars: int | None = None, max_links: int | None = Non
 
     try:
         observed = get(url, policy, validate=current)
-        page = extract_page(observed, max_chars=chars, max_links=links)
+        page = extract_page(observed, max_chars=chars, max_links=links, query=query)
         if not current():
             return failure('network_denied', 'The webpage reader configuration changed during the request.')
         page['observed_at'] = datetime.now(timezone.utc).isoformat()

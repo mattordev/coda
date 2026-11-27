@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ai.tools.models import ToolError, ToolResult
+from ai.tools.progress import report_tool
 
 if TYPE_CHECKING:
     from ai.intents.dispatcher import IntentCommand
@@ -18,6 +19,7 @@ class NativeCommandAdapter:
     def execute(self, request: IntentRequest) -> ToolResult:
         """Execute a native command and normalize its outcomes."""
         try:
+            report_tool('action', request.intent.name)
             success = bool(self._command.run(request))
         except Exception:
             return ToolResult(
@@ -28,4 +30,7 @@ class NativeCommandAdapter:
                 ),
             )
 
-        return ToolResult(success=success)
+        result = ToolResult(success=success)
+        if success:
+            report_tool('completed', request.intent.name, result=result)
+        return result

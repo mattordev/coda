@@ -14,6 +14,17 @@ def response(text, content_type='text/html', **changes):
 
 
 class WebExtractTests(unittest.TestCase):
+    def test_query_selects_evidence_beyond_the_normal_prefix_before_clipping(self):
+        html = '<main>' + '<p>Unrelated introduction.</p>' * 500 + (
+            '<p>HTMLParser does not check that end tags match start tags.</p></main>')
+        prefix = extract_page(response(html), max_chars=400)
+        relevant = extract_page(response(html), max_chars=400, query='HTMLParser limitations')
+        self.assertNotIn('end tags', prefix['text'])
+        self.assertIn('end tags match start tags', relevant['text'])
+        self.assertLessEqual(len(relevant['text']), 400)
+        self.assertTrue(relevant['partial'])
+        self.assertIn('query_excerpt', relevant['partial_reasons'])
+
     def test_main_text_metadata_and_links_use_final_url(self):
         page = extract_page(response('''<html lang="en-GB"><head><title>A &amp; B</title>
             <meta name="description" content="A short description"></head><body>

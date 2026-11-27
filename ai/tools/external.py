@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from ai.tools.models import ToolError, ToolResult
 from ai.tools.validation import compile_input_schema, validate_arguments
+from ai.tools.progress import report_tool
 
 if TYPE_CHECKING:
     from ai.intents.models import Intent, IntentRequest
@@ -21,6 +22,7 @@ class ExternalToolAdapter:
         invoke: Callable[[dict[str, object]], ToolResult],
         *,
         preprocess: Callable[[IntentRequest], dict[str, object]] | None = None,
+        feedback: bool = True,
     ) -> None:
         if (
             not isinstance(intent.source, str)
@@ -40,6 +42,7 @@ class ExternalToolAdapter:
         self._validator = compile_input_schema(intent.input_schema)
         self._invoke = invoke
         self._preprocess = preprocess
+        self._feedback = feedback
 
     def execute(self, request: IntentRequest) -> ToolResult:
         """Validate once and invoke once, without automatic retry or fallback."""
@@ -69,6 +72,8 @@ class ExternalToolAdapter:
             )
 
         try:
+            if self._feedback:
+                report_tool('action', self._name)
             result = self._invoke(arguments)
         except Exception:
             return ToolResult(
@@ -87,4 +92,6 @@ class ExternalToolAdapter:
                     message="The tool returned an invalid result.",
                 ),
             )
+        if self._feedback and result.success:
+            report_tool('completed', self._name, result=result)
         return result

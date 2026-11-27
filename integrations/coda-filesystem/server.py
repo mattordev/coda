@@ -763,18 +763,41 @@ def _windows_security(source, destination):
     get_security.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID,
                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
     get_security.restype = wintypes.BOOL
-    needed = wintypes.DWORD()
-    get_security(str(source), 7, None, 0, ctypes.byref(needed))
-    if not 0 < needed.value <= 65536:
-        raise OSError('The file security descriptor is unavailable or too large.')
-    descriptor = ctypes.create_string_buffer(needed.value)
-    if not get_security(str(source), 7, descriptor, needed.value, ctypes.byref(needed)):
-        raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+    def descriptor_for(path):
+        needed = wintypes.DWORD()
+        get_security(str(path), 7, None, 0, ctypes.byref(needed))
+        if not 0 < needed.value <= 65536:
+            raise OSError('The file security descriptor is unavailable or too large.')
+        descriptor = ctypes.create_string_buffer(needed.value)
+        if not get_security(str(path), 7, descriptor, needed.value, ctypes.byref(needed)):
+            raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+        return descriptor
+
+    descriptor, staged_descriptor = descriptor_for(source), descriptor_for(destination)
+    equal_sid = security.EqualSid
+    equal_sid.argtypes = [wintypes.LPVOID, wintypes.LPVOID]
+    equal_sid.restype = wintypes.BOOL
+    flags = 4 | 0x80000000  # Copy and protect the DACL before writing content.
+    for function, flag in ((security.GetSecurityDescriptorOwner, 1),
+                           (security.GetSecurityDescriptorGroup, 2)):
+        function.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.BOOL)]
+        function.restype = wintypes.BOOL
+        original_sid, staged_sid = wintypes.LPVOID(), wintypes.LPVOID()
+        defaulted = wintypes.BOOL()
+        if not function(descriptor, ctypes.byref(original_sid), ctypes.byref(defaulted)) or not function(
+                staged_descriptor, ctypes.byref(staged_sid), ctypes.byref(defaulted)):
+            raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
+        if not original_sid or not staged_sid:
+            raise OSError('The file ownership descriptor is unavailable.')
+        # Modify access and file ownership allow safe editing, but do not
+        # imply WRITE_OWNER. Request that right only for a real SID change.
+        if not equal_sid(original_sid, staged_sid):
+            flags |= flag
     set_security = security.SetFileSecurityW
     set_security.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID]
     set_security.restype = wintypes.BOOL
     # Protect the copied DACL from additional parent-directory inheritance.
-    if not set_security(str(destination), 7 | 0x80000000, descriptor):
+    if not set_security(str(destination), flags, descriptor):
         raise getattr(ctypes, 'WinError')(ctypes.get_last_error())
 
 

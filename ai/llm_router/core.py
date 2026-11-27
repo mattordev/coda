@@ -110,6 +110,7 @@ def _try_providers(
     """
     last_error = None
     output_started = False
+    failed_attempts = 0
     if options is not None and options.on_visible_text is not None:
         callback = options.on_visible_text
         def forward(text):
@@ -143,6 +144,7 @@ def _try_providers(
                 bool(attempted_providers)
                 and provider not in attempted_providers
             ),
+            failed_attempts=failed_attempts,
             **({"provider_call": provider_call, "purpose": purpose} if provider_call is not None else {}),
             **({"options": options} if options is not None else {}),
         )
@@ -169,6 +171,7 @@ def _try_providers(
             if error not in COMPLETION_ERRORS:
                 logger.log_failure(provider)
             _debug_print(f"[ROUTER] {provider} failed: {error}")
+            failed_attempts += 1
             last_error = error
             continue
 
@@ -189,6 +192,7 @@ def _call_provider_with_health(
     sequence: int = 1,
     is_retry: bool = False,
     is_fallback: bool = False,
+    failed_attempts: int = 0,
     provider_call=None,
     purpose=WorkloadPurpose.CONVERSATION,
     options=None,
@@ -215,6 +219,14 @@ def _call_provider_with_health(
             f"[ROUTER] Skipping {provider} due to recent failure; using fallback."
         )
         return None, f"{provider} is temporarily unavailable after a recent failure.", True
+
+    if failed_attempts >= 2 and not _is_cancelled(cancel_event):
+        context = current_request()
+        if context is not None and context.progress is not None:
+            try:
+                context.progress('multiple_provider_failures')
+            except Exception:
+                _debug_print('[ROUTER] Progress feedback unavailable.')
 
     logger.log_attempt(provider)
     call = provider_call or llm_service.call_provider

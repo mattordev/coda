@@ -1,7 +1,9 @@
 import json
 import threading
 import time
+import tempfile
 from pathlib import Path
+from utils.console import print_line as print
 
 ## program flow example:
 # User speaks -> record_user_message
@@ -96,10 +98,28 @@ def _read_state_from_disk():
 # write the dash state to json, makes a temp file and then replaces the main file when safe to prevent corruption.
 def _write_state_to_disk(state):
     _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = _STATE_FILE.with_suffix(".json.tmp")
-    with temp_path.open("w", encoding="utf-8") as temp_file:
-        json.dump(state, temp_file, indent=2)
-    temp_path.replace(_STATE_FILE)
+    temp_path = None
+    try:
+        # Each writer owns its staging file. Windows readers/virus scanners can
+        # briefly hold the destination open without replacement sharing.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=_STATE_FILE.parent,
+                                         prefix=f".{_STATE_FILE.name}.", suffix=".tmp", delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(state, temp_file, indent=2)
+        for attempt in range(5):
+            try:
+                temp_path.replace(_STATE_FILE)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.01 * 2 ** attempt)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 # shared helper to append a message to the state, used by both user messages and AI responses, 
 # also clamps the message list to prevent it from growing indefinitely.
@@ -116,9 +136,11 @@ def _append_message(state, key, text, source):
 
 # core transaction wrapper, returns the updated state after applying the mutator function, 
 # ensures that all state updates are atomic and thread-safe by using a lock, also updates the "updated_at" timestamp on every change.
-def _update_state(mutator):
+def _update_state(mutator, *, cancel_event=None):
     with _STATE_LOCK:
         state = _read_state_from_disk()
+        if cancel_event is not None and cancel_event.is_set():
+            return state
         mutator(state)
         state["updated_at"] = time.time()
         _write_state_to_disk(state)
@@ -145,7 +167,7 @@ def record_user_message(text, source="voice", tags=None):
 # called before TTS in speak_response.py. Increments the event counter, updates the last AI message and motion, 
 # and appends the message to the list of AI messages. If the text is empty after normalization, 
 # it simply returns the current state without making any changes
-def record_ai_response(text, source="assistant"):
+def record_ai_response(text, source="assistant", *, cancel_event=None):
     message_text = _normalize_text(text)
     if not message_text:
         return _read_state_from_disk()
@@ -157,7 +179,18 @@ def record_ai_response(text, source="assistant"):
         state["last_ai_motion"] = _motion_for_event(state["ai_event_counter"])
         _append_message(state, "ai_messages", message_text, source)
 
-    return _update_state(mutator)
+    return _update_state(mutator, cancel_event=cancel_event)
+
+
+def try_record_ai_response(text, source="assistant", *, cancel_event=None):
+    """The optional dashboard projection cannot prevent a valid spoken reply."""
+    try:
+        record_ai_response(text, source=source,
+                           **({'cancel_event': cancel_event} if cancel_event is not None else {}))
+    except OSError:
+        print('[DASHBOARD] Could not save assistant output; speech will continue.')
+        return False
+    return True
 
 # lock protected read-only accessor. Returns latest full state from the json file.
 def snapshot():

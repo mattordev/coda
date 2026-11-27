@@ -5,7 +5,7 @@ const state = {
 	latestMessages: [],
 };
 
-const REFRESH_INTERVAL_MS = 30000;
+const REFRESH_INTERVAL_MS = 1000;
 const HEARTBEAT_STALE_MS = 6000;
 
 function formatTimestamp(timestamp) {
@@ -27,7 +27,7 @@ function renderTranscript(messages) {
 	}
 
 	if (!messages || messages.length === 0) {
-		transcriptBody.innerHTML = '<div class="empty-state">No speech captured yet.</div>';
+		transcriptBody.innerHTML = '<div class="empty-state">No messages yet.</div>';
 		return;
 	}
 
@@ -53,7 +53,7 @@ function renderTranscript(messages) {
 		.map(
 			(message) => `
             <article class="transcript-entry">
-                <small>${escapeHtml(message.source || "voice")} · ${formatTimestamp(message.timestamp)}</small>
+                <small>${message.role === "assistant" ? "CODA" : "You"} · ${escapeHtml(message.source || "voice")} · ${formatTimestamp(message.timestamp)}</small>
                 <div>${escapeHtml(String(message.text || ""))}</div>
                 ${renderTags(message.tags)}
             </article>
@@ -176,7 +176,10 @@ async function refreshDashboard() {
 		}
 
 		const payload = await response.json();
-		state.latestMessages = payload.user_messages || [];
+		state.latestMessages = [
+			...(payload.user_messages || []).map((message) => ({ ...message, role: "user" })),
+			...(payload.ai_messages || []).map((message) => ({ ...message, role: "assistant" })),
+		].sort((left, right) => Number(left.timestamp || 0) - Number(right.timestamp || 0));
 		updateStatus(payload);
 		renderTranscript(state.latestMessages);
 

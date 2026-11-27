@@ -352,11 +352,16 @@ def run(
             if captured_phrase.overlapped_capture:
                 event_tags.append("assistant_playback")
 
-            dashboard_state.record_user_message(
-                speech_text,
-                source=provider_used,
-                tags=event_tags,
-            )
+            try:
+                dashboard_state.record_user_message(
+                    speech_text,
+                    source=provider_used,
+                    tags=event_tags,
+                )
+            except OSError:
+                # Dashboard persistence is optional; its file locks must not
+                # escape into the microphone-error handler or end listening.
+                print('[DASHBOARD] Could not save voice input; voice processing will continue.')
 
             display_message(f"Heard: {message}")
             if debug_enabled:
@@ -385,7 +390,9 @@ def run(
                         print("[VOICE] Follow-up ended by user.")
                     continue
 
-                command_message = message.strip()
+                command_message = wakeword_command_message if has_wakeword else message.strip()
+                if not command_message:
+                    continue
                 if debug_enabled:
                     print("[VOICE] Follow-up mode active. Processing without wakeword.")
             elif has_wakeword:

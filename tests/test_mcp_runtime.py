@@ -156,6 +156,34 @@ class MCPLifecycleTests(unittest.TestCase):
         self.assertEqual(executor.execute(request).error.code, "invalid_arguments")
         transport.request.assert_not_called()
 
+    def test_action_feedback_waits_for_permissions_and_valid_arguments(self):
+        from ai.request_context import request_context
+        from ai.tools.progress import ToolFeedback
+        for mode in ('denied', 'confirmation', 'confirmed', 'invalid', 'allowed'):
+            with self.subTest(mode=mode):
+                manager, transport, intent = self.fake_manager(
+                    permission_decider=(lambda *_: 'confirm') if mode in ('confirmation', 'confirmed') else None)
+                if mode == 'denied':
+                    manager._servers['test'].definition = replace(manager._servers['test'].definition,
+                                                                allowed_tools=frozenset())
+                request = IntentRequest(intent, 'echo', 1, arguments={'message': 12 if mode == 'invalid' else 'hello'})
+                events = []
+
+                def invoke(*_args, **_kwargs):
+                    self.assertEqual(events, [ToolFeedback('action', intent.name)])
+                    return ToolResult(True, {'observed': 'hello'})
+
+                transport.request.side_effect = invoke
+                with request_context('feedback-boundary', progress=events.append):
+                    result = manager.executor(intent.name).execute(request, confirmed=mode == 'confirmed')
+                self.assertEqual(result.success, mode in ('allowed', 'confirmed'))
+                if mode in ('allowed', 'confirmed'):
+                    self.assertEqual(events, [ToolFeedback('action', intent.name), ToolFeedback('completed', intent.name)])
+                    transport.request.assert_called_once()
+                else:
+                    self.assertEqual(events, [])
+                    transport.request.assert_not_called()
+
     def test_old_executor_is_rejected_after_tool_disappears(self):
         manager, transport, intent = self.fake_manager()
         executor = manager.executor(intent.name)
