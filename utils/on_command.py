@@ -27,6 +27,8 @@ from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStra
 from ai.privacy.sanitizer import sanitize_text, sanitize_structure
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.result_summary import _presentation_style, _question_text
+from utils.web_requests import normalize_spoken, browser_request
+from ai.tools.captures import retain_capture
 
 
 _intent_router = None
@@ -299,6 +301,7 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     global _pending_source_read
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
+    outcome = retain_capture(outcome)
     interpreted = interpret_result(outcome, request.message, cancel_event=cancel_event)
     if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
         return CommandResult(handled=False)
@@ -433,7 +436,7 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
 def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     global _pending_confirmation
     global _pending_source_read
-    normalized_message = msg.strip()
+    normalized_message = normalize_spoken(msg)
 
     cancelled_result = _get_cancellation_result(cancel_event, debug)
     if cancelled_result is not None:
@@ -491,6 +494,21 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             return CommandResult(True, response_text="There isn't a pending page read. Say which source to read, such as read the first source.",
                                  open_follow_up=True)
 
+    browser_args = browser_request(normalized_message)
+    if browser_args is not None and _mcp_catalog is not None:
+        from ai.intents.models import IntentRequest
+        servers = [name for name,metadata in _mcp_catalog.manager.inspect().items()
+                   if metadata.get('bundle') == 'browser' and metadata.get('enabled') and metadata.get('trusted')]
+        if len(servers) != 1:
+            return CommandResult(True,response_text='Choose one configured browser instance with an explicit tool command.')
+        server = servers[0]
+        _mcp_catalog.discover(server_id=server, cancel_event=cancel_event)
+        try:
+            executor = _mcp_catalog.manager.executor('mcp.'+server+'.inspect_page')
+        except ValueError:
+            return CommandResult(True,response_text='The browser tool is not configured or available.')
+        request = IntentRequest(executor._intent,normalized_message,1,arguments=browser_args)
+        return _tool_outcome(request,executor.execute(request,cancel_event=cancel_event),cancel_event=cancel_event,debug=debug)
     native_match = None if _intent_registry is None else IntentRouter(_intent_registry, strategies=(
         ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
     )).route(normalized_message)

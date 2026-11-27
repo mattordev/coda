@@ -82,6 +82,30 @@ def _build_classifier_messages(
         "message": message,
         "available_intents": _build_intent_catalog(registry),
     }
+    # Aliases/examples already have deterministic host strategies. Avoid paying
+    # their prompt cost, or repeating parameter metadata beside its schema.
+    def compact_schema(value):
+        if isinstance(value,dict):
+            result = {}
+            for key,child in value.items():
+                if key in ('description','title','default'):
+                    continue
+                if key in ('properties','$defs','patternProperties') and isinstance(child,dict):
+                    result[key] = {name:compact_schema(schema) for name,schema in child.items()}
+                elif key in ('items','additionalProperties','not','if','then','else','anyOf','allOf','oneOf','prefixItems'):
+                    result[key] = compact_schema(child)
+                else:
+                    result[key] = child
+            return result
+        if isinstance(value,list):
+            return [compact_schema(child) for child in value]
+        return value
+    for item in payload['available_intents']:
+        item['aliases'] = item['aliases'][:4]
+        item['examples'] = item['examples'][:2]
+        item['parameters'] = []
+        item['description'] = item['description'][:240]
+        item['input_schema'] = compact_schema(item['input_schema'])
 
     return [
         {
@@ -266,6 +290,10 @@ class LocalClassifierStrategy:
                 raise
 
             self._record_attempt(AttemptOutcome.SUCCESS, result)
+            if parsed_result.intent is not None and parsed_result.intent.name == 'connected':
+                import re
+                if not re.search(r'\b(internet|online|offline|connect\w*|network|wifi)\b',message,re.I):
+                    return IntentResult(intent=None,confidence=0)
             return parsed_result
 
         return _parse_classifier_response("", registry)
