@@ -1,6 +1,9 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import sys
+from tempfile import TemporaryDirectory
 from threading import Event
+from time import monotonic, sleep
 from types import SimpleNamespace
 import unittest
 
@@ -10,6 +13,31 @@ from runtime.owned_process import start_owned_process
 
 @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
 class OwnedProcessTests(unittest.TestCase):
+    def test_cancellation_stops_a_running_process_before_its_deadline(self):
+        with TemporaryDirectory() as directory:
+            marker = Path(directory) / "started"
+            action = SimpleNamespace(
+                executable=str(Path(sys.executable).resolve()),
+                argv=("-I", "-c",
+                      "from pathlib import Path; import sys, time; "
+                      "print('ready', flush=True); Path(sys.argv[1]).touch(); time.sleep(15)",
+                      str(marker)),
+                cwd=directory, environment=(), timeout_seconds=20, max_output_bytes=256,
+            )
+            stop = Event()
+            with ThreadPoolExecutor(1) as pool:
+                result = pool.submit(execute_approved_action, action, (), stop)
+                try:
+                    deadline = monotonic() + 5
+                    while not marker.exists() and not result.done() and monotonic() < deadline:
+                        sleep(0.02)
+                    self.assertTrue(marker.exists())
+                finally:
+                    stop.set()
+                outcome = result.result(timeout=5)
+            self.assertEqual(outcome.state, "cancelled")
+            self.assertEqual(outcome.stdout.text.strip(), "ready")
+
     def test_timeout_closes_pipes_held_by_a_descendant(self):
         executable = str(Path(sys.executable).resolve())
         action = SimpleNamespace(
