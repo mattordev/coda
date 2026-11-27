@@ -63,6 +63,40 @@ class ScheduleApprovalTests(unittest.TestCase):
                 self.assertLess(monotonic(), deadline)
                 sleep(0.05)
             self.assertIn("Exit code: 0", response)
+
+    @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
+    def test_inspection_reads_only_live_owned_jobs(self):
+        from runtime.background_actions import BackgroundActions
+        from utils.on_command import _on_command, cancel_pending_confirmation
+
+        jobs = BackgroundActions()
+        self.addCleanup(jobs.close, 5)
+        self.addCleanup(cancel_pending_confirmation)
+        self.action.update(background=True, argv=["-I", "-c", "import time; time.sleep(20)"])
+        self.write_policy()
+        with (
+            patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}),
+            patch("runtime.action_commands.background_actions", jobs),
+        ):
+            def call(message):
+                return _on_command(message, {}).response_text
+
+            self.assertIn("Supply the background job ID", call(f"action inspect {os.getpid()}"))
+            self.assertIn("No live resource", call("action inspect " + "0" * 32))
+            self.assertIn("Say confirm", call("run action probe in background"))
+            job_id = call("confirm").split("Job ID: ")[1].rstrip(".")
+            inspect = "action inspect " + job_id
+            deadline = monotonic() + 8
+            while "No live resource" in (response := call(inspect)):
+                self.assertLess(monotonic(), deadline)
+                sleep(0.05)
+            self.assertIn("CPU seconds", response)
+            self.assertIn("MiB of resident memory", response)
+            self.assertIn("Cancellation requested", call("action cancel " + job_id))
+            self.assertTrue(jobs.close(5))
+            self.assertIn("cancelled", call("action status " + job_id))
+            self.assertIn("No live resource", call(inspect))
+
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)

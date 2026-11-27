@@ -13,7 +13,7 @@ from runtime.system_policy import load_system_policy
 background_actions = BackgroundActions()
 
 
-def _execute(policy_path, fingerprint, name, background, stop):
+def _execute(policy_path, fingerprint, name, background, stop, publish_metrics=None):
     try:
         if configured_policy_path() != policy_path:
             return "The execution policy location changed. Request the action again."
@@ -21,7 +21,9 @@ def _execute(policy_path, fingerprint, name, background, stop):
         if policy.fingerprint != fingerprint:
             return "The execution policy changed. Request the action again."
         action = policy.action(name, background=background)
-        outcome = execute_approved_action(action, policy.secrets, stop or Event())
+        outcome = execute_approved_action(
+            action, policy.secrets, stop or Event(), publish_metrics=publish_metrics,
+        )
     except (OSError, ValueError):
         return "The approved action could not run. Check the current system policy."
     state = outcome.state.replace("_", " ")
@@ -51,6 +53,15 @@ def _start_background(work, stop):
 
 def action_command(message):
     """Recognize explicit local action requests before model routing."""
+    inspection = re.fullmatch(r"action inspect ([0-9a-f]{32})", message, re.IGNORECASE | re.ASCII)
+    if inspection is not None:
+        metrics = background_actions.inspect(inspection[1].lower())
+        if metrics is None:
+            return "No live resource readings for that background job.", None
+        return (f"The background program has used {metrics['cpu_seconds']:.2f} CPU seconds "
+                f"and uses {metrics['resident_bytes'] / 1024**2:.1f} MiB of resident memory."), None
+    if message.casefold() == "action inspect" or message.casefold().startswith("action inspect "):
+        return "Supply the background job ID returned by CODA.", None
     job = re.fullmatch(r"action (status|cancel) ([0-9a-f]{32})", message, re.IGNORECASE | re.ASCII)
     if job is not None:
         operation = background_actions.status if job[1].lower() == "status" else background_actions.cancel
