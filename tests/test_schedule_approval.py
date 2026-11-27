@@ -61,6 +61,24 @@ class ScheduleApprovalTests(unittest.TestCase):
             self.assertFalse(cancel_pending_confirmation())
             self.assertEqual(len(store.list_tasks()), 1)
 
+    @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
+    def test_interactive_action_revalidates_then_returns_real_process_output(self):
+        from utils.on_command import _on_command, cancel_pending_confirmation
+
+        self.addCleanup(cancel_pending_confirmation)
+        with patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}):
+            self.assertIn("without additional arguments",
+                          _on_command("run action probe --help", {}).response_text)
+            self.assertIn("Say confirm", _on_command("run action probe", {}).response_text)
+            self.action["argv"] = ["-V"]
+            self.write_policy()
+            self.assertIn("policy changed", _on_command("confirm", {}).response_text)
+            _on_command("run action probe", {})
+            response = _on_command("confirm", {}).response_text
+            self.assertIn("Exit code: 0", response)
+            self.assertIn("Python ", response)
+            self.assertFalse(cancel_pending_confirmation())
+
     def test_confirmed_edit_cannot_overwrite_a_newer_definition(self):
         task = save_confirmed_schedule(self.store, self.policy, self.propose())
         stale = self.propose(task_id=task, interval=30)

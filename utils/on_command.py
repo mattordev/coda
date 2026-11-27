@@ -30,6 +30,7 @@ from ai.tools.result_summary import _presentation_style, _question_text
 from utils.web_requests import normalize_spoken, browser_request
 from ai.tools.captures import retain_capture
 from runtime.schedule_commands import schedule_command
+from runtime.action_commands import action_command
 
 
 _intent_router = None
@@ -476,12 +477,12 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             if time.monotonic() >= expires:
                 return CommandResult(handled=True, response_text="That confirmation expired. Please request the action again.")
             if request is None:
-                return CommandResult(handled=True, response_text=executor())
+                return CommandResult(handled=True, response_text=executor(cancel_event))
             return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
 
-    schedule_reply = schedule_command(msg.strip())
-    if schedule_reply is not None:
-        response, confirm = schedule_reply
+    local_reply = action_command(msg.strip()) or schedule_command(msg.strip())
+    if local_reply is not None:
+        response, confirm = local_reply
         if confirm is not None:
             _pending_confirmation = (None, confirm, time.monotonic() + 60)
         return CommandResult(handled=True, response_text=response)

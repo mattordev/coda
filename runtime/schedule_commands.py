@@ -21,7 +21,9 @@ def configured_policy_path():
     return path.resolve()
 
 
-def _save(store, policy, proposal):
+def _save(store, policy, proposal, stop):
+    if stop is not None and stop.is_set():
+        return "Action cancelled."
     try:
         if configured_policy_path() != policy:
             return "The scheduler policy location changed. Request the schedule again."
