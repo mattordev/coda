@@ -5,19 +5,22 @@ import re
 from threading import Event
 
 from ai.privacy.sanitizer import sanitize_text
+from runtime.background_actions import BackgroundActions
 from runtime.process_executor import execute_approved_action
 from runtime.schedule_commands import configured_policy_path
 from runtime.system_policy import load_system_policy
 
+background_actions = BackgroundActions()
 
-def _execute(policy_path, fingerprint, name, stop):
+
+def _execute(policy_path, fingerprint, name, background, stop):
     try:
         if configured_policy_path() != policy_path:
             return "The execution policy location changed. Request the action again."
         policy = load_system_policy(policy_path)
         if policy.fingerprint != fingerprint:
             return "The execution policy changed. Request the action again."
-        action = policy.action(name)
+        action = policy.action(name, background=background)
         outcome = execute_approved_action(action, policy.secrets, stop or Event())
     except (OSError, ValueError):
         return "The approved action could not run. Check the current system policy."
@@ -36,20 +39,39 @@ def _execute(policy_path, fingerprint, name, stop):
     return "\n".join(lines)
 
 
+def _start_background(work, stop):
+    if stop is not None and stop.is_set():
+        return "Action cancelled."
+    try:
+        key = background_actions.submit(work)
+    except (ValueError, RuntimeError):
+        return "No background action slot is available."
+    return f"Background action queued. Job ID: {key}."
+
+
 def action_command(message):
-    """Recognize an explicit foreground request before model routing."""
-    match = re.fullmatch(r"run action ([a-z][a-z0-9_-]{0,63})", message, re.IGNORECASE | re.ASCII)
+    """Recognize explicit local action requests before model routing."""
+    job = re.fullmatch(r"action (status|cancel) ([0-9a-f]{32})", message, re.IGNORECASE | re.ASCII)
+    if job is not None:
+        operation = background_actions.status if job[1].lower() == "status" else background_actions.cancel
+        return operation(job[2].lower()), None
+    match = re.fullmatch(r"run action ([a-z][a-z0-9_-]{0,63})( in background)?",
+                         message, re.IGNORECASE | re.ASCII)
     if match is None:
         if message.casefold().startswith("run action "):
             return "Supply one approved action name without additional arguments.", None
         return None
     name = match[1].lower()
+    background = match[2] is not None
     try:
         path = configured_policy_path()
         if path is None:
             return "System execution is disabled.", None
         policy = load_system_policy(path)
-        policy.action(name)
+        policy.action(name, background=background)
     except (OSError, ValueError):
         return "That action is unavailable under the current system policy.", None
-    return f"Run the approved action {name}? Say confirm or cancel.", partial(_execute, path, policy.fingerprint, name)
+    work = partial(_execute, path, policy.fingerprint, name, background)
+    mode = " in the background" if background else ""
+    confirm = partial(_start_background, work) if background else work
+    return f"Run the approved action {name}{mode}? Say confirm or cancel.", confirm

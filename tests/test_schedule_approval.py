@@ -17,6 +17,32 @@ from runtime.system_policy import SystemPolicyError
 
 
 class ScheduleApprovalTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
+    def test_background_requires_its_own_grant_and_uses_an_opaque_job_id(self):
+        from runtime.background_actions import BackgroundActions
+        from utils.on_command import _on_command, cancel_pending_confirmation
+
+        self.addCleanup(cancel_pending_confirmation)
+        jobs = BackgroundActions()
+        self.addCleanup(jobs.close, 5)
+        with (
+            patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}),
+            patch("runtime.action_commands.background_actions", jobs),
+        ):
+            message = "run action probe in background"
+            self.assertIn("unavailable", _on_command(message, {}).response_text)
+            self.action["background"] = True
+            self.write_policy()
+            self.assertIn("Say confirm", _on_command(message, {}).response_text)
+            queued = _on_command("confirm", {}).response_text
+            job_id = queued.split("Job ID: ")[1].rstrip(".")
+            self.assertRegex(job_id, r"^[0-9a-f]{32}$")
+            status = "action status " + job_id
+            deadline = monotonic() + 5
+            while "still running" in (response := _on_command(status, {}).response_text):
+                self.assertLess(monotonic(), deadline)
+                sleep(0.05)
+            self.assertIn("Exit code: 0", response)
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)

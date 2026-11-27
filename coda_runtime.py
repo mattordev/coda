@@ -15,6 +15,7 @@ from ai.request_context import current_request, request_context
 from runtime import model_warmup
 from runtime.schedule_worker import SchedulerService
 from runtime.schedule_commands import configured_policy_path
+from runtime.action_commands import background_actions
 
 import os
 import sys
@@ -766,6 +767,8 @@ def shutdown_runtime(timeout_seconds=4.0):
     stop_voice_thread(timeout_seconds=timeout_seconds)
 
     active_request_state.cancel_active()
+    if not background_actions.close(timeout_seconds):
+        print("Background action cleanup has not finished.")
     if scheduler_service is not None and not scheduler_service.close(timeout=timeout_seconds):
         print("Scheduler cleanup has not finished.")
     stop_execution_thread(timeout_seconds=timeout_seconds)
