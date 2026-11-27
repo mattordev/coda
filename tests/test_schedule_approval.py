@@ -52,7 +52,7 @@ class ScheduleApprovalTests(unittest.TestCase):
         self.assertEqual(self.store.list_tasks()[0]["interval"], 60)
 
     def test_revoked_grant_denies_a_due_occurrence_before_execution(self):
-        proposal = self.propose()
+        proposal = self.propose(interval=30)
         save_confirmed_schedule(self.store, self.policy, proposal)
         self.action["scheduled"] = False
         self.write_policy()
@@ -60,6 +60,8 @@ class ScheduleApprovalTests(unittest.TestCase):
         result = run_due_schedule(self.store, self.policy, executor, now=proposal.due, grace=0)
         self.assertEqual(result["state"], "denied")
         self.assertEqual(self.store.history()[0]["state"], "denied")
+        self.assertEqual(self.store.list_tasks()[0]["status"], "paused")
+        self.assertIsNone(run_due_schedule(self.store, self.policy, executor, now=proposal.due + 30, grace=0))
         executor.assert_not_called()
 
     def test_uncertain_executor_error_does_not_replay_the_occurrence(self):

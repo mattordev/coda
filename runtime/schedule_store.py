@@ -154,6 +154,9 @@ class ScheduleStore:
         with self._write() as db:
             result = db.execute("""UPDATE runs SET state = ?
                 WHERE task_id = ? AND due = ? AND state = 'claimed'""", (state, task_id, due))
+            if state == "denied" and result.rowcount:
+                db.execute("""UPDATE tasks SET status = 'paused'
+                    WHERE id = ? AND status = 'active' AND due IS NOT NULL""", (task_id,))
             self._prune(db)
             return result.rowcount == 1
 
