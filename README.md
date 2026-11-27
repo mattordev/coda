@@ -75,6 +75,8 @@ integration alone does not mark a milestone delivered.
 
 See the [v1.5.6 release notes](docs/release-notes-v1.5.6.md) for the filesystem
 capabilities, independent grants, migration, safe testing and recovery limits.
+See the [v1.5.7 release notes](docs/release-notes-v1.5.7.md) for public reading,
+source-grounded research, optional browsers, confirmed forms and upgrade limits.
 See the [v1.5.5 release notes](docs/release-notes-v1.5.5.md) for opt-in web search,
 SearXNG configuration, DDGS fallback and conversational tool failures.
 See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
