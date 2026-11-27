@@ -463,7 +463,7 @@ class SourceConversationTests(unittest.TestCase):
         self.assertNotIn('https://', searched.response_text)
         read = runtime.run('read second source', {})
         self.assertTrue(read.tool_result.success)
-        self.assertEqual(self.calls[-1], ('read_url', {'url': 'https://example.com/2', 'max_chars': 5000, 'max_links': 0}))
+        self.assertEqual(self.calls[-1], ('read_url', {'url': 'https://example.com/2', 'max_chars': 5000, 'max_links': 0, 'query':'parser'}))
         runtime.run('read fourth source', {})
         self.assertEqual(self.calls[-1][1]['url'], 'https://example.com/4')
         self.assertEqual(len(history._tool_results), 3)
@@ -521,7 +521,7 @@ class SourceConversationTests(unittest.TestCase):
         conversational.assert_not_called()
         self.assertTrue(read.tool_result.success)
         self.assertEqual(self.calls, [('search_web', {'query': 'parser'}),
-                                     ('read_url', {'url': 'https://example.com/1', 'max_chars': 5000, 'max_links': 0})])
+                                     ('read_url', {'url': 'https://example.com/1', 'max_chars': 5000, 'max_links': 0, 'query':'parser'})])
         self.assertIsNone(runtime._pending_source_read)
         with patch.object(runtime, 'route_request', return_value=('No action.', None)):
             runtime.run('yes', {})

@@ -85,7 +85,8 @@ def source_seed(result, manager):
                             'snippet': str(entry.get('snippet', ''))[:2000],
                             'observation': 'search_snippet'})
         seed = {'server': context.get('server'), 'token': context.get('token'),
-                'observed_at': context.get('observed_at'), 'sources': sources}
+                'observed_at': context.get('observed_at'), 'sources': sources,
+                'query': context.get('arguments',{}).get('query','')}
     try:
         now = time.monotonic()
         observed = seed['observed_at']
@@ -271,6 +272,8 @@ def run_sources(plan, catalog, message, *, cancel_event=None):
         arguments = {'url': url, 'max_chars': chars, 'max_links': 0}
         if plan.kind == 'research':
             arguments['query'] = plan.query
+        elif seed and isinstance(seed.get('query'),str) and seed['query']:
+            arguments['query'] = seed['query'][:1000]
         outcome = _invoke(catalog, server, 'read_url', arguments, message, budget)
         if manager.source_focus_token(server) != reader_token:
             return _failure('permission_denied', 'Webpage reader permissions changed during source retrieval.'), None
@@ -303,7 +306,14 @@ def run_sources(plan, catalog, message, *, cancel_event=None):
         seed['reader_server'] = server
     partial = len(observations) != len(urls) or any(
         page['status'] != 'fetched' or page.get('partial') is True for page in observations)
+    if seed:
+        for observation in observations:
+            selected = observation.get('requested_url',observation.get('url'))
+            match = next((item for item in seed['sources'] if item['url'] == selected),None)
+            if match is not None:
+                observation['source_number'] = match['number']
     data = {'kind': 'web_sources', 'scope': 'fetched_pages', 'sources': observations, 'partial': partial,
+            'query': plan.query if plan.kind == 'research' else seed.get('query','') if seed else '',
             'page_attempts': len(observations), 'requested_pages': len(urls),
             'not_attempted': len(urls) - len(observations)}
     # One workflow snapshot in the existing result history; no intermediate duplicates.

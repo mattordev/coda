@@ -92,6 +92,8 @@ def prepare_tool_display(result: ToolResult, *, max_chars: int = 12000) -> str:
             text = ""
         else:
             text = _readable(data, max_items=None)
+        if isinstance(payload,dict) and isinstance(payload.get('capture'),dict) and payload['capture'].get('path'):
+            text = 'Screenshot saved: ' + payload['capture']['path'] + '\n' + text
         text = text or "Tool completed."
     return safe_diagnostic(text, max_chars=max_chars)
 

@@ -109,7 +109,8 @@ mechanism is contained or that public navigation/forms work.
   POST redirects are supported.
 - Bound snapshot text, screenshot dimensions/bytes and private artifact storage.
   Return source URLs, observation type and partiality. Captures are bounded image
-  content blocks in tool results only, with zero persistent artifact storage.
+  content blocks in tool results, plus a bounded user-local PNG cache for text-UI
+  access (at most ten host-named captures, each at most 1 MiB).
   Keep capture data out of ordinary text/model prompts; no model-selected paths.
 - Verify cancellation, failed startup, timeout, retirement, inactivity and shutdown
   close all owned browser/driver/proxy resources on Windows and Linux. Preserve

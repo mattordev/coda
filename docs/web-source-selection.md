@@ -43,6 +43,12 @@ it is evidence extraction, not independent verification that a website is true.
 Ordinary snippet searches keep their conversational overview. Original results,
 URLs, failed observations and privacy checks over the entire result are retained.
 
+Selected-source reads retain the original bounded search question for local
+query-focused extraction. Headings/navigation alone cannot serve as explanatory
+evidence. Comparisons report each selected source separately, preserving its
+original number and explicitly reporting failed or empty observations. A single
+readable page is not presented as a completed multi-source comparison.
+
 Search-snippet interpretation shares the configured
 `CODA_MCP_INTERPRET_TIMEOUT_SECONDS` budget across fallback providers, just like
 document interpretation. A slow local model can use the operator's longer

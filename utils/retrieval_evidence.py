@@ -108,6 +108,8 @@ def evidence_cards(data, question):
     if not isinstance(sources, list):
         return []
     candidates = []
+    if not query_terms(question) and isinstance(page.get('query'),str):
+        question = page['query'] or question
     terms = query_terms(question)
     for number, source in enumerate(sources[:3], 1):
         if not isinstance(source, dict) or not single_page and source.get('status') != 'fetched':
@@ -115,6 +117,10 @@ def evidence_cards(data, question):
         if not isinstance(source.get('text'), str):
             continue
         for score, index, passage in _passages(source['text'], question):
+            # A title/navigation breadcrumb is not an explanation, even when
+            # it contains every query keyword. Keep actual prose observations.
+            if len(passage.split()) < 4 or not re.search(r'[.!?]$|\b(?:does|can|cannot|is|are|provides|supports)\b',passage,re.I):
+                continue
             if score or not terms:
                 candidates.append((-score, number, index, passage))
     cards, seen = [], set()
@@ -126,6 +132,31 @@ def evidence_cards(data, question):
         if len(cards) == 12:
             break
     return cards
+
+
+def compare_evidence(data, question):
+    page = data.get('structuredContent',data) if isinstance(data,dict) else None
+    if not isinstance(page,dict) or page.get('kind') != 'web_sources':
+        return None
+    sources = page.get('sources',[])
+    if not re.search(r'\bcompare\b',question,re.I):
+        return None
+    parts = []
+    available = 0
+    for number, source in enumerate(sources[:3],1):
+        number = source.get('source_number',number)
+        if source.get('status') != 'fetched':
+            parts.append(f'Source {number} could not be read.')
+            continue
+        cards = evidence_cards({'kind':'web_page','text':source.get('text',''),'query':page.get('query','')},question)
+        if not cards:
+            parts.append(f'Source {number} returned no substantive evidence for this comparison.')
+            continue
+        available += 1
+        parts.append(f"Source {number}: " + cards[0]['text'])
+    if available < 2:
+        parts.insert(0,"I couldn't obtain enough readable sources for a full comparison.")
+    return ' '.join(parts)
 
 
 def evidence_answer(cards, ids):

@@ -171,6 +171,10 @@ def web_page_summary(data):
     if not isinstance(page, dict) or page.get('kind') not in ('web_page', 'browser_page') or not isinstance(page.get('text'), str):
         return None
     if page.get('kind') == 'browser_page' and page.get('capture'):
+        if page['capture'].get('path'):
+            return 'I saved the screenshot locally. Its file location is in the tool output.'
+        if page['capture'].get('save_failed'):
+            return "I captured the page but couldn't save a local copy. The image remains in the tool result."
         return 'I captured the rendered page. The image is in the tool result. ' + (
             'Some page resources were blocked or omitted.' if page.get('partial') else 'The disposable browser session is closed.')
     text = page['text'].strip()

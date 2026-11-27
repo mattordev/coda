@@ -16,6 +16,7 @@ from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent
 from utils.browser_session import BrowserLimits, render
 from utils.public_http import NetworkError, NetworkPolicy, post_form
+from utils.web_requests import public_url
 
 CONFIG_PATH = Path(__file__).with_name('browser.config.json')
 server = MCPServer('coda-browser', log_level='ERROR')
@@ -73,7 +74,7 @@ async def inspect_page(url: str, selectors: dict[str, str] | None = None,
             return False
 
     try:
-        page, png = await render(url, policy, limits, selectors=selectors, capture=capture, validate=current)
+        page, png = await render(public_url(url), policy, limits, selectors=selectors, capture=capture, validate=current)
         if not current():
             return failure('permission_denied', 'Browser permissions changed during the operation.')
         content = [TextContent(type='text', text='Rendered page text (possibly partial):\n' + page['text'])]
