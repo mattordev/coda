@@ -10,6 +10,7 @@ import utils.runtime_state as runtime_state
 
 from ai.intents import Intent, IntentRequest
 from ai.tools.models import ToolResult
+from runtime.model_warmup import memory_snapshot
 import utils.speak_response as speak
 
 
@@ -209,7 +210,15 @@ def get_resource_usage() -> dict[str, object]:
         disk_usage = {"total_bytes": disk.total, "free_bytes": disk.free}
     except (OSError, psutil.Error, NotImplementedError):
         disk_usage = None
-    return {"cpu_usage_percent": cpu_percent, "coda_volume": disk_usage}
+    try:
+        coda_memory = memory_snapshot()
+    except (OSError, psutil.Error, RuntimeError, NotImplementedError):
+        coda_memory = {"rss_bytes": None, "vram_bytes": None}
+    return {
+        "cpu_usage_percent": cpu_percent,
+        "coda_volume": disk_usage,
+        "coda_process_memory": coda_memory,
+    }
 
 
 def get_system_status_data() -> dict[str, object]:
@@ -283,6 +292,13 @@ def print_system_status(status: dict[str, object]) -> None:
         else:
             print(f"CODA volume has {disk['free_bytes'] / 1024**3:.1f} GiB free of "
                   f"{disk['total_bytes'] / 1024**3:.1f} GiB.")
+    if "coda_process_memory" in status:
+        memory = status["coda_process_memory"]
+        rss, vram = memory["rss_bytes"], memory["vram_bytes"]
+        print("CODA process memory is unavailable." if rss is None else
+              f"CODA process uses {rss / 1024**2:.1f} MiB of resident memory.")
+        print("CODA CUDA allocation is unavailable." if vram is None else
+              f"CODA has allocated {vram / 1024**2:.1f} MiB on its current CUDA device.")
     print(f"System uptime is: {system_uptime}")
     print(f"Battery status is: {battery_status}")
 
