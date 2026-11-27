@@ -77,7 +77,8 @@ class ScheduleStore:
         self._validate_timing(due, interval)
         task_id = uuid4().hex
         with self._write() as db:
-            if db.execute("SELECT count(*) FROM tasks").fetchone()[0] >= 128:
+            self._prune(db)
+            if db.execute("SELECT count(*) FROM tasks WHERE due IS NOT NULL").fetchone()[0] >= 128:
                 raise ValueError("Schedule task limit reached.")
             db.execute("INSERT INTO tasks (id, action, binding, timezone, due, interval) VALUES (?, ?, ?, ?, ?, ?)",
                        (task_id, action, binding, timezone, due, interval))
@@ -188,4 +189,8 @@ class ScheduleStore:
         db.execute("""DELETE FROM runs WHERE rowid IN (
             SELECT rowid FROM runs WHERE state != 'claimed'
             ORDER BY rowid DESC LIMIT -1 OFFSET 512
+        )""")
+        # Keep completed definitions while their history still refers to them.
+        db.execute("""DELETE FROM tasks WHERE due IS NULL AND NOT EXISTS (
+            SELECT 1 FROM runs WHERE task_id = tasks.id
         )""")

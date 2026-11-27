@@ -11,6 +11,19 @@ from runtime.schedule_store import ScheduleStore
 
 
 class ScheduleStoreTests(unittest.TestCase):
+    def test_completed_one_time_task_frees_a_slot_without_losing_history(self):
+        first = self.store.create("probe", "binding", "UTC", 100)
+        for _ in range(127):
+            self.store.create("probe", "binding", "UTC", 200)
+        with self.assertRaisesRegex(ValueError, "limit"):
+            self.store.create("probe", "binding", "UTC", 300)
+        self.assertEqual(self.store.claim(100, grace=0)["id"], first)
+        self.assertTrue(self.store.finish(first, 100, "completed"))
+        self.store.create("probe", "binding", "UTC", 300)
+        self.assertEqual(self.store.history(), [
+            {"task_id": first, "due": 100, "state": "completed"},
+        ])
+
     def test_migrates_v2_with_paused_task_and_existing_history(self):
         path = self.path.with_name("legacy.sqlite")
         db = sqlite3.connect(path)
