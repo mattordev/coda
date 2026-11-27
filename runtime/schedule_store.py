@@ -3,7 +3,13 @@
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
+from threading import Lock
 from uuid import uuid4
+
+
+# The scheduler and command handler share one database in the same process.
+# Hold this only around short SQLite operations, never around action execution.
+_database_lock = Lock()
 
 
 class ScheduleStore:
@@ -32,26 +38,28 @@ class ScheduleStore:
 
     @contextmanager
     def _write(self):
-        db = sqlite3.connect(self.path, timeout=1)
-        try:
-            db.row_factory = sqlite3.Row
-            db.execute("PRAGMA foreign_keys = ON")
-            with db:
-                db.execute("BEGIN IMMEDIATE")
-                yield db
-        finally:
-            db.close()
+        with _database_lock:
+            db = sqlite3.connect(self.path, timeout=1)
+            try:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA foreign_keys = ON")
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    yield db
+            finally:
+                db.close()
 
     @staticmethod
     @contextmanager
     def _read(path):
         uri = Path(path).resolve().as_uri() + "?mode=ro"
-        db = sqlite3.connect(uri, uri=True, timeout=1)
-        try:
-            db.row_factory = sqlite3.Row
-            yield db
-        finally:
-            db.close()
+        with _database_lock:
+            db = sqlite3.connect(uri, uri=True, timeout=1)
+            try:
+                db.row_factory = sqlite3.Row
+                yield db
+            finally:
+                db.close()
 
     @classmethod
     def inspect(cls, path, view):
