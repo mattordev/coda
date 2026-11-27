@@ -149,7 +149,7 @@ class ScheduleStore:
         return {**dict(task), "due": due, "state": state}
 
     def finish(self, task_id, due, state):
-        if state not in {"completed", "failed", "denied", "cancelled", "interrupted"}:
+        if state not in {"completed", "failed", "denied", "cancelled", "interrupted", "timed_out"}:
             raise ValueError("Invalid terminal run state.")
         with self._write() as db:
             result = db.execute("""UPDATE runs SET state = ?

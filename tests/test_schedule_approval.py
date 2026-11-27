@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from threading import Event
+from time import monotonic, sleep
 import unittest
 from unittest.mock import Mock, patch
 
@@ -107,3 +108,20 @@ class ScheduleApprovalTests(unittest.TestCase):
         with scheduler_ownership(self.store.path):
             self.assertIsNone(service.failure)
             self.assertEqual(self.store.history()[0]["state"], "cancelled")
+
+    @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
+    def test_service_runs_a_saved_approved_program_and_persists_completion(self):
+        proposal = self.propose()
+        task = save_confirmed_schedule(self.store, self.policy, proposal)
+        service = SchedulerService(self.store.path, self.policy)
+        self.addCleanup(service.close)
+        with patch("runtime.schedule_worker.time", return_value=proposal.due):
+            service.start()
+            deadline = monotonic() + 5
+            while not self.store.pending_attention() and monotonic() < deadline:
+                sleep(0.05)
+            self.assertTrue(service.close())
+        self.assertIsNone(service.failure)
+        self.assertEqual(self.store.history(), [
+            {"task_id": task, "due": proposal.due, "state": "completed"},
+        ])

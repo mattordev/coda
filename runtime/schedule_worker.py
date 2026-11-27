@@ -8,6 +8,7 @@ from time import time
 import sqlite3
 
 from runtime.schedule_store import ScheduleStore
+from runtime.process_executor import execute_approved_action
 from runtime.system_policy import load_system_policy
 
 
@@ -35,7 +36,7 @@ def run_due_schedule(store, policy_path, execute, *, now, grace):
     if allowed:
         try:
             state = execute(action, policy.secrets)
-            if state not in ("completed", "failed", "cancelled"):
+            if state not in ("completed", "failed", "cancelled", "timed_out"):
                 state = "interrupted"
         except Exception:
             state = "interrupted"
@@ -78,10 +79,14 @@ def run_scheduler(store, policy_path, execute, stop, *, grace=30):
             stop.wait(0.25)
 
 
+def _execute_scheduled_action(action, secrets, stop):
+    return execute_approved_action(action, secrets, stop).state
+
+
 class SchedulerService:
     """Own the scheduler thread and its shutdown signal."""
 
-    def __init__(self, database_path, policy_path, execute):
+    def __init__(self, database_path, policy_path, execute=_execute_scheduled_action):
         self._stop = Event()
         self._thread = Thread(
             target=self._run, args=(database_path, policy_path, execute),
