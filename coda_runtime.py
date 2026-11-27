@@ -579,6 +579,9 @@ def _event_loop(stop_event):
         except Empty:
             pass
         else:
+            if "service_error" in notice:
+                print(f"CODA: {notice['service_error']}")
+                continue
             state = notice["state"].replace("_", " ")
             print(f"CODA: Scheduled task {notice['id']} {state}. Say schedule history for details.")
             now = time.monotonic()

@@ -17,6 +17,26 @@ from runtime.system_policy import SystemPolicyError
 
 
 class ScheduleApprovalTests(unittest.TestCase):
+    def test_service_reports_corrupt_storage_without_dispatching(self):
+        corrupt = self.policy.with_name("corrupt.sqlite")
+        corrupt.write_bytes(b"not a scheduler database")
+        notified = Event()
+        notices = []
+
+        def notify(notice):
+            notices.append(notice)
+            notified.set()
+
+        executor = Mock()
+        service = SchedulerService(corrupt, self.policy, executor, notify=notify)
+        self.addCleanup(service.close)
+        service.start()
+        self.assertTrue(notified.wait(5))
+        self.assertTrue(service.close())
+        self.assertEqual(notices, [{"service_error": "Schedule storage is unavailable."}])
+        self.assertEqual(corrupt.read_bytes(), b"not a scheduler database")
+        executor.assert_not_called()
+
     @unittest.skipUnless(sys.platform in ("win32", "linux"), "Windows and Linux process ownership")
     def test_background_requires_its_own_grant_and_uses_an_opaque_job_id(self):
         from runtime.background_actions import BackgroundActions

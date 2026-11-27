@@ -108,6 +108,8 @@ class SchedulerService:
             self.failure = "Scheduler ownership is unavailable."
         except (sqlite3.Error, OSError, ValueError):
             self.failure = "Schedule storage is unavailable."
+        if self.failure is not None and notify is not None:
+            notify({"service_error": self.failure})
 
     def start(self):
         self._thread.start()
