@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
+import sqlite3
 import sys
 import unittest
 
@@ -10,6 +11,36 @@ from runtime.schedule_store import ScheduleStore
 
 
 class ScheduleStoreTests(unittest.TestCase):
+    def test_migrates_v2_with_paused_task_and_existing_history(self):
+        path = self.path.with_name("legacy.sqlite")
+        db = sqlite3.connect(path)
+        try:
+            with db:
+                db.executescript("""
+                    CREATE TABLE tasks (
+                        id TEXT PRIMARY KEY, action TEXT NOT NULL, binding TEXT NOT NULL,
+                        timezone TEXT NOT NULL, due INTEGER, interval INTEGER,
+                        status TEXT NOT NULL DEFAULT 'active'
+                    );
+                    CREATE TABLE runs (
+                        task_id TEXT NOT NULL REFERENCES tasks(id), due INTEGER NOT NULL,
+                        state TEXT NOT NULL, PRIMARY KEY (task_id, due)
+                    );
+                    INSERT INTO tasks VALUES ('task', 'probe', 'binding', 'UTC', 200, 100, 'paused');
+                    INSERT INTO runs VALUES ('task', 100, 'completed');
+                    PRAGMA user_version = 2;
+                """)
+        finally:
+            db.close()
+        migrated = ScheduleStore(path)
+        self.assertIsNone(migrated.claim(200, grace=0))
+        self.assertEqual(migrated.list_tasks()[0]["status"], "paused")
+        self.assertEqual(migrated.pending_attention(), [
+            {"task_id": "task", "due": 100, "state": "completed"},
+        ])
+        self.assertTrue(migrated.acknowledge("task", 100))
+        self.assertEqual(ScheduleStore(path).pending_attention(), [])
+
     def test_headless_inspection_reports_only_public_task_fields(self):
         task = self.store.create("probe", "private-binding", "UTC", 100)
         command = [sys.executable, "-m", "runtime.schedule_inspect"]
