@@ -103,6 +103,16 @@ another tool. Extraction/grounding must preserve the
 
 ## Validation evidence
 
+The optional browser also uses `post_form` after its separate mandatory host
+approval and exact-form re-inspection. This accepts at most 4,096 bytes of an
+already approved URL-encoded body, with a fixed content type and the same current
+policy/DNS/peer/TLS/deadline checks. It adds no ambient cookies or authentication.
+No action is retried after sending, and POST redirects are returned as response
+observations without following their destinations. An HTTP response does not prove
+the site's business action succeeded; a failed send/read may have an unknown
+external effect. The primitive itself grants no action authority. Ordinary reader
+and browser-resource paths remain GET-only.
+
 Focused tests distinguish address/connection mocks from actual HTTP fixture
 traffic. Controlled loopback servers use an injected test dialer that maps a
 checked public address to the owned fixture and reports that test peer identity.

@@ -103,7 +103,7 @@ def evidence_cards(data, question):
     page = data.get('structuredContent', data)
     if not isinstance(page, dict):
         return []
-    single_page = page.get('kind') == 'web_page'
+    single_page = page.get('kind') in ('web_page', 'browser_page')
     sources = [page] if single_page else page.get('sources')
     if not isinstance(sources, list):
         return []

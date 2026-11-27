@@ -236,6 +236,11 @@ def _dispatch_intent(
         if outcome.error is not None and outcome.error.code == "confirmation_required":
             _pending_confirmation = (deepcopy(request), executor, time.monotonic() + 60)
             confirmation = f"Confirm the action {request.intent.name}? Say confirm or cancel."
+            if isinstance(outcome.data,dict) and isinstance(outcome.data.get('browser_action'),dict):
+                action = outcome.data['browser_action']
+                confirmation = ('Submit the inspected form to ' + sanitize_text(action['destination']) +
+                                ' with these exact fields: ' + sanitize_text(action['body']) +
+                                '? Say confirm or cancel.')
             parts = request.intent.name.split('.', 2)
             if (len(parts) == 3 and parts[2] in ('create_file', 'create_directory')
                     and _mcp_catalog.manager.filesystem_focus_token(parts[1]) is not None):

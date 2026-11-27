@@ -2,8 +2,9 @@
 
 This is the evaluation/implementation contract for
 [#250](https://github.com/mattordev/coda/issues/250), followed by navigation/capture
-#251 and interaction approvals #252. It does not add a browser MCP tool or declare
-browser containment/interaction acceptance. Ordinary HTTP reading and source
+#251 and interaction approvals #252. The selected contract is implemented by the
+optional [browser bundle](../integrations/coda-browser/README.md); final platform
+and release acceptance is tracked on those issues. Ordinary HTTP reading and source
 workflows work independently of this optional capability.
 
 ## Integration selection
@@ -83,31 +84,43 @@ and preservation of existing evidence files. These results establish a reproduci
 lifecycle/render/capture baseline; they do not establish that every browser egress
 mechanism is contained or that public navigation/forms work.
 
-## Required implementation before browser acceptance
+## Runtime contract and acceptance
 
 - Launch fresh nonpersistent contexts only: no existing CDP connection, profile,
   credentials, storage state, extensions or model-selected executable arguments.
-- Route all page/frame/popup HTTP through CODA's DNS/peer-pinned public transport.
-  Redirects and subresources need the same checks; browser `continue`/`fetch`
-  fallback is forbidden. Bound aggregate requests, bytes, time and context count.
+- Broker permitted GET resources through CODA's DNS/peer-pinned public transport.
+  Initial redirects resolve in that transport before navigating to the final
+  origin. Redirecting subresources and extra document/frame/popup navigation are
+  refused: Playwright does not route every redirect hop. Browser `continue`/`fetch`
+  fallback is forbidden. Aggregate requests, bytes and time are bounded; one
+  fresh context is owned per operation.
 - Provide a deny-only path for background/unrouted traffic. Service-worker,
   WebSocket, QUIC, WebRTC and proxy-bypass behavior need controlled-listener tests.
   Origin filtering, isolated profiles and command-line flags alone are insufficient
   evidence of network containment. JavaScript rendering must remain supported.
 - Keep arbitrary evaluation, network request, file upload and broad scripting tools
-  out of the MCP surface. Classify consequential clicks, field changes and form
-  submission separately from reading. Mandatory host approvals must bind one-use,
-  expiring requests to the exact page, element/form, destination, method and body.
-  Changed DOM/forms, navigation or grants invalidate the approval; a page script
-  cannot borrow it for unrelated requests. No automatic mutation retries.
+  out of the MCP surface. `prepare_action` inspects a native POST form or its
+  submit button and proposes field values without typing/clicking. Mandatory
+  host approval binds one expiring use to the exact instance, page, selector,
+  DOM/controls, destination, method, body and configuration. `execute_action`
+  re-inspects and uses the checked host transport to send that exact body.
+  Page listeners receive no authority. Custom JavaScript widgets, login/passwords,
+  uploads and unsupported forms are refused. No automatic mutation retries or
+  POST redirects are supported.
 - Bound snapshot text, screenshot dimensions/bytes and private artifact storage.
-  Return source URLs, observation type and partiality. Keep capture data out of
-  ordinary text/model prompts; no model-selected output paths.
+  Return source URLs, observation type and partiality. Captures are bounded image
+  content blocks in tool results only, with zero persistent artifact storage.
+  Keep capture data out of ordinary text/model prompts; no model-selected paths.
 - Verify cancellation, failed startup, timeout, retirement, inactivity and shutdown
   close all owned browser/driver/proxy resources on Windows and Linux. Preserve
   existing user browser processes. Optional browser failure must leave HTTP,
   search and native commands available.
 
-These are open implementation/acceptance gates, not capabilities supplied by the
-diagnostic. The browser planning card remains open until the selected contract
-has the required integration evidence.
+The original candidate diagnostic remains a lifecycle baseline rather than a
+security acceptance claim. The runtime fixture now exercises actual Chromium,
+owned HTTP and real MCP in both session modes, including exact confirmed POST,
+changed-form refusal, denied private HTTP/WebSocket/WebRTC attempts, and cleanup.
+Windows evidence passes locally. Windows/Linux Python 3.11/3.12 browser CI,
+the complete regression and release gates must pass before closing the relevant
+issues or publishing the release. The runtime does not claim an OS-level sandbox
+against browser vulnerabilities or that arbitrary remote GET handlers are pure.

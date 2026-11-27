@@ -1,0 +1,67 @@
+name: Optional browser
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Browser / ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install explicit browser test dependencies
+        run: >-
+          python -m pip install -c requirements.txt -r integrations/coda-browser/requirements.txt
+          mcp jsonschema psutil idna certifi requests python-dotenv
+      - name: Install matched managed browser and operating-system dependencies
+        if: runner.os == 'Linux'
+        run: python -m playwright install chromium --only-shell --with-deps
+      - name: Install matched managed browser on Windows
+        if: runner.os == 'Windows'
+        run: python -m playwright install chromium --only-shell
+      - name: Configure a sandbox-capable managed browser on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # Prefer an existing trusted helper. Otherwise grant user namespaces
+          # only to this root-owned managed binary, following Chromium's docs.
+          # Do not disable the browser sandbox or global AppArmor restrictions.
+          sandbox_helper=/opt/google/chrome/chrome-sandbox
+          if [ -u "$sandbox_helper" ] && [ "$(stat -c %u "$sandbox_helper")" = 0 ]; then
+            echo "CHROME_DEVEL_SANDBOX=$sandbox_helper" >> "$GITHUB_ENV"
+          else
+            sudo install -d -m 755 /opt/coda-browser-ci
+            sudo cp -a "$HOME/.cache/ms-playwright/." /opt/coda-browser-ci/
+            sudo chown -R root:root /opt/coda-browser-ci
+            sudo chmod -R go-w /opt/coda-browser-ci
+            mapfile -t browser_shells < <(find /opt/coda-browser-ci -type f -name chrome-headless-shell)
+            test "${#browser_shells[@]}" = 1
+            cat <<EOF | sudo tee /etc/apparmor.d/coda-browser-ci >/dev/null
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile coda-browser-ci ${browser_shells[0]} flags=(unconfined) {
+            userns,
+          }
+          EOF
+            sudo apparmor_parser -r /etc/apparmor.d/coda-browser-ci
+            echo "PLAYWRIGHT_BROWSERS_PATH=/opt/coda-browser-ci" >> "$GITHUB_ENV"
+          fi
+      - name: Exercise real Chromium and MCP without external test destinations
+        env:
+          CODA_RUN_BROWSER_SMOKE: '1'
+          PYTHON_DOTENV_DISABLED: '1'
+        run: python -m unittest tests.test_browser_integration -v

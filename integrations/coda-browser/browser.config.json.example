@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "actions_enabled": false,
+  "network": {
+    "allowed_hosts": [],
+    "allowed_ports": [80, 443],
+    "timeout_seconds": 10,
+    "max_response_bytes": 524288,
+    "max_wire_bytes": 1048576,
+    "max_redirects": 3
+  },
+  "limits": {
+    "timeout_seconds": 25,
+    "max_requests": 24,
+    "max_total_bytes": 2097152,
+    "max_total_wire_bytes": 4194304,
+    "max_chars": 12000,
+    "max_elements": 20,
+    "max_screenshot_bytes": 524288
+  }
+}

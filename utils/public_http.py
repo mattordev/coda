@@ -356,8 +356,24 @@ def _body(response, policy, guard):
     return bytes(body), False
 
 
-def get(url, policy, *, cancel_event=None, validate=None):
+def get(url, policy, *, cancel_event=None, validate=None, follow_redirects=True):
     """One bounded GET transaction. Every redirect gets fresh DNS/peer checks."""
+    return _request(url, policy, cancel_event=cancel_event, validate=validate, follow_redirects=follow_redirects)
+
+
+def post_form(url, body, policy, *, cancel_event=None, validate=None):
+    """Send one explicitly authorised form body, without redirect/retry or credentials.
+
+    This primitive grants no authority. Its caller must bind an approved observed
+    form and exact body. A failure after send cannot establish whether it acted.
+    """
+    if not isinstance(body, bytes) or len(body) > 4096:
+        raise NetworkError('invalid_arguments', 'Supply a form body of at most 4096 bytes.')
+    return _request(url, policy, cancel_event=cancel_event, validate=validate,
+                    follow_redirects=False, method='POST', body=body)
+
+
+def _request(url, policy, *, cancel_event=None, validate=None, follow_redirects=True, method='GET', body=b''):
     guard = _Guard(policy.timeout_seconds, cancel_event, validate)
     target = destination(url, policy)
     requested = target.url
@@ -367,23 +383,37 @@ def get(url, policy, *, cancel_event=None, validate=None):
         response = None
         try:
             connection.settimeout(guard.check())
-            request = ('GET ' + target.resource + ' HTTP/1.1\r\nHost: ' + target.host_header
+            request = (method + ' ' + target.resource + ' HTTP/1.1\r\nHost: ' + target.host_header
                        + '\r\nUser-Agent: CODA-WebReader/1.0\r\nAccept: text/html,text/plain,text/markdown,application/json\r\n'
-                         'Accept-Encoding: gzip, identity\r\nConnection: close\r\n\r\n')
-            connection.sendall(request.encode('ascii'))
+                         'Accept-Encoding: gzip, identity\r\nConnection: close\r\n')
+            if method == 'POST':
+                request += 'Content-Type: application/x-www-form-urlencoded\r\nContent-Length: ' + str(len(body)) + '\r\n'
+            connection.sendall((request + '\r\n').encode('ascii') + body)
             response = http.client.HTTPResponse(_ResponseSocket(connection, guard, policy.max_wire_bytes))
             response.begin()
             guard.check()
+            if method == 'POST' and 300 <= response.status < 400:
+                # The action already went out. Report this response without
+                # following, interpreting or granting a redirect destination.
+                return HTTPResult(requested, target.url, response.status, (), b'', False, guard.wire_bytes, 0)
             if response.status in (301, 302, 303, 307, 308):
                 location = response.getheader('Location')
-                if not location or redirects == policy.max_redirects:
+                if not location:
                     raise NetworkError('redirect_limit', 'The page redirect chain could not be completed within its limit.')
                 following = destination(urljoin(target.url, location), policy)
                 if target.secure and not following.secure:
                     raise NetworkError('network_denied', 'HTTPS-to-HTTP redirects are not permitted.')
+                if not follow_redirects:
+                    # Browser mediation must preserve origin changes. Never
+                    # fulfill a redirect's body under the original origin.
+                    guard.check()
+                    return HTTPResult(requested, target.url, response.status,
+                                      (('Location', following.url),), b'', False, guard.wire_bytes, 0)
+                if redirects == policy.max_redirects:
+                    raise NetworkError('redirect_limit', 'The page redirect chain could not be completed within its limit.')
                 target = following
                 continue
-            if not 200 <= response.status < 300:
+            if method == 'GET' and not 200 <= response.status < 300:
                 raise NetworkError('http_error', 'The web server returned HTTP status ' + str(response.status) + '.')
             body, partial = _body(response, policy, guard)
             guard.check()

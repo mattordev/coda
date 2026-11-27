@@ -30,6 +30,10 @@ eventually revived as the assistant it is today.
 - Validate tool arguments and require explicit confirmation for configured actions.
 - Use the opt-in filesystem integration for bounded reads/searches, conversational
   folder results, conflict-checked edits, copying and separately approved moves/deletion.
+- Search the web, read bounded public-page text and research selected sources
+  with explicit snippet/fetched evidence and grounded replies.
+- Optionally inspect JavaScript-rendered pages in disposable browser sessions,
+  capture a bounded viewport and confirm exact native form submissions.
 - Report live runtime state and transcripts through the dashboard.
 
 ### Commands
@@ -71,6 +75,8 @@ integration alone does not mark a milestone delivered.
 
 See the [v1.5.6 release notes](docs/release-notes-v1.5.6.md) for the filesystem
 capabilities, independent grants, migration, safe testing and recovery limits.
+See the [v1.5.7 release notes](docs/release-notes-v1.5.7.md) for public reading,
+source-grounded research, optional browsers, confirmed forms and upgrade limits.
 See the [v1.5.5 release notes](docs/release-notes-v1.5.5.md) for opt-in web search,
 SearXNG configuration, DDGS fallback and conversational tool failures.
 See the [v1.5.4 release notes](docs/release-notes-v1.5.4.md) for streaming and
@@ -462,7 +468,8 @@ Commands are self-registering modules that own their intent metadata and
 - [Bundled filesystem MCP setup](integrations/coda-filesystem/README.md)
 - [Optional public webpage reader](integrations/coda-webread/README.md)
 - [Search results and bounded source research](docs/web-source-selection.md)
-- [Optional browser integration evaluation and open gates](docs/browser-integration-plan.md)
+- [Optional browser setup, limits and confirmed forms](integrations/coda-browser/README.md)
+- [Browser selection and implementation contract](docs/browser-integration-plan.md)
 - [Filesystem setup, migration and safe test route](docs/filesystem-quickstart.md)
 - [Filesystem validation and platform evidence](docs/capability-filesystem-validation.md)
 - [Safe filesystem workspace references](docs/mcp-workspaces.md)

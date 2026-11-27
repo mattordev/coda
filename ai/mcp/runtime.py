@@ -18,6 +18,7 @@ from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError, _config
 from ai.mcp.protection import MUTATIONS, OperatorProtectionError, operator_paths, check_mutation, guarded_launch
 from ai.mcp.transport import SDKStdioTransport, failure
 from ai.mcp.web_sources import source_configuration, source_environment_token
+from ai.mcp.browser_actions import BrowserApprovals
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
 from ai.tools.progress import report_tool
@@ -62,6 +63,7 @@ class LocalMCPManager:
         self._transport = transport or SDKStdioTransport()
         self._permission_decider = permission_decider
         self._closed = False
+        self._browser_approvals = BrowserApprovals()
         for definition in definitions:
             if not isinstance(definition, (LocalServerDefinition, RemoteServerDefinition)):
                 raise TypeError("MCP definitions must be CODA server definition objects.")
@@ -297,6 +299,14 @@ class LocalMCPManager:
             getattr(definition, "bundled_server", None) == "filesystem"
             and name in MUTATIONS
         )
+        browser_action = getattr(definition, 'bundled_server', None) == 'browser' and name == 'execute_action'
+        if browser_action:
+            candidate = self._browser_approvals.match(definition, request.arguments)
+            if candidate is None:
+                return failure('approval_missing', 'Inspect the exact form with prepare_action again; its proposal is missing, changed or expired.')
+            if not confirmed:
+                return replace(failure('confirmation_required', 'The exact browser form requires explicit confirmation.'),
+                               data={'browser_action':candidate})
         if filesystem_mutation:
             try:
                 with self._metadata_lock:
@@ -315,6 +325,7 @@ class LocalMCPManager:
         runtime = self._servers.get(server_id)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
+        self._browser_approvals.clear(server_id)
         with self._metadata_lock:
             runtime.retire_requests += 1
             runtime.generation += 1
@@ -409,6 +420,9 @@ class MCPToolExecutor:
                 arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
             except WorkspaceReferenceError as error:
                 return failure(error.code, str(error))
+            if getattr(definition, 'bundled_server', None) == 'browser' and self._tool_name == 'execute_action':
+                if self._manager._browser_approvals.match(definition,arguments,consume=True) is None:
+                    return failure('approval_missing','The browser proposal changed or expired; inspect it again.')
             source_bundle = getattr(definition, 'bundled_server', None) in ('websearch', 'webread')
             focus_token = self._manager.source_focus_token if source_bundle else self._manager.filesystem_focus_token
             token = focus_token(self._server_id)
@@ -420,6 +434,8 @@ class MCPToolExecutor:
             )
             if outcome.success:
                 report_tool('completed', self._intent.name, result=outcome)
+                if getattr(definition, 'bundled_server', None) == 'browser' and self._tool_name == 'prepare_action':
+                    self._manager._browser_approvals.remember(definition,arguments,outcome)
             if outcome.success and token is not None and token == focus_token(self._server_id):
                 outcome = replace(outcome, host_context={
                     'server': self._server_id, 'tool': self._tool_name,

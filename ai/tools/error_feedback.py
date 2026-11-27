@@ -7,6 +7,13 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'browser_disabled':'Browser tools are disabled. Ordinary web search and reading remain available.',
+    'dependency_missing':'The optional browser dependencies or managed Chromium need explicit installation.',
+    'browser_error':'The optional browser could not complete that operation. Ordinary web reading remains available.',
+    'action_denied':'That browser action is disabled or unsupported. Nothing was submitted by the action tool.',
+    'approval_missing':'Please inspect the exact form again; its proposal is missing, changed or expired.',
+    'form_changed':'The form or its permissions changed. Please inspect it again before confirming.',
+    'action_unverified':'The form request did not complete cleanly. Its external effect is unverified; check the site before trying again.',
     'network_disabled': 'Public webpage reading is disabled in the reader configuration.',
     'invalid_url': 'Please provide an ordinary absolute public HTTP or HTTPS URL without credentials.',
     'network_denied': 'That web destination is not allowed by the current network configuration.',
