@@ -96,6 +96,12 @@ All project-management operations above succeeded and were independently retriev
 
 ## Continuation
 
+Release workflow: keep each release's feature work on one feature branch, open
+its integration PR into `develop`, then promote the accepted release with a
+separate `develop` → `main` PR. Create the release tag and published artifacts
+from the accepted main commit. An integrated feature PR does not itself complete
+the release milestone. This is the user-confirmed workflow for subsequent work.
+
 Start with [#239](https://github.com/mattordev/coda/issues/239), the capability audit and permission boundaries, and the preserved [#43](https://github.com/mattordev/coda/issues/43) creation draft. New bounded reading is [#240](https://github.com/mattordev/coda/issues/240). Each release?s tests, documentation and release card remain required; do not publish an incomplete milestone.
 
 The current audit/verification PR is [#279](https://github.com/mattordev/coda/pull/279). Check current issue comments, linked PRs and board state before resuming; this document records establishment rather than claiming delivery.

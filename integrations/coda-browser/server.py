@@ -84,6 +84,7 @@ def _bound_proposal(page, snapshot):
 
 
 async def _form(url, form_selector, fields, expected_fingerprint=None):
+    attempted = False
     try:
         snapshot = load_config()
         enabled, policy, limits, actions = snapshot
@@ -106,6 +107,7 @@ async def _form(url, form_selector, fields, expected_fingerprint=None):
         if candidate['fingerprint'] != expected_fingerprint:
             return failure('form_changed','The page, form, field values, destination or browser permissions changed. Inspect it again before confirming.')
         try:
+            attempted = True
             cancel = Event()
             task = asyncio.create_task(asyncio.to_thread(post_form,candidate['destination'],candidate['body'].encode('ascii'),
                                                         policy,validate=current,cancel_event=cancel))
@@ -114,7 +116,7 @@ async def _form(url, form_selector, fields, expected_fingerprint=None):
             finally:
                 cancel.set()
                 await asyncio.gather(task,return_exceptions=True)
-        except NetworkError:
+        except Exception:
             # Never retry a mutation, including after an HTTP/socket timeout.
             return failure('action_unverified','The form request did not complete cleanly. Its external effect is unverified; inspect the site before requesting it again.')
         result = {'kind':'browser_action','observation':'http_response','url':response.final_url,
@@ -128,6 +130,8 @@ async def _form(url, form_selector, fields, expected_fingerprint=None):
     except (OSError,ValueError,TypeError):
         return failure('configuration_error','The browser configuration or form is invalid.')
     except Exception:
+        if attempted:
+            return failure('action_unverified','The external form effect is unverified. Inspect the website before requesting it again.')
         return failure('browser_error','The optional browser could not inspect this form. No approved form request was started.')
 
 
