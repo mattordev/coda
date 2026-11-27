@@ -141,10 +141,17 @@ def compare_evidence(data, question):
     sources = page.get('sources',[])
     if not re.search(r'\bcompare\b',question,re.I):
         return None
+    if not isinstance(sources,list):
+        return 'The tool returned no source observations I can compare.'
     parts = []
     available = 0
     for number, source in enumerate(sources[:3],1):
-        number = source.get('source_number',number)
+        if not isinstance(source,dict):
+            parts.append(f'Source {number} returned an invalid observation.')
+            continue
+        original = source.get('source_number')
+        if type(original) is int and 1 <= original <= 10:
+            number = original
         if source.get('status') != 'fetched':
             parts.append(f'Source {number} could not be read.')
             continue

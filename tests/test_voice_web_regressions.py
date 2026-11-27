@@ -70,6 +70,9 @@ class VoiceWebRegressionTests(unittest.TestCase):
         self.assertIn('Source 2 returned no substantive evidence',answer)
         self.assertIn('Source 3: Threads',answer)
         self.assertIn("couldn't obtain enough",answer)
+        self.assertIn('no source observations',compare_evidence({'kind':'web_sources','sources':None},'compare sources'))
+        self.assertIn('invalid observation',compare_evidence({'kind':'web_sources','sources':['invalid']},'compare sources'))
+        self.assertIn('Source 7',compare_evidence({'kind':'web_sources','sources':[{'source_number':7,'status':'failed'}]},'compare sources'))
 
     def test_connected_false_positive_is_rejected_even_at_high_confidence(self):
         registry=IntentRegistry();registry.register(Intent('connected','Check internet connection.'))
