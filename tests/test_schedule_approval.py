@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -42,6 +43,23 @@ class ScheduleApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemPolicyError, "changed"):
             save_confirmed_schedule(self.store, self.policy, proposal)
         self.assertEqual(self.store.list_tasks(), [])
+
+    def test_interactive_confirmation_is_required_and_consumed(self):
+        from utils.on_command import _on_command, cancel_pending_confirmation
+
+        self.addCleanup(cancel_pending_confirmation)
+        message = 'schedule create {"action":"probe","local_time":"2027-01-15T09:00","timezone":"UTC"}'
+        with patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}):
+            preview = _on_command(message, {})
+            store = ScheduleStore(self.policy.with_suffix(".schedules.sqlite"))
+            self.assertIn("Say confirm or cancel", preview.response_text)
+            self.assertEqual(store.list_tasks(), [])
+            self.assertIn("cancelled", _on_command("cancel", {}).response_text)
+            self.assertEqual(store.list_tasks(), [])
+            _on_command(message, {})
+            self.assertIn("Schedule saved", _on_command("confirm", {}).response_text)
+            self.assertFalse(cancel_pending_confirmation())
+            self.assertEqual(len(store.list_tasks()), 1)
 
     def test_confirmed_edit_cannot_overwrite_a_newer_definition(self):
         task = save_confirmed_schedule(self.store, self.policy, self.propose())

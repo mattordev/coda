@@ -14,6 +14,7 @@ from ai.telemetry import logger as telemetry_logger
 from ai.request_context import current_request, request_context
 from runtime import model_warmup
 from runtime.schedule_worker import SchedulerService
+from runtime.schedule_commands import configured_policy_path
 
 import os
 import sys
@@ -82,14 +83,13 @@ latest_request_id = None
 def start_scheduler():
     """Opt into scheduling using an absolute operator policy path."""
     global scheduler_service
-    configured = os.environ.get("CODA_SYSTEM_POLICY")
-    if not configured:
-        return
-    policy = Path(configured)
-    if not policy.is_absolute() or not policy.is_file():
+    try:
+        policy = configured_policy_path()
+    except (OSError, ValueError):
         print("Scheduler disabled: CODA_SYSTEM_POLICY must point to an existing absolute file.")
         return
-    policy = policy.resolve()
+    if policy is None:
+        return
     with shutdown_lock:
         if shutdown_started.is_set() or scheduler_service is not None:
             return
