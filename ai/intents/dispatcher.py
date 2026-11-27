@@ -9,7 +9,7 @@ from .models import IntentRequest
 
 
 class IntentCommand(Protocol):
-    def run(self, request: IntentRequest) -> bool:
+    def run(self, request: IntentRequest) -> bool | ToolResult:
         """Execute a structured request."""
 
 

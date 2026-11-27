@@ -9,6 +9,7 @@ from pathlib import Path
 import utils.runtime_state as runtime_state
 
 from ai.intents import Intent, IntentRequest
+from ai.tools.models import ToolResult
 import utils.speak_response as speak
 
 
@@ -28,7 +29,7 @@ INTENT = Intent(
 # Also implement someway to check the system health (temp, power usage etc.)
 
 
-def run(request: IntentRequest) -> bool:
+def run(request: IntentRequest) -> bool | ToolResult:
     """Generates a system or program report."""
     report_type = choose_report_type(request.message)
 
@@ -40,7 +41,7 @@ def run(request: IntentRequest) -> bool:
         return True
 
     if report_type == "system":
-        get_system_status()
+        return ToolResult(success=True, data=get_system_status())
     else:
         get_program_status()
 
@@ -340,11 +341,12 @@ def print_system_status(status: dict[str, object]) -> None:
     )
 
 
-def get_system_status() -> None:
+def get_system_status() -> dict[str, object]:
     """Collect and present the current system status."""
     print("Checking system status...")
     status = get_system_status_data()
     print_system_status(status)
+    return status
 
 # Gets the status of the program.
 

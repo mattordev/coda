@@ -3,9 +3,24 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from commands import status as status_command
+from ai.intents.dispatcher import IntentDispatcher
+from ai.intents.models import IntentRequest
 
 
 class StatusCommandTests(unittest.TestCase):
+    def test_native_dispatch_returns_the_report_it_presents(self):
+        report = {"cpu_usage_percent": 25.0, "coda_volume": None}
+        request = IntentRequest(intent=status_command.INTENT, message="system status", confidence=1.0)
+        with (
+            patch.object(status_command, "get_system_status_data", return_value=report) as collect,
+            patch.object(status_command, "print_system_status") as present,
+        ):
+            result = IntentDispatcher({"status": status_command}).execute(request)
+        self.assertTrue(result.success)
+        self.assertEqual(result.data, report)
+        collect.assert_called_once_with()
+        present.assert_called_once_with(report)
+
     def test_reads_cpu_and_workspace_volume_on_the_host(self):
         usage = status_command.get_resource_usage()
         self.assertLessEqual(0, usage["cpu_usage_percent"])
