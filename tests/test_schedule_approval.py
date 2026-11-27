@@ -3,10 +3,11 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from runtime.schedule_approval import propose_schedule, save_confirmed_schedule
 from runtime.schedule_store import ScheduleStore
+from runtime.schedule_worker import run_due_schedule
 from runtime.system_policy import SystemPolicyError
 
 
@@ -46,3 +47,24 @@ class ScheduleApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed"):
             save_confirmed_schedule(self.store, self.policy, stale)
         self.assertEqual(self.store.list_tasks()[0]["interval"], 60)
+
+    def test_revoked_grant_denies_a_due_occurrence_before_execution(self):
+        proposal = self.propose()
+        save_confirmed_schedule(self.store, self.policy, proposal)
+        self.action["scheduled"] = False
+        self.write_policy()
+        executor = Mock()
+        result = run_due_schedule(self.store, self.policy, executor, now=proposal.due, grace=0)
+        self.assertEqual(result["state"], "denied")
+        self.assertEqual(self.store.history()[0]["state"], "denied")
+        executor.assert_not_called()
+
+    def test_uncertain_executor_error_does_not_replay_the_occurrence(self):
+        proposal = self.propose()
+        save_confirmed_schedule(self.store, self.policy, proposal)
+        executor = Mock(side_effect=RuntimeError("unknown external effect"))
+        result = run_due_schedule(self.store, self.policy, executor, now=proposal.due, grace=0)
+        self.assertEqual(result["state"], "interrupted")
+        self.assertIsNone(run_due_schedule(self.store, self.policy, executor, now=proposal.due, grace=0))
+        executor.assert_called_once()
+        self.assertEqual(executor.call_args.args[0].argv, ("--version",))
