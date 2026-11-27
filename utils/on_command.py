@@ -480,12 +480,12 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
                 return CommandResult(handled=True, response_text=executor(cancel_event))
             return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
 
-    local_reply = action_command(msg.strip()) or schedule_command(msg.strip())
+    local_reply = action_command(normalized_message.rstrip(".!?")) or schedule_command(msg.strip())
     if local_reply is not None:
         response, confirm = local_reply
         if confirm is not None:
             _pending_confirmation = (None, confirm, time.monotonic() + 60)
-        return CommandResult(handled=True, response_text=response)
+        return CommandResult(handled=True, response_text=response, open_follow_up=confirm is not None)
 
     answer = normalized_message.casefold().rstrip('.!?')
     answer = ' '.join(answer.replace(',', ' ').split())

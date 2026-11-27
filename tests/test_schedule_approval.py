@@ -79,6 +79,7 @@ class ScheduleApprovalTests(unittest.TestCase):
             preview = _on_command(message, {})
             store = ScheduleStore(self.policy.with_suffix(".schedules.sqlite"))
             self.assertIn("Say confirm or cancel", preview.response_text)
+            self.assertTrue(preview.open_follow_up)
             self.assertEqual(store.list_tasks(), [])
             self.assertIn("cancelled", _on_command("cancel", {}).response_text)
             self.assertEqual(store.list_tasks(), [])
@@ -104,7 +105,9 @@ class ScheduleApprovalTests(unittest.TestCase):
         with patch.dict(os.environ, {"CODA_SYSTEM_POLICY": str(self.policy)}):
             self.assertIn("without additional arguments",
                           _on_command("run action probe --help", {}).response_text)
-            self.assertIn("Say confirm", _on_command("run action probe", {}).response_text)
+            preview = _on_command("Run action probe.", {})
+            self.assertIn("Say confirm", preview.response_text)
+            self.assertTrue(preview.open_follow_up)
             self.action["argv"] = ["-V"]
             self.write_policy()
             self.assertIn("policy changed", _on_command("confirm", {}).response_text)
