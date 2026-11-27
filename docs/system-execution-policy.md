@@ -92,6 +92,9 @@ shell. Try these commands, prefixed by your usual wake word.
 - `run action python-version in background`, then `confirm`. Use
   `action status <job-id>` to check the result. A running job can be stopped
   with `action cancel <job-id>`.
+- Use `action inspect <job-id>` while a job is running to see CPU time and
+  resident memory for the approved program. Readings refresh about twice per
+  second and expire when the job ends. The command accepts CODA job IDs.
 - `schedule create {"action":"python-version","local_time":"2027-01-15T09:00","timezone":"Europe/London"}`,
   using a time a minute or two in the future. Confirm the UTC time in the
   preview. Use `schedule list` to check the saved task and `schedule history`

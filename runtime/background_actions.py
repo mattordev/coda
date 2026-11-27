@@ -11,6 +11,7 @@ class _Job:
     stop: Event
     thread: Thread | None = None
     response: str | None = None
+    metrics: dict | None = None
 
 
 class BackgroundActions:
@@ -40,12 +41,22 @@ class BackgroundActions:
             return key
 
     def _run(self, job, work):
+        def publish_metrics(metrics):
+            with self._lock:
+                job.metrics = metrics
+
         try:
-            response = work(job.stop)
+            response = work(job.stop, publish_metrics)
         except Exception:
             response = "The background action could not complete."
         with self._lock:
+            job.metrics = None
             job.response = response
+
+    def inspect(self, key):
+        with self._lock:
+            job = self._jobs.get(key)
+            return None if job is None or job.metrics is None else dict(job.metrics)
 
     def status(self, key):
         with self._lock:
