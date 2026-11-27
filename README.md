@@ -27,6 +27,8 @@ eventually revived as the assistant it is today.
 - Load self-registering commands from the `commands` directory.
 - Discover and invoke trusted MCP tools over local stdio or remote Streamable HTTP.
 - Reuse optional persistent MCP sessions with idle retirement and explicit cleanup.
+- Run confirmed local actions and schedule approved tasks on Windows and Linux.
+  These features are off by default. See the [system actions and scheduling guide](docs/system-execution-policy.md).
 - Validate tool arguments and require explicit confirmation for configured actions.
 - Use the opt-in filesystem integration for bounded reads/searches, conversational
   folder results, conflict-checked edits, copying and separately approved moves/deletion.

@@ -108,6 +108,21 @@ For offline inspection, run
 `python -m runtime.schedule_inspect <database> <tasks|history|pending>`.
 This opens the existing database read-only.
 
+To turn off automatic execution, remove `CODA_SYSTEM_POLICY` from the
+launch environment and restart CODA. To retain history when switching
+installations, keep the policy and database together in the same external
+directory. Before copying either file, close CODA and back up both files.
+Startup migrates supported older database schemas in a transaction.
+An incompatible or corrupt database stops scheduler startup while normal
+conversation remains available.
+
+The scheduler runs while CODA is open. After a restart it records interrupted
+occurrences without replaying them. It skips elapsed intervals outside the
+30-second grace window. Revoking an action grant before dispatch prevents the
+run. After a recurring grant is denied, review and edit the paused task before
+resuming it. Schedule history retains the 512 most recent terminal outcomes.
+Background jobs belong to the current session and are cancelled on shutdown.
+
 Use the standard-library [SQLite interface](https://docs.python.org/3.11/library/sqlite3.html)
 for bounded task/run/attention records, schema migration and atomic occurrence
 claims. Keep durable task storage separate from browser/MCP observations and
