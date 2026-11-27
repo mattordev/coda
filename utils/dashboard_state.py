@@ -3,6 +3,7 @@ import threading
 import time
 import tempfile
 from pathlib import Path
+from utils.console import print_line as print
 
 ## program flow example:
 # User speaks -> record_user_message
@@ -179,6 +180,17 @@ def record_ai_response(text, source="assistant", *, cancel_event=None):
         _append_message(state, "ai_messages", message_text, source)
 
     return _update_state(mutator, cancel_event=cancel_event)
+
+
+def try_record_ai_response(text, source="assistant", *, cancel_event=None):
+    """The optional dashboard projection cannot prevent a valid spoken reply."""
+    try:
+        record_ai_response(text, source=source,
+                           **({'cancel_event': cancel_event} if cancel_event is not None else {}))
+    except OSError:
+        print('[DASHBOARD] Could not save assistant output; speech will continue.')
+        return False
+    return True
 
 # lock protected read-only accessor. Returns latest full state from the json file.
 def snapshot():

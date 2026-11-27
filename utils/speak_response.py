@@ -229,7 +229,7 @@ def configure_speech_submitter(
 def speak_response(response):
     global _eleven_labs_disabled
 
-    dashboard_state.record_ai_response(response, source="tts")
+    dashboard_state.try_record_ai_response(response, source="tts")
 
     if _speech_submitter is not None:
         return _speech_submitter(response)

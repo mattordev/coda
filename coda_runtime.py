@@ -57,7 +57,7 @@ def _display_spoken_feedback(task):
     try:
         print(f"CODA: {task.text}", flush=True)
     finally:
-        dashboard_state.record_ai_response(task.text, source="voice_feedback", cancel_event=task.cancel_event)
+        dashboard_state.try_record_ai_response(task.text, source="voice_feedback", cancel_event=task.cancel_event)
 
 
 speech_processor = SpeechTaskProcessor(
@@ -479,7 +479,7 @@ def _execution_loop(stop_event):
                     execution_result.response_text is not None
                     and not execution_result.cancelled
                 ):
-                    dashboard_state.record_ai_response(
+                    dashboard_state.try_record_ai_response(
                         execution_result.response_text,
                         source="tts",
                     )

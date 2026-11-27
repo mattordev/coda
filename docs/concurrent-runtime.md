@@ -54,6 +54,8 @@ longer to produce audible feedback.
 Dashboard persistence is optional to voice input. Exhausted replacement retries
 are reported as dashboard errors while recognition and request submission
 continue; they must never enter the microphone runtime-error handler (#86).
+Assistant-message projection is also best-effort, so a failed dashboard write
+cannot discard a finalized reply or stop native-command speech.
 
 All native, MCP and other external tools share three feedback stages:
 
