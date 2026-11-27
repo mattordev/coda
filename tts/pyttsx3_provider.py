@@ -59,10 +59,11 @@ class Pyttsx3Provider:
         except Exception:
             return False
 
-    def create_session(self, text: str):
+    def create_session(self, text: str, *, on_playback_start=None):
         return Pyttsx3Session(
             text=text,
             engine=self._get_engine(),
+            on_playback_start=on_playback_start,
         )
 
     def _get_engine(self) -> Pyttsx3Engine:
@@ -88,12 +89,14 @@ class Pyttsx3Session:
         self,
         text: str,
         engine: Pyttsx3Engine,
+        *, on_playback_start=None,
     ) -> None:
         self._text = text
         self._engine = engine
         self._stop_event = Event()
         self._lock = Lock()
         self._playing = False
+        self._on_playback_start = on_playback_start
 
     def play(self, cancel_event: Event) -> bool:
         if cancel_event.is_set():
@@ -109,6 +112,8 @@ class Pyttsx3Session:
 
             self._engine.startLoop(False)
             loop_started = True
+            if self._on_playback_start is not None and not cancel_event.is_set():
+                self._on_playback_start()
 
             while True:
                 self._engine.iterate()

@@ -95,6 +95,26 @@ class FakeRuntime:
 
 
 class PocketTTSProviderTests(unittest.TestCase):
+    def test_feedback_hook_requires_successful_pcm_write_and_runs_once(self):
+        for fail_writes in (False, True):
+            with self.subTest(fail_writes=fail_writes):
+                process, publish = FakeProcess(fail_writes=fail_writes), Mock()
+
+                def observed_start():
+                    self.assertEqual(process.stdin.chunks, [b'first'])
+                    publish()
+
+                provider = PocketTTSProvider(runtime_factory=Mock(return_value=FakeRuntime()), ffplay_path='ffplay')
+                with patch('tts.pockettts_provider.Popen', return_value=process):
+                    session = provider.create_session('One moment.', on_playback_start=observed_start)
+                    if fail_writes:
+                        with self.assertRaises(BrokenPipeError):
+                            session.play(threading.Event())
+                        publish.assert_not_called()
+                    else:
+                        self.assertTrue(session.play(threading.Event()))
+                        publish.assert_called_once_with()
+
     def test_preserves_headroom_for_inputs_near_hard_limit(self):
         for token_count in range(45, 51):
             with self.subTest(token_count=token_count):

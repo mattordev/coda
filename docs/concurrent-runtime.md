@@ -43,6 +43,67 @@ cancellation policy, optional terminal previews and audio timing definitions.
 Native commands, MCP interpretation and non-streaming adapters retain the
 complete-response path described below.
 
+## Spoken tool feedback
+
+Voice requests that are still processing after 0.8 seconds queue one short
+acknowledgement, chosen from three phrases such as "Okay, give me a moment."
+It uses the normal TTS provider and speech queue. Fast replies and manual
+requests skip it. This is a delay before queuing; a cold TTS provider can take
+longer to produce audible feedback.
+
+Dashboard persistence is optional to voice input. Exhausted replacement retries
+are reported as dashboard errors while recognition and request submission
+continue; they must never enter the microphone runtime-error handler (#86).
+
+All native, MCP and other external tools share three feedback stages:
+
+| Stage | Trigger | Example |
+| --- | --- | --- |
+| Acknowledgement | Request still working after the short delay | "Sure, one moment." |
+| Action confirmation | Validated execution starts, after permission/approval gates | "I'm searching the web now." |
+| Progress update | A later workflow step or result interpretation starts | "I've found search results. I'm reading the selected pages now." |
+
+These action confirmations describe execution; they do not grant permission.
+A tool needing approval still asks for it before announcing that execution is
+starting. Native tools, all twelve filesystem capabilities, and web search/read
+have action wording; other external tools receive a generic action message.
+An immediate action can replace the generic acknowledgement. Quick results may
+retire unspoken feedback entirely. Each request has at most one action message
+and two distinct progress messages, alongside the separately bounded provider
+failure notice. This prevents multi-page workflows from narrating every call.
+
+Completion events alone do not speak or invent a new stage. A snippet search
+followed by interpretation says it is checking snippets. Only an actual page
+read after searching says it is reading selected pages. File interpretation
+says it is working through the contents. All wording is host-owned: filenames,
+paths, URLs, arguments and remote text never enter feedback messages.
+
+The feedback has its own cancellation event, so retiring it never
+cancels the real request. The first streamed answer text, a native command's
+speech submission, or completion of execution retires it before the answer is
+queued. Request cancellation and shutdown also retire it. Its completion does
+not open or close a follow-up window. Audible feedback appears once in the
+console and dashboard chat, while remaining excluded from the model's answer
+history and answer speech metrics. Messages cancelled before playback do not
+appear. PocketTTS publishes after the first PCM write; other built-in providers
+publish when their playback loop/process starts. Older injected providers without
+a playback-start callback publish after successful playback. Existing playback echo
+filtering and wake-word stop handling apply to it like other CODA speech.
+
+The same request-owned feedback channel announces once when at least two AI
+providers have failed and another is actually being tried. One failure stays
+quiet. Providers skipped for cooldown do not count as failures.
+Manual requests stay quiet. Updates use fixed phrases, contain no provider
+errors or tool data, and are retired when the answer is ready. If a provider
+fails quickly enough that the answer is already ready, its queued update may
+be suppressed. The answer itself explains an unavailable or timed-out search
+summary, even when those progress updates were suppressed.
+
+After restarting CODA, try a longer spoken search to hear the acknowledgement,
+then "Coda, what time is it?" to check that a quick command skips it. During a
+longer request, "Coda, stop" should stop both the work and any speech. Manual
+searches should continue without the spoken acknowledgement.
+
 ## Runtime Ownership
 
 `coda_runtime.py` coordinates lifecycle and shared runtime state. It starts the

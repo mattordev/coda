@@ -8,9 +8,10 @@ from runtime.speech_worker import SpeechTaskProcessor, SpeechWorker
 from runtime.incremental_speech import IncrementalSpeech
 from runtime.incremental_display import IncrementalDisplay
 from runtime.speech_metrics import SpeechMetrics
+from runtime.voice_acknowledgement import VoiceAcknowledgement
 import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
-from ai.request_context import request_context
+from ai.request_context import current_request, request_context
 from runtime import model_warmup
 
 import os
@@ -47,9 +48,22 @@ event_thread = None
 active_request_state = ActiveRequestState()
 speech_stop_event = threading.Event()
 speech_playback_controller = SpeechPlaybackController()
+
+
+def _display_spoken_feedback(task):
+    """Mirror audible lifecycle speech in the console and visible chat only."""
+    if task.cancel_event.is_set():
+        return
+    try:
+        print(f"CODA: {task.text}", flush=True)
+    finally:
+        dashboard_state.record_ai_response(task.text, source="voice_feedback", cancel_event=task.cancel_event)
+
+
 speech_processor = SpeechTaskProcessor(
     speech.resolve_speech_providers,
     speech_playback_controller,
+    on_feedback=_display_spoken_feedback,
 )
 speech_worker = SpeechWorker(
     runtime_queues.speech,
@@ -287,6 +301,10 @@ def submit_speech_response(text: str) -> bool:
     if request.cancel_event.is_set():
         return False
 
+    context = current_request()
+    if context is not None and context.before_speech is not None:
+        context.before_speech()
+
     runtime_queues.speech.put(
         SpeechTask(
             request_id=request.request_id,
@@ -415,8 +433,12 @@ def _execution_loop(stop_event):
         if os.getenv("CODA_STREAM_DISPLAY", "false").strip().lower() in ("true", "1", "yes", "on"):
             display = IncrementalDisplay(request.cancel_event)
         metrics = SpeechMetrics(request.request_id, request.accepted_at)
+        acknowledgement = VoiceAcknowledgement(
+            request, runtime_queues.speech, speech_processor.stop, stop_event,
+        )
         if os.getenv("CODA_STREAM_SPEECH", "true").strip().lower() in ("true", "1", "yes", "on"):
             def start_stream(channel, voice_request=request.source == InputSource.VOICE):
+                acknowledgement.finish()
                 runtime_queues.speech.put(SpeechTask(
                     request_id=channel.request_id, text="", cancel_event=channel.cancel_event,
                     open_follow_up=voice_request, stream=channel, metrics=channel.metrics,
@@ -424,6 +446,7 @@ def _execution_loop(stop_event):
             stream = IncrementalSpeech(request.request_id, request.cancel_event, start_stream, metrics=metrics)
         
         try:
+            acknowledgement.start()
             if request.cancel_event.is_set():
                 execution_result = ExecutionResult(
                     request_id=request.request_id,
@@ -432,13 +455,16 @@ def _execution_loop(stop_event):
                 )
             else:
                 with request_context(request.request_id, request.cancel_event,
-                                     speech_stream=stream, display_stream=display):
+                                     speech_stream=stream, display_stream=display,
+                                     before_speech=acknowledgement.finish,
+                                     progress=acknowledgement.report):
                     command_result = command.run(
                         request.message,
                         commands,
                         debug=debug_enabled,
                         cancel_event=request.cancel_event,
                     )
+                acknowledgement.finish()
                 execution_result = _create_execution_result(
                     request,
                     command_result,
@@ -476,6 +502,7 @@ def _execution_loop(stop_event):
                 error=str(error),
             )
         finally:
+            acknowledgement.finish()
             if display is not None:
                 display.finish(bool(execution_result.response_text) and not execution_result.cancelled
                                and execution_result.error is None)
@@ -525,6 +552,9 @@ def _event_loop(stop_event):
 
                 if runtime_event.event_type == WorkerEventType.STARTED:
                     follow_up_state.close()
+                    continue
+
+                if runtime_event.is_acknowledgement:
                     continue
 
                 if (

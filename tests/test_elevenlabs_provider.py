@@ -11,6 +11,27 @@ from tts.elevenlabs_provider import (
 
 
 class ElevenLabsProviderTests(unittest.TestCase):
+    @patch('tts.elevenlabs_provider.Popen')
+    def test_feedback_hook_waits_for_generated_audio_and_playback_launch(self, popen):
+        publish = Mock()
+        process = Mock()
+        process.poll.return_value = 0
+        process.returncode = 0
+
+        def generate(*_args):
+            publish.assert_not_called()
+            return b'audio'
+
+        def launch(*_args, **_kwargs):
+            publish.assert_not_called()
+            return process
+
+        popen.side_effect = launch
+        session = ElevenLabsProvider(generate, ffplay_path='ffplay').create_session(
+            'One moment.', on_playback_start=publish)
+        self.assertTrue(session.play(threading.Event()))
+        publish.assert_called_once_with()
+
     @patch(
         "tts.elevenlabs_provider.shutil.which",
         return_value=None,
