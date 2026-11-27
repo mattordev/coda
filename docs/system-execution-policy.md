@@ -65,6 +65,49 @@ of an operator-owned JSON policy. Keep it in a private directory outside the
 installation so the policy and its adjacent `.schedules.sqlite` database survive
 updates. The service starts with CODA and stops when CODA closes.
 
+For a smoke test, save a private JSON policy with these fields. Replace both
+paths with an absolute Python executable and an existing disposable directory.
+
+```json
+{
+  "enabled": true,
+  "actions": {
+    "python-version": {
+      "executable": "C:/Python311/python.exe",
+      "argv": ["--version"],
+      "cwd": "C:/Temp/coda-system-test",
+      "background": true,
+      "scheduled": true,
+      "timeout_seconds": 10,
+      "max_output_bytes": 4096
+    }
+  }
+}
+```
+
+Start CODA in manual mode with `CODA_SYSTEM_POLICY` set in the launching
+shell. Try these commands, prefixed by your usual wake word.
+
+- `run action python-version`, then `confirm`. Expect Python's version and exit code 0.
+- `run action python-version in background`, then `confirm`. Use
+  `action status <job-id>` to check the result. A running job can be stopped
+  with `action cancel <job-id>`.
+- `schedule create {"action":"python-version","local_time":"2027-01-15T09:00","timezone":"Europe/London"}`,
+  using a time a minute or two in the future. Confirm the UTC time in the
+  preview. Use `schedule list` to check the saved task and `schedule history`
+  after it runs.
+- Use `schedule pause <task-id>`, `schedule resume <task-id>`, or
+  `schedule cancel <task-id>` to control future runs. To edit, use
+  `schedule edit` with the same JSON fields plus `task_id` and confirm again.
+  Optional `interval` specifies recurrence in seconds.
+- Use `schedule pending` to see unacknowledged results and
+  `schedule acknowledge <task-id> <due>` to mark one as seen. The `due` value
+  shown in the result is a UTC epoch timestamp in seconds.
+
+For offline inspection, run
+`python -m runtime.schedule_inspect <database> <tasks|history|pending>`.
+This opens the existing database read-only.
+
 Use the standard-library [SQLite interface](https://docs.python.org/3.11/library/sqlite3.html)
 for bounded task/run/attention records, schema migration and atomic occurrence
 claims. Keep durable task storage separate from browser/MCP observations and
