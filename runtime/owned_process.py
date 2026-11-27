@@ -25,6 +25,7 @@ sys.exit(result)
 
 @contextmanager
 def _windows_process(argv, options):
+    import pywintypes
     import win32api
     import win32con
     import win32job
@@ -32,7 +33,10 @@ def _windows_process(argv, options):
     # CreateProcess requires a Windows system directory for a minimal environment.
     if not any(name.casefold() == "systemroot" for name in options["env"]):
         options["env"]["SystemRoot"] = win32api.GetWindowsDirectory()
-    job = win32job.CreateJobObject(None, "")
+    try:
+        job = win32job.CreateJobObject(None, "")
+    except pywintypes.error as exc:
+        raise OSError("Could not create the Windows process job.") from exc
     process = None
     try:
         limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
@@ -40,7 +44,8 @@ def _windows_process(argv, options):
         win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)
         process = subprocess.Popen(
             [sys.executable, "-I", "-S", "-c", _GATED_LAUNCH, *argv],
-            stdin=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW, **options,
+            executable=sys.executable, stdin=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW, **options,
         )
         access = win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE
         handle = win32api.OpenProcess(access, False, process.pid)
@@ -51,6 +56,8 @@ def _windows_process(argv, options):
         process.stdin.write(b"1")
         process.stdin.close()
         yield process
+    except pywintypes.error as exc:
+        raise OSError("Could not configure the Windows process job.") from exc
     finally:
         job.Close()
         if process is not None:
