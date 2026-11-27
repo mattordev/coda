@@ -7,6 +7,17 @@ from runtime.schedule_store import ScheduleStore
 
 
 class ScheduleStoreTests(unittest.TestCase):
+    def test_replacement_invalidates_old_definition_and_keeps_pause(self):
+        task = self.store.create("probe", "old", "UTC", 100)
+        self.assertTrue(self.store.pause(task))
+        self.assertTrue(self.store.replace(task, "old", "other", "new", "UTC", 200))
+        self.assertFalse(self.store.replace(task, "old", "probe", "stale", "UTC", 150))
+        self.assertIsNone(self.store.claim(200, grace=0))
+        self.assertTrue(self.store.resume(task))
+        self.assertIsNone(self.store.claim(100, grace=0))
+        claim = self.store.claim(200, grace=0)
+        self.assertEqual((claim["action"], claim["binding"]), ("other", "new"))
+
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)

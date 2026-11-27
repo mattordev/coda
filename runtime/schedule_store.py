@@ -39,12 +39,16 @@ class ScheduleStore:
         finally:
             db.close()
 
-    def create(self, action, binding, timezone, due, interval=None):
-        """Save a task whose normalized definition has been approved by the host."""
+    @staticmethod
+    def _validate_timing(due, interval):
         if type(due) is not int or not 0 <= due < 2**62:
             raise ValueError("Invalid schedule timestamp.")
         if interval is not None and (type(interval) is not int or not 1 <= interval <= 366 * 86400):
             raise ValueError("Invalid schedule interval.")
+
+    def create(self, action, binding, timezone, due, interval=None):
+        """Save a task whose normalized definition has been approved by the host."""
+        self._validate_timing(due, interval)
         task_id = uuid4().hex
         with self._write() as db:
             if db.execute("SELECT count(*) FROM tasks").fetchone()[0] >= 128:
@@ -52,6 +56,21 @@ class ScheduleStore:
             db.execute("INSERT INTO tasks (id, action, binding, timezone, due, interval) VALUES (?, ?, ?, ?, ?, ?)",
                        (task_id, action, binding, timezone, due, interval))
         return task_id
+
+    def replace(self, task_id, expected_binding, action, binding, timezone, due, interval=None):
+        """Apply a newly approved definition conditionally, preserving paused state."""
+        self._validate_timing(due, interval)
+        if binding == expected_binding:
+            raise ValueError("A replacement requires a new approval binding.")
+        with self._write() as db:
+            result = db.execute("""UPDATE tasks
+                SET action = ?, binding = ?, timezone = ?, due = ?, interval = ?
+                WHERE id = ? AND binding = ? AND status != 'cancelled' AND tasks.due IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM runs WHERE task_id = tasks.id
+                    AND (state = 'claimed' OR runs.due >= ?)
+                  )""", (action, binding, timezone, due, interval, task_id, expected_binding, due))
+            return result.rowcount == 1
 
     def list_tasks(self):
         """Read schedule definitions without exposing their approval bindings."""
