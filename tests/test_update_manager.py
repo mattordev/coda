@@ -92,7 +92,22 @@ class UpdateManagerTests(unittest.TestCase):
         permissions = integration / "filesystem.config.json"
         permissions.write_text('{"read":{"allowed_roots":["/private"],"blocked_paths":[]}}', encoding="utf-8")
         (integration / "server.py").write_text("old server", encoding="utf-8")
-        return {path.relative_to(self.root): path.read_bytes() for path in (definition, permissions)}
+        preserved = [definition, permissions]
+        # Web upgrades must preserve separate reader/browser grants, including
+        # a deliberately disabled browser and disabled external actions.
+        for identity, policy in (
+            ('webread', {'network': {'enabled': True, 'allowed_hosts': ['example.com']}}),
+            ('browser', {'enabled': False, 'actions_enabled': False, 'network': {'allowed_hosts': []}}),
+        ):
+            directory = self.root / 'integrations' / ('coda-' + identity)
+            directory.mkdir()
+            settings = directory / (identity + '.config.json')
+            settings.write_text(json.dumps(policy), encoding='utf-8')
+            instance = configs / (identity + '.json')
+            instance.write_text(json.dumps({'id':identity, 'bundled_server':identity,
+                                           'enabled':False, 'trusted':False, 'allowed_tools':[]}), encoding='utf-8')
+            preserved.extend((settings, instance))
+        return {path.relative_to(self.root): path.read_bytes() for path in preserved}
 
     def test_archive_upgrade_and_rollback_preserve_mcp_permissions_exactly(self):
         originals = self.add_mcp_configuration()

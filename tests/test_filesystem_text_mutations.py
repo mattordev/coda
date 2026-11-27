@@ -20,6 +20,49 @@ SPEC.loader.exec_module(filesystem)
 
 
 class FilesystemTextMutationTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Native Windows Modify-only staging ACL')
+    def test_modify_only_workspace_preserves_acl_for_append_and_real_mcp_edit(self):
+        import subprocess
+        restricted = self.root / 'modify-only'
+        restricted.mkdir()
+        quoted = str(restricted).replace("'", "''")
+        environment = {name: value for name, value in os.environ.items() if name.casefold() != 'psmodulepath'}
+        script = (f"$path='{quoted}'; $acl=Get-Acl -LiteralPath $path; "
+                  "$acl.SetAccessRuleProtection($true,$false); "
+                  "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; "
+                  "$rule=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,"
+                  "[System.Security.AccessControl.FileSystemRights]::Modify,"
+                  "[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',"
+                  "[System.Security.AccessControl.PropagationFlags]::None,"
+                  "[System.Security.AccessControl.AccessControlType]::Allow); "
+                  "$acl.SetAccessRule($rule); Set-Acl -LiteralPath $path -AclObject $acl")
+        subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
+                       check=True, capture_output=True, text=True, env=environment,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+        self.source = restricted / 'report.md'
+        self.source.write_bytes(b'Alpha')
+        quoted_file = str(self.source).replace("'", "''")
+
+        def acl():
+            return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                f"(Get-Acl -LiteralPath '{quoted_file}').Sddl"], check=True, capture_output=True,
+                text=True, env=environment, creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
+
+        original_acl = acl()
+        result = filesystem.append_file(str(self.source), ' Beta', self.revision())
+        self.assertFalse(result.is_error, result)
+        self.assertEqual(self.source.read_bytes(), b'Alpha Beta')
+        self.assertEqual(acl(), original_acl)
+        runtime, _ = self.host(mode='operation')
+        pending = runtime.run('mcp.files.edit_file ' + json.dumps({'path': str(self.source),
+            'old_text': 'Beta', 'new_text': 'Gamma', 'expected_sha256': self.revision()}), {})
+        self.assertIn('Replace one occurrence', pending.response_text)
+        completed = runtime.run('confirm', {})
+        self.assertTrue(completed.tool_result.success, completed)
+        self.assertEqual(self.source.read_bytes(), b'Alpha Gamma')
+        self.assertEqual(acl(), original_acl)
+        self.assertEqual(list(restricted.glob('.coda-*')), [])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

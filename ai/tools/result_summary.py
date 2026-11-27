@@ -159,8 +159,86 @@ def filesystem_fact_summary(data, text, question):
     return None
 
 
+def web_page_summary(data):
+    """Describe the observation, including empty/partial text, without inventing content."""
+    page = _payload(data)
+    if isinstance(page,dict) and page.get('kind') == 'browser_proposal':
+        return "I've inspected the form and prepared its exact fields. Nothing has been submitted. Review the proposed destination and body in the tool output before requesting execution."
+    if isinstance(page,dict) and page.get('kind') == 'browser_action':
+        status=page.get('status')
+        return ('The approved form request received HTTP status ' + str(status) +
+                '. The website action itself has not been independently verified.')
+    if not isinstance(page, dict) or page.get('kind') not in ('web_page', 'browser_page') or not isinstance(page.get('text'), str):
+        return None
+    if page.get('kind') == 'browser_page' and page.get('capture'):
+        return 'I captured the rendered page. The image is in the tool result. ' + (
+            'Some page resources were blocked or omitted.' if page.get('partial') else 'The disposable browser session is closed.')
+    text = page['text'].strip()
+    if not text:
+        return 'The page returned no readable text. Its title or search snippet cannot establish what the article says.'
+    prefix = 'I retrieved part of the webpage.' if page.get('partial') is True else 'I retrieved the webpage text.'
+    if len(text) <= 400:
+        return prefix + ' ' + text
+    return prefix + ' Ask me to summarise it, or say show tool output to inspect the source text.'
+
+
+def spoken_search_text(text):
+    """Keep speech readable; exact numbered links remain in the visual result."""
+    text = re.sub(r'\[([^\]\n]*)\]\((?:https?|ftp|file)://[^\s)]*\)', r'\1', text, flags=re.IGNORECASE)
+    text = re.sub(r'(?:\b(?:https?|ftp|file)://|\bwww\.)[^\s<>\[\]\"()]+', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\d+(?:\s*,\s*\d+)*\]', '', text)
+    text = re.sub(r'(?m)^\s*(?:[-*\u2022]|\d+[.)])\s+', '', text)
+    text = re.sub(r'(?m)^#{1,6}\s*', '', text)
+    text = re.sub(r'\(\s*\)', '', text).replace('**', '')
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def web_search_summary(data):
+    """A brief grounded fallback when automatic interpretation is unavailable/off."""
+    page = _payload(data)
+    if not isinstance(page, dict):
+        return None
+    results = (page.get('results') if page.get('kind') == 'web_search' else
+               page.get('sources') if page.get('kind') == 'web_sources' and page.get('scope') == 'search_snippets_only' else None)
+    if not isinstance(results, list):
+        return None
+    if not results:
+        return "I didn't get any search results for that."
+    for source in results[:10]:
+        snippet = source.get('snippet') if isinstance(source, dict) else None
+        if isinstance(snippet, str) and (snippet := spoken_search_text(snippet)):
+            if len(snippet) > 280:
+                snippet = snippet[:280].rsplit(' ', 1)[0].rstrip('.,;:') + '\N{HORIZONTAL ELLIPSIS}'
+            if not snippet.endswith(('.', '!', '?', '\N{HORIZONTAL ELLIPSIS}')):
+                snippet += '.'
+            return 'The first available search snippet says: ' + snippet + ' The source links are in the tool output.'
+    return "I found some possible sources, but their snippets don't give enough detail to answer yet. The links are in the tool output."
+
+
+def web_sources_summary(data):
+    page = _payload(data)
+    if not isinstance(page, dict) or page.get('kind') != 'web_sources' or not isinstance(page.get('sources'), list):
+        return None
+    if any(not isinstance(source, dict) or not isinstance(source.get('text', ''), str) for source in page['sources']):
+        return None
+    if page.get('scope') == 'search_snippets_only':
+        return 'These are retained search snippets; no result pages have been fetched.'
+    readable = [source for source in page['sources'] if source.get('status') == 'fetched' and source.get('text', '').strip()]
+    if not readable:
+        return 'None of the requested pages returned readable source text. I cannot summarise their article contents from titles or snippets.'
+    text = f"I retrieved readable text from {len(readable)} of {page.get('requested_pages', len(page['sources']))} requested pages."
+    if page.get('partial'):
+        text += ' The evidence is partial.'
+    return text + ' ' + (' '.join(source['text'] for source in readable)[:400] if sum(len(source['text']) for source in readable) <= 400
+                        else 'Say show tool output to inspect the source text and URLs.')
+
+
 def summarize_result(data, text, question):
     """Return grounded speech for known shapes, or None for natural short text."""
+    page = web_page_summary(data) or web_search_summary(data) or web_sources_summary(data)
+    if page is not None:
+        return page
     facts = filesystem_fact_summary(data, text, question)
     if facts is not None:
         return facts

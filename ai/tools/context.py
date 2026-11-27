@@ -14,6 +14,11 @@ def prepare_tool_context(
     """Apply privacy to the full envelope before bounding a separate representation."""
     if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars <= 0:
         raise ValueError("Tool context limit must be a positive integer.")
+    payload = result.data.get('structuredContent', {}) if isinstance(result.data, dict) else {}
+    if isinstance(payload, dict) and payload.get('kind') == 'browser_page' and payload.get('capture'):
+        # Captures are tool-only visual artifacts. Do not serialize image bytes
+        # into conversation/model context, including a later explicit summary.
+        return None
     envelope = {
         "success": result.success,
         "data": result.data,

@@ -55,6 +55,7 @@ class SpeechTask:
     open_follow_up: bool = False
     stream: object | None = field(default=None, repr=False, compare=False)
     metrics: object | None = field(default=None, repr=False, compare=False)
+    is_acknowledgement: bool = False
     
 class WorkerName(str, Enum):
     VOICE_INPUT = "voice_input"
@@ -77,3 +78,4 @@ class WorkerEvent:
     error: str | None = None
     created_at: float = field(default_factory=time.time)
     open_follow_up: bool = False
+    is_acknowledgement: bool = False

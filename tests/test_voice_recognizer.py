@@ -27,6 +27,57 @@ def _captured_phrase(
 
 
 class VoiceRecognizerTests(unittest.TestCase):
+    def test_dashboard_write_denials_do_not_stop_current_or_next_voice_request(self):
+        stop, requests = Event(), RuntimeQueue()
+        recognizer = MagicMock()
+        recognizer.energy_threshold = 100
+        phrases = iter(['Coda time', 'Coda status'])
+
+        def transcribe(*_args):
+            text = next(phrases)
+            if text.endswith('status'):
+                stop.set()
+            return text, 'fixture'
+
+        with (patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer),
+              patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()),
+              patch.object(voice_recognizer, 'listen_for_phrase', return_value=_captured_phrase()),
+              patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe),
+              patch.object(voice_recognizer.dashboard_state, 'record_user_message',
+                           side_effect=PermissionError('dashboard replacement locked')),
+              patch('builtins.print') as output):
+            voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests)
+        self.assertEqual([requests.get(timeout=0).message for _ in range(2)], ['time', 'status'])
+        messages = [str(call.args[0]) for call in output.call_args_list if call.args]
+        self.assertEqual(sum(message.startswith('[DASHBOARD]') for message in messages), 2)
+        self.assertFalse(any('Microphone runtime error' in message for message in messages))
+
+    def test_follow_up_strips_optional_wakeword_before_source_agreement(self):
+        for spoken, expected in (('Oh, Coda, yes please.', 'yes please'),
+                                 ('yes please', 'yes please'), ('Coda', None)):
+            with self.subTest(spoken=spoken):
+                stop, requests = Event(), RuntimeQueue()
+                recognizer = MagicMock()
+                recognizer.energy_threshold = 100
+
+                def transcribe(*_args):
+                    stop.set()
+                    return spoken, 'fixture'
+
+                with (patch.object(voice_recognizer.sr, 'Recognizer', return_value=recognizer),
+                      patch.object(voice_recognizer, '_get_microphone', return_value=MagicMock()),
+                      patch.object(voice_recognizer, 'listen_for_phrase',
+                                   return_value=_captured_phrase(follow_up_active=True)),
+                      patch.object(voice_recognizer.stt_service, 'transcribe_audio', side_effect=transcribe),
+                      patch.object(voice_recognizer.dashboard_state, 'record_user_message'),
+                      patch('builtins.print')):
+                    voice_recognizer.run(['coda'], {}, stop_event=stop, request_queue=requests)
+                request = requests.get(timeout=0)
+                if expected is None:
+                    self.assertIsNone(request)
+                else:
+                    self.assertEqual(request.message, expected)
+
     def test_stop_matching_requires_complete_wakeword_and_final_exact_action(self):
         for text, expected in (
             ('Coda stop.', True),

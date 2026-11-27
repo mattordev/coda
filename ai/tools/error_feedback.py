@@ -7,6 +7,24 @@ from ai.privacy.sanitizer import sanitize_text
 
 # These are result codes, not guesses based on words appearing in a traceback.
 ERROR_EXPLANATIONS = {
+    'browser_disabled':'Browser tools are disabled. Ordinary web search and reading remain available.',
+    'dependency_missing':'The optional browser dependencies or managed Chromium need explicit installation.',
+    'browser_error':'The optional browser could not complete that operation. Ordinary web reading remains available.',
+    'action_denied':'That browser action is disabled or unsupported. Nothing was submitted by the action tool.',
+    'approval_missing':'Please inspect the exact form again; its proposal is missing, changed or expired.',
+    'form_changed':'The form or its permissions changed. Please inspect it again before confirming.',
+    'action_unverified':'The form request did not complete cleanly. Its external effect is unverified; check the site before trying again.',
+    'network_disabled': 'Public webpage reading is disabled in the reader configuration.',
+    'invalid_url': 'Please provide an ordinary absolute public HTTP or HTTPS URL without credentials.',
+    'network_denied': 'That web destination is not allowed by the current network configuration.',
+    'network_timeout': 'The webpage request exceeded its time limit.',
+    'network_busy': 'An earlier hostname lookup is still finishing. Please try again shortly.',
+    'network_error': 'The webpage connection failed.',
+    'tls_error': 'The secure webpage connection could not be verified.',
+    'http_error': 'The website returned an unsuccessful HTTP response.',
+    'redirect_limit': 'The webpage exceeded the allowed number of redirects.',
+    'unsupported_content': 'That response format is not supported by the webpage text reader.',
+    'page_invalid_encoding': 'The webpage did not contain supported, valid text.',
     'move_incomplete': 'The move outcome is unverified. Inspect both source and destination and say show tool output before any new request.',
     'cross_device': 'Moving across filesystems is unsupported. The move was refused without a copy-and-delete fallback.',
     'destructive_disabled': 'Deleting and moving files is disabled in the filesystem configuration.',
@@ -45,6 +63,11 @@ ERROR_EXPLANATIONS = {
 }
 
 FAILURE_CATEGORIES = {
+    'network_disabled': 'permission_denied', 'network_denied': 'permission_denied',
+    'invalid_url': 'invalid_arguments', 'network_timeout': 'timeout', 'network_busy': 'unavailable',
+    'network_error': 'unavailable', 'tls_error': 'unavailable', 'http_error': 'unavailable',
+    'redirect_limit': 'invalid_arguments', 'unsupported_content': 'invalid_arguments',
+    'page_invalid_encoding': 'invalid_arguments',
     'move_incomplete': 'unknown_error', 'cross_device': 'invalid_arguments',
     'destructive_disabled': 'permission_denied', 'directory_not_empty': 'invalid_arguments',
     'delete_incomplete': 'unknown_error', 'protected_path': 'permission_denied',

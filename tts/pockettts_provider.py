@@ -160,7 +160,7 @@ class PocketTTSProvider:
             )
             return False
 
-    def create_session(self, text: str, *, metrics=None):
+    def create_session(self, text: str, *, metrics=None, on_playback_start=None):
         if self._ffplay_path is None:
             raise RuntimeError("ffplay is not available.")
 
@@ -169,6 +169,7 @@ class PocketTTSProvider:
             runtime=self._get_runtime(),
             ffplay_path=self._ffplay_path,
             metrics=metrics,
+            on_playback_start=on_playback_start,
         )
 
     def create_stream_session(self, chunks, *, metrics=None):
@@ -232,11 +233,12 @@ class PocketTTSSession:
         text: str,
         runtime: PocketTTSRuntime,
         ffplay_path: str,
-        *, chunks=None, metrics=None,
+        *, chunks=None, metrics=None, on_playback_start=None,
     ) -> None:
         self._text = text
         self._chunks = chunks
         self._metrics = metrics
+        self._on_playback_start = on_playback_start
         self._runtime = runtime
         self._ffplay_path = ffplay_path
         self._stop_event = Event()
@@ -304,6 +306,9 @@ class PocketTTSSession:
                     process.stdin.flush()
                     if pcm_chunk and self._metrics is not None:
                         self._metrics.mark('playback_start')
+                    if pcm_chunk and self._on_playback_start is not None:
+                        self._on_playback_start()
+                        self._on_playback_start = None
                 except (BrokenPipeError, OSError) as error:
                     if self._should_stop(cancel_event):
                         cancelled = True

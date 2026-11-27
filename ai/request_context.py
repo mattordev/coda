@@ -13,6 +13,8 @@ class RequestContext:
     cancel_event: Event | None = None
     speech_stream: object | None = None
     display_stream: object | None = None
+    before_speech: object | None = None
+    progress: object | None = None
 
 
 _current = ContextVar('coda_request_context', default=None)
@@ -33,7 +35,8 @@ def cancellation_event():
 
 
 @contextmanager
-def request_context(request_id=None, cancel_event=None, *, speech_stream=None, display_stream=None):
+def request_context(request_id=None, cancel_event=None, *, speech_stream=None, display_stream=None,
+                    before_speech=None, progress=None):
     """Nested callers inherit identity; finally always restores the caller."""
     previous = current_request()
     context = RequestContext(
@@ -41,6 +44,8 @@ def request_context(request_id=None, cancel_event=None, *, speech_stream=None, d
         cancel_event if cancel_event is not None else (previous.cancel_event if previous else None),
         speech_stream if speech_stream is not None else (previous.speech_stream if previous else None),
         display_stream if display_stream is not None else (previous.display_stream if previous else None),
+        before_speech if before_speech is not None else (previous.before_speech if previous else None),
+        progress if progress is not None else (previous.progress if previous else None),
     )
     token = _current.set(context)
     try:

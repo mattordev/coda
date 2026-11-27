@@ -36,7 +36,7 @@ class ElevenLabsProvider:
     def is_available(self) -> bool:
         return self._ffplay_path is not None
 
-    def create_session(self, text: str):
+    def create_session(self, text: str, *, on_playback_start=None):
         if self._ffplay_path is None:
             raise RuntimeError("ffplay is not available.")
 
@@ -44,6 +44,7 @@ class ElevenLabsProvider:
             text=text,
             generate_audio=self._generate_audio,
             ffplay_path=self._ffplay_path,
+            on_playback_start=on_playback_start,
         )
 
 
@@ -55,6 +56,7 @@ class ElevenLabsSession:
         text: str,
         generate_audio: AudioGenerator,
         ffplay_path: str,
+        *, on_playback_start=None,
     ) -> None:
         self._text = text
         self._generate_audio = generate_audio
@@ -62,6 +64,7 @@ class ElevenLabsSession:
         self._lock = Lock()
         self._process: Popen | None = None
         self._playing = False
+        self._on_playback_start = on_playback_start
 
     def play(self, cancel_event: Event) -> bool:
         timeout_seconds = _generation_timeout_seconds()
@@ -113,6 +116,9 @@ class ElevenLabsSession:
 
             with self._lock:
                 self._process = process
+
+            if self._on_playback_start is not None and not cancel_event.is_set():
+                self._on_playback_start()
 
             while process.poll() is None:
                 if cancel_event.wait(timeout=0.05):

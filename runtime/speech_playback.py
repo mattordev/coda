@@ -42,7 +42,8 @@ class SpeechPlaybackController:
         self._active_session: SpeechSession | None = None
         self._active_cancel_event: Event | None = None
         
-    def play(self, provider:SpeechProvider, text: str, cancel_event: Event, *, metrics=None) -> bool:
+    def play(self, provider:SpeechProvider, text: str, cancel_event: Event, *, metrics=None,
+             on_playback_start=None) -> bool:
         if cancel_event.is_set():
             return False
         
@@ -50,6 +51,8 @@ class SpeechPlaybackController:
         kwargs = {}
         if metrics is not None and 'metrics' in inspect.signature(provider.create_session).parameters:
             kwargs['metrics'] = metrics
+        if on_playback_start is not None and 'on_playback_start' in inspect.signature(provider.create_session).parameters:
+            kwargs['on_playback_start'] = on_playback_start
         session = provider.create_session(text, **kwargs)
         return self.play_session(session, cancel_event)
 

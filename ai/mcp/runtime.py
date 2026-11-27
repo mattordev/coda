@@ -17,8 +17,11 @@ from ai.mcp.remote import RemoteServerDefinition
 from ai.mcp.workspace import resolve_arguments, WorkspaceReferenceError, _configuration
 from ai.mcp.protection import MUTATIONS, OperatorProtectionError, operator_paths, check_mutation, guarded_launch
 from ai.mcp.transport import SDKStdioTransport, failure
+from ai.mcp.web_sources import source_configuration, source_environment_token
+from ai.mcp.browser_actions import BrowserApprovals
 from ai.tools.external import ExternalToolAdapter
 from ai.tools.models import ToolResult
+from ai.tools.progress import report_tool
 
 
 class ServerState(str, Enum):
@@ -41,6 +44,7 @@ class _ServerRuntime:
     retire_requests: int = 0
     configuration_revision: int = 0
     retry_after: float = 0.0
+    source_environment: str | None = None
 
 
 class LocalMCPManager:
@@ -59,6 +63,7 @@ class LocalMCPManager:
         self._transport = transport or SDKStdioTransport()
         self._permission_decider = permission_decider
         self._closed = False
+        self._browser_approvals = BrowserApprovals()
         for definition in definitions:
             if not isinstance(definition, (LocalServerDefinition, RemoteServerDefinition)):
                 raise TypeError("MCP definitions must be CODA server definition objects.")
@@ -139,6 +144,14 @@ class LocalMCPManager:
 
             try:
                 definition = runtime.definition
+                if getattr(definition, 'bundled_server', None) in ('websearch', 'webread') and definition.session_mode == 'persistent':
+                    try:
+                        environment = source_environment_token(definition)
+                    except (ValueError, TypeError):
+                        return failure('configuration_error', 'A source-server environment reference is unavailable.')
+                    if runtime.source_environment is not None and runtime.source_environment != environment:
+                        return failure('configuration_error', 'Source-server environment changed; retire and rediscover the instance before using it.')
+                    runtime.source_environment = environment
                 if getattr(definition, 'bundled_server', None) == 'filesystem':
                     with self._metadata_lock:
                         definitions = tuple(server.definition for server in self._servers.values())
@@ -244,6 +257,23 @@ class LocalMCPManager:
             return None
         return id(self), revision, repr(definition), repr(policy)
 
+    def source_focus_token(self, server_id):
+        """Bind short-lived source references to current operator grants/configuration."""
+        with self._metadata_lock:
+            runtime = self._servers.get(server_id)
+            if self._closed or runtime is None:
+                return None
+            definition, revision = runtime.definition, runtime.configuration_revision
+        try:
+            configuration = source_configuration(definition)
+            if runtime.source_environment is not None and runtime.source_environment != source_environment_token(definition):
+                return None
+        except (OSError, ValueError, TypeError, KeyError):
+            return None
+        if configuration is None:
+            return None
+        return id(self), revision, repr(definition), configuration[0]
+
     def executor(self, intent_name: str, *, cancel_event: Event | None = None) -> MCPToolExecutor:
         """Resolve a discovered capability without starting a process."""
         with self._metadata_lock:
@@ -269,6 +299,14 @@ class LocalMCPManager:
             getattr(definition, "bundled_server", None) == "filesystem"
             and name in MUTATIONS
         )
+        browser_action = getattr(definition, 'bundled_server', None) == 'browser' and name == 'execute_action'
+        if browser_action:
+            candidate = self._browser_approvals.match(definition, request.arguments)
+            if candidate is None:
+                return failure('approval_missing', 'Inspect the exact form with prepare_action again; its proposal is missing, changed or expired.')
+            if not confirmed:
+                return replace(failure('confirmation_required', 'The exact browser form requires explicit confirmation.'),
+                               data={'browser_action':candidate})
         if filesystem_mutation:
             try:
                 with self._metadata_lock:
@@ -287,6 +325,7 @@ class LocalMCPManager:
         runtime = self._servers.get(server_id)
         if runtime is None:
             return failure("server_not_found", "The MCP server is not configured.")
+        self._browser_approvals.clear(server_id)
         with self._metadata_lock:
             runtime.retire_requests += 1
             runtime.generation += 1
@@ -301,6 +340,7 @@ class LocalMCPManager:
                     return closed
             with self._metadata_lock:
                 runtime.state = ServerState.RETIRED
+                runtime.source_environment = None
             return ToolResult(success=True)
         finally:
             with self._metadata_lock:
@@ -380,22 +420,34 @@ class MCPToolExecutor:
                 arguments = resolve_arguments(definition, self._tool_name, arguments, cancel_event=cancel_event)
             except WorkspaceReferenceError as error:
                 return failure(error.code, str(error))
-            token = self._manager.filesystem_focus_token(self._server_id)
+            if getattr(definition, 'bundled_server', None) == 'browser' and self._tool_name == 'execute_action':
+                if self._manager._browser_approvals.match(definition,arguments,consume=True) is None:
+                    return failure('approval_missing','The browser proposal changed or expired; inspect it again.')
+            source_bundle = getattr(definition, 'bundled_server', None) in ('websearch', 'webread')
+            focus_token = self._manager.source_focus_token if source_bundle else self._manager.filesystem_focus_token
+            token = focus_token(self._server_id)
+            report_tool('action', self._intent.name)
             outcome = self._manager._request(
                 self._server_id, "invoke", tool_name=self._tool_name,
                 arguments=arguments, cancel_event=cancel_event,
                 configuration_revision=self._configuration_revision,
             )
-            if outcome.success and token is not None and token == self._manager.filesystem_focus_token(self._server_id):
+            if outcome.success:
+                report_tool('completed', self._intent.name, result=outcome)
+                if getattr(definition, 'bundled_server', None) == 'browser' and self._tool_name == 'prepare_action':
+                    self._manager._browser_approvals.remember(definition,arguments,outcome)
+            if outcome.success and token is not None and token == focus_token(self._server_id):
                 outcome = replace(outcome, host_context={
                     'server': self._server_id, 'tool': self._tool_name,
                     'arguments': deepcopy(arguments), 'token': token,
                     'observed_at': time.monotonic(),
+                    **({'bundle': definition.bundled_server} if source_bundle else {}),
                 })
             return outcome
 
         adapter = ExternalToolAdapter(
             self._intent,
             invoke,
+            feedback=False,
         )
         return adapter.execute(request)

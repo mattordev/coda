@@ -84,3 +84,23 @@ successful live direct and natural-language checks remain separate validation.
 References: [SearXNG search API](https://docs.searxng.org/dev/search_api.html),
 [reference example](https://github.com/jetsonhacks/searxng-search/blob/main/tools/searxng/search_searxng.py),
 [bundled MCP configuration](../../docs/mcp-bundled.md).
+
+## Source-page reading policy
+
+The current search tool returns snippets and does not fetch the linked pages.
+The [web source selection policy](../../docs/web-source-selection.md) defines the
+hybrid search/research behaviour, explicit numbered source choice,
+evidence labels, bounded requests and privacy/approval boundaries. HTTP retrieval
+and optional browser implementation retain their own acceptance gates; this
+policy does not enable either capability or change an existing private grant.
+
+The source workflow preserves the provider fallback while bounding queries to
+1,000 characters, titles to 300, snippets to 2,000 and URLs to 4,096. It scans at
+most 100 candidate entries. Search configuration is at most 64 KiB; SearXNG JSON
+is at most 1 MiB plus the one-byte overflow probe. Invalid/credential-bearing
+result URLs are omitted. Ordinary spoken results give a brief conversational
+overview of the snippets. Numbered titles, complete links and snippets remain in
+tool output; URLs are not read aloud. Automatic interpretation uses the existing
+privacy-controlled model path, while direct mode/unavailable interpretation gives
+a short snippet receipt. Neither mode fetches result pages. Reading selected
+sources needs the separately permitted page reader.

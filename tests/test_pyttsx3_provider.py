@@ -7,6 +7,17 @@ from tts.pyttsx3_provider import Pyttsx3Provider, Pyttsx3Session
 
 
 class Pyttsx3ProviderTests(unittest.TestCase):
+    def test_feedback_hook_runs_when_engine_loop_starts(self):
+        engine, publish = Mock(), Mock()
+        engine.getProperty.return_value = []
+        engine.isBusy.return_value = False
+        engine.startLoop.side_effect = lambda *_: publish.assert_not_called()
+        engine.iterate.side_effect = lambda: publish.assert_called_once_with()
+        session = Pyttsx3Provider(engine_factory=lambda: engine).create_session(
+            'One moment.', on_playback_start=publish)
+        self.assertTrue(session.play(threading.Event()))
+        publish.assert_called_once_with()
+
     def test_provider_configures_and_reuses_engine(self):
         engine = Mock()
         engine.getProperty.return_value = [
