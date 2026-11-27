@@ -13,6 +13,22 @@ class ScheduleStoreTests(unittest.TestCase):
         self.path = Path(directory.name) / "scheduler.sqlite"
         self.store = ScheduleStore(self.path)
 
+    def test_pause_resume_and_cancel_survive_reopen(self):
+        task = self.store.create("probe", "private-binding", "UTC", 100, interval=10)
+        self.assertTrue(self.store.pause(task))
+        reopened = ScheduleStore(self.path)
+        self.assertIsNone(reopened.claim(100, grace=0))
+        self.assertEqual(reopened.list_tasks()[0]["status"], "paused")
+        self.assertNotIn("binding", reopened.list_tasks()[0])
+        self.assertTrue(reopened.resume(task))
+        self.assertEqual(reopened.claim(100, grace=0)["state"], "claimed")
+        self.assertTrue(reopened.cancel(task))
+        self.assertTrue(reopened.finish(task, 100, "completed"))
+        reopened = ScheduleStore(self.path)
+        self.assertFalse(reopened.resume(task))
+        self.assertIsNone(reopened.claim(110, grace=0))
+        self.assertEqual(reopened.list_tasks()[0]["status"], "cancelled")
+
     def test_competing_workers_cannot_claim_the_same_occurrence(self):
         task_id = self.store.create("probe", "binding", "UTC", 100, interval=10)
         other = ScheduleStore(self.path)

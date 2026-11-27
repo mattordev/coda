@@ -20,8 +20,11 @@ class ScheduleStore:
                     task_id TEXT NOT NULL REFERENCES tasks(id), due INTEGER NOT NULL,
                     state TEXT NOT NULL, PRIMARY KEY (task_id, due)
                 )""")
-                db.execute("PRAGMA user_version = 1")
-            elif version != 1:
+            if version in (0, 1):
+                db.execute("""ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'cancelled'))""")
+                db.execute("PRAGMA user_version = 2")
+            elif version != 2:
                 raise ValueError("Unsupported schedule database version.")
 
     @contextmanager
@@ -46,15 +49,41 @@ class ScheduleStore:
         with self._write() as db:
             if db.execute("SELECT count(*) FROM tasks").fetchone()[0] >= 128:
                 raise ValueError("Schedule task limit reached.")
-            db.execute("INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
+            db.execute("INSERT INTO tasks (id, action, binding, timezone, due, interval) VALUES (?, ?, ?, ?, ?, ?)",
                        (task_id, action, binding, timezone, due, interval))
         return task_id
+
+    def list_tasks(self):
+        """Read schedule definitions without exposing their approval bindings."""
+        with self._write() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id, action, timezone, due, interval, status FROM tasks ORDER BY rowid"
+            )]
+
+    def pause(self, task_id):
+        return self._change_status(task_id, "paused", ("active",))
+
+    def resume(self, task_id):
+        return self._change_status(task_id, "active", ("paused",))
+
+    def cancel(self, task_id):
+        """Cancel future occurrences. A worker owns any already claimed run."""
+        return self._change_status(task_id, "cancelled", ("active", "paused"))
+
+    def _change_status(self, task_id, target, allowed):
+        with self._write() as db:
+            # A one-time task with no due date has already been consumed.
+            result = db.execute("""UPDATE tasks SET status = ?,
+                due = CASE WHEN ? = 'cancelled' THEN NULL ELSE due END
+                WHERE id = ? AND due IS NOT NULL AND status IN (?, ?)""",
+                (target, target, task_id, allowed[0], allowed[-1]))
+            return result.rowcount == 1
 
     def claim(self, now, *, grace):
         """Record and advance one occurrence atomically before handing it to a worker."""
         with self._write() as db:
             task = db.execute("""SELECT tasks.* FROM tasks
-                WHERE due <= ? AND NOT EXISTS (
+                WHERE status = 'active' AND due <= ? AND NOT EXISTS (
                     SELECT 1 FROM runs WHERE task_id = tasks.id AND state = 'claimed'
                 ) ORDER BY due, id LIMIT 1""", (now,)).fetchone()
             if task is None:
