@@ -572,6 +572,7 @@ def _execution_loop(stop_event):
         
 def _event_loop(stop_event):
     """Process runtime results until shutdown"""
+    next_schedule_announcement = 0.0
     while not stop_event.is_set():
         try:
             notice = schedule_notices.get_nowait()
@@ -580,6 +581,20 @@ def _event_loop(stop_event):
         else:
             state = notice["state"].replace("_", " ")
             print(f"CODA: Scheduled task {notice['id']} {state}. Say schedule history for details.")
+            now = time.monotonic()
+            if (
+                now >= next_schedule_announcement
+                and runtime_state.get_input_mode() == "wake word"
+                and active_request_state.active_request() is None
+                and not follow_up_state.is_active()
+                and not speech_playback_controller.is_playing()
+            ):
+                runtime_queues.speech.put(SpeechTask(
+                    request_id=f"schedule-{notice['id']}-{notice['due']}",
+                    text=f"A scheduled task {state}. You can ask for schedule history.",
+                    cancel_event=threading.Event(),
+                ))
+                next_schedule_announcement = now + 30
         runtime_event = runtime_queues.events.get(timeout=0.1)
 
         if runtime_event is None:
