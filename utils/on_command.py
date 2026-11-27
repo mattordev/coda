@@ -3,6 +3,7 @@ import json
 import re
 from utils.console import print_line as print
 from copy import deepcopy
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Thread
 import time
@@ -27,6 +28,10 @@ from ai.intents.router import IntentRouter, ExactMatchStrategy, ExampleMatchStra
 from ai.privacy.sanitizer import sanitize_text, sanitize_structure
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.result_summary import _presentation_style, _question_text
+from utils.web_requests import normalize_spoken, browser_request
+from ai.tools.captures import retain_capture
+from runtime.schedule_commands import schedule_command
+from runtime.action_commands import action_command
 
 
 _intent_router = None
@@ -34,6 +39,12 @@ _intent_registry = None
 _mcp_catalog = None
 _pending_confirmation = None
 _pending_source_read = None
+
+
+@dataclass(frozen=True)
+class _LocalConfirmation:
+    callback: Callable[[Event | None], str]
+    expires: float
 
 
 def _cancel_source_offer():
@@ -299,6 +310,7 @@ def _tool_outcome(request, outcome, *, cancel_event=None, debug=False):
     global _pending_source_read
     if cancel_event is not None and cancel_event.is_set():
         return CommandResult(handled=False)
+    outcome = retain_capture(outcome)
     interpreted = interpret_result(outcome, request.message, cancel_event=cancel_event)
     if interpreted.text is None or (cancel_event is not None and cancel_event.is_set()):
         return CommandResult(handled=False)
@@ -433,7 +445,7 @@ def on_command(msg, commands, debug=False, cancel_event: Event | None = None):
 def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     global _pending_confirmation
     global _pending_source_read
-    normalized_message = msg.strip()
+    normalized_message = normalize_spoken(msg)
 
     cancelled_result = _get_cancellation_result(cancel_event, debug)
     if cancelled_result is not None:
@@ -463,7 +475,7 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     pending = _pending_confirmation
     _pending_confirmation = None
     if pending is not None:
-        request, executor, expires = pending
+        expires = pending.expires if isinstance(pending, _LocalConfirmation) else pending[2]
         answer = normalized_message.lower().rstrip(".!?")
         if answer in ("cancel", "no", "deny"):
             llm_service.clear_tool_focus()
@@ -471,7 +483,19 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         if answer in ("confirm", "yes", "approve"):
             if time.monotonic() >= expires:
                 return CommandResult(handled=True, response_text="That confirmation expired. Please request the action again.")
-            return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+            if isinstance(pending, tuple):
+                request, executor = pending[0], pending[1]
+                return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+            callback = pending.callback
+            if callable(callback):
+                return CommandResult(handled=True, response_text=callback(cancel_event))
+
+    local_reply = action_command(normalized_message.rstrip(".!?")) or schedule_command(msg.strip())
+    if local_reply is not None:
+        response, confirm = local_reply
+        if confirm is not None:
+            _pending_confirmation = _LocalConfirmation(confirm, time.monotonic() + 60)
+        return CommandResult(handled=True, response_text=response, open_follow_up=confirm is not None)
 
     answer = normalized_message.casefold().rstrip('.!?')
     answer = ' '.join(answer.replace(',', ' ').split())
@@ -491,6 +515,21 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
             return CommandResult(True, response_text="There isn't a pending page read. Say which source to read, such as read the first source.",
                                  open_follow_up=True)
 
+    browser_args = browser_request(normalized_message)
+    if browser_args is not None and _mcp_catalog is not None:
+        from ai.intents.models import IntentRequest
+        servers = [name for name,metadata in _mcp_catalog.manager.inspect().items()
+                   if metadata.get('bundle') == 'browser' and metadata.get('enabled') and metadata.get('trusted')]
+        if len(servers) != 1:
+            return CommandResult(True,response_text='Choose one configured browser instance with an explicit tool command.')
+        server = servers[0]
+        _mcp_catalog.discover(server_id=server, cancel_event=cancel_event)
+        try:
+            executor = _mcp_catalog.manager.executor('mcp.'+server+'.inspect_page')
+        except ValueError:
+            return CommandResult(True,response_text='The browser tool is not configured or available.')
+        request = IntentRequest(executor._intent,normalized_message,1,arguments=browser_args)
+        return _tool_outcome(request,executor.execute(request,cancel_event=cancel_event),cancel_event=cancel_event,debug=debug)
     native_match = None if _intent_registry is None else IntentRouter(_intent_registry, strategies=(
         ExactMatchStrategy(), ExampleMatchStrategy(), CommandPrefixStrategy(),
     )).route(normalized_message)

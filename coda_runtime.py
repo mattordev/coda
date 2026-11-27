@@ -13,6 +13,9 @@ import utils.speak_response as speech
 from ai.telemetry import logger as telemetry_logger
 from ai.request_context import current_request, request_context
 from runtime import model_warmup
+from runtime.schedule_worker import SchedulerService
+from runtime.schedule_commands import configured_policy_path
+from runtime.action_commands import background_actions
 
 import os
 import sys
@@ -32,6 +35,7 @@ import time
 import threading
 import re
 from pathlib import Path
+from queue import Empty, Full, Queue
 
 commands = {}  # ALL COMMANDS TO BE USED BY OPERATOR
 wakewords = []
@@ -73,8 +77,37 @@ speech_worker = SpeechWorker(
 )
 shutdown_lock = threading.Lock()
 shutdown_started = threading.Event()
+scheduler_service = None
+schedule_notices = Queue(maxsize=8)
 latest_request_lock = threading.Lock()
 latest_request_id = None
+
+
+def start_scheduler():
+    """Opt into scheduling using an absolute operator policy path."""
+    global scheduler_service
+    try:
+        policy = configured_policy_path()
+    except (OSError, ValueError):
+        print("Scheduler disabled: CODA_SYSTEM_POLICY must point to an existing absolute file.")
+        return
+    if policy is None:
+        return
+    with shutdown_lock:
+        if shutdown_started.is_set() or scheduler_service is not None:
+            return
+        scheduler_service = SchedulerService(
+            policy.with_suffix(".schedules.sqlite"), policy, notify=_queue_schedule_notice,
+        )
+        scheduler_service.start()
+
+
+def _queue_schedule_notice(outcome):
+    try:
+        schedule_notices.put_nowait(outcome)
+    except Full:
+        # The occurrence remains available in durable scheduler history.
+        pass
 
 
 # scans for cli args in the form of --flag value or --flag=value, returns the value or None if not found
@@ -539,7 +572,32 @@ def _execution_loop(stop_event):
         
 def _event_loop(stop_event):
     """Process runtime results until shutdown"""
+    next_schedule_announcement = 0.0
     while not stop_event.is_set():
+        try:
+            notice = schedule_notices.get_nowait()
+        except Empty:
+            pass
+        else:
+            if "service_error" in notice:
+                print(f"CODA: {notice['service_error']}")
+                continue
+            state = notice["state"].replace("_", " ")
+            print(f"CODA: Scheduled task {notice['id']} {state}. Say schedule history for details.")
+            now = time.monotonic()
+            if (
+                now >= next_schedule_announcement
+                and runtime_state.get_input_mode() == "wake word"
+                and active_request_state.active_request() is None
+                and not follow_up_state.is_active()
+                and not speech_playback_controller.is_playing()
+            ):
+                runtime_queues.speech.put(SpeechTask(
+                    request_id=f"schedule-{notice['id']}-{notice['due']}",
+                    text=f"A scheduled task {state}. You can ask for schedule history.",
+                    cancel_event=threading.Event(),
+                ))
+                next_schedule_announcement = now + 30
         runtime_event = runtime_queues.events.get(timeout=0.1)
 
         if runtime_event is None:
@@ -746,6 +804,10 @@ def shutdown_runtime(timeout_seconds=4.0):
     stop_voice_thread(timeout_seconds=timeout_seconds)
 
     active_request_state.cancel_active()
+    if not background_actions.close(timeout_seconds):
+        print("Background action cleanup has not finished.")
+    if scheduler_service is not None and not scheduler_service.close(timeout=timeout_seconds):
+        print("Scheduler cleanup has not finished.")
     stop_execution_thread(timeout_seconds=timeout_seconds)
     command.shutdown_tools(timeout_seconds=timeout_seconds)
     model_warmup.shutdown(timeout_seconds=timeout_seconds)
@@ -816,6 +878,7 @@ def _run_runtime(skip_update_check=False):
     from utils.update_bootstrap import acknowledge_handoff
     acknowledge_handoff(Path(__file__).resolve().parent)
     command.start_tools()
+    start_scheduler()
     stt_service.start()
     warmup = model_warmup.start()
     startup_models = warmup.snapshot()

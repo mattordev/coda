@@ -19,7 +19,7 @@ from ai.telemetry.models import WorkloadPurpose
 from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.presentation import prepare_tool_response
 from ai.tools.progress import report_tool
-from utils.retrieval_evidence import evidence_cards, evidence_answer
+from utils.retrieval_evidence import evidence_cards, evidence_answer, compare_evidence
 from ai.tools.result_summary import (_directory_entries, _filename_search, _question_text, _payload,
                                      filesystem_fact_summary, web_page_summary, web_search_summary, web_sources_summary, spoken_search_text)
 
@@ -161,10 +161,22 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
     direct = safe_diagnostic(prepare_tool_response(result, question=question), max_chars=MAX_RESPONSE_CHARS)
     if not result.success:
         return Interpretation(direct)
+    if re.fullmatch(r'was that it[.!?]?',question.strip(),re.I):
+        return Interpretation(direct + ' Say show tool output for the retained details.')
+    comparison = compare_evidence(result.data,question)
+    if comparison is not None:
+        return Interpretation(safe_diagnostic(comparison,max_chars=MAX_RESPONSE_CHARS),partial=_partial_source(result.data))
     browser_page = result.data.get('structuredContent', {}) if isinstance(result.data, dict) else {}
+    if isinstance(browser_page,dict) and browser_page.get('kind') == 'browser_page' and re.search(r'\bpage title\b',question,re.I):
+        fields = browser_page.get('fields',{})
+        title = fields.get('title',browser_page.get('title'))
+        return Interpretation('The page title is ' + safe_diagnostic(title,max_chars=300) if isinstance(title,str) and title else 'The page returned no title.')
     if isinstance(browser_page,dict) and browser_page.get('kind') in ('browser_proposal','browser_action'):
         return Interpretation(direct)
     if isinstance(browser_page, dict) and browser_page.get('kind') == 'browser_page' and browser_page.get('capture'):
+        if re.search(r'\b(where|saved|location|anywhere)\b',question,re.I):
+            path = browser_page['capture'].get('path')
+            return Interpretation('The screenshot is saved at ' + path if path else 'There is no saved local copy. The image is retained only in the tool result.')
         return Interpretation(direct)
     try:
         source = _source_text(result.data)
@@ -340,6 +352,8 @@ def interpret_result(result, question, *, cancel_event=None, force=False):
 def is_result_follow_up(question):
     """Conservative reference detection, never path resolution or action selection."""
     text = question.casefold().strip()
+    if re.fullmatch(r'(?:was that it|is (?:the |that )?tool result saved anywhere|where is (?:it|the screenshot|the capture)(?: saved)?)[.!?]?',text):
+        return True
     if text.startswith('mcp.') or re.search(r'[/\\]|\b(again|refresh|reread|another|different|other|latest|current)\b', text):
         return False
     return bool(

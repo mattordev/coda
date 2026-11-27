@@ -3,9 +3,43 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from commands import status as status_command
+from ai.intents.dispatcher import IntentDispatcher
+from ai.intents.models import IntentRequest
 
 
 class StatusCommandTests(unittest.TestCase):
+    def test_native_dispatch_returns_the_report_it_presents(self):
+        report = {"cpu_usage_percent": 25.0, "coda_volume": None}
+        request = IntentRequest(intent=status_command.INTENT, message="system status", confidence=1.0)
+        with (
+            patch.object(status_command, "get_system_status_data", return_value=report) as collect,
+            patch.object(status_command, "print_system_status") as present,
+        ):
+            result = IntentDispatcher({"status": status_command}).execute(request)
+        self.assertTrue(result.success)
+        self.assertEqual(result.data, report)
+        collect.assert_called_once_with()
+        present.assert_called_once_with(report)
+
+    def test_reads_cpu_and_workspace_volume_on_the_host(self):
+        usage = status_command.get_resource_usage()
+        self.assertLessEqual(0, usage["cpu_usage_percent"])
+        self.assertLessEqual(usage["cpu_usage_percent"], 100)
+        volume = usage["coda_volume"]
+        self.assertGreater(volume["total_bytes"], 0)
+        self.assertLessEqual(0, volume["free_bytes"])
+        self.assertLessEqual(volume["free_bytes"], volume["total_bytes"])
+
+    def test_unavailable_probes_do_not_hide_other_metrics(self):
+        with (
+            patch.object(status_command.psutil, "cpu_percent", side_effect=OSError),
+            patch.object(status_command.psutil, "disk_usage",
+                         return_value=SimpleNamespace(total=1024, free=512)),
+        ):
+            usage = status_command.get_resource_usage()
+        self.assertIsNone(usage["cpu_usage_percent"])
+        self.assertEqual(usage["coda_volume"], {"total_bytes": 1024, "free_bytes": 512})
+
     def test_chooses_requested_report_type(self):
         cases = (
             ("show system status", "system"),

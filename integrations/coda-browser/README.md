@@ -64,12 +64,16 @@ tool. At most ten named selectors of 200 characters return at most 1,000 text
 characters each. The ordinary snapshot has a separate text/element ceiling.
 
 Capture is one 1000×700 viewport, not a full-page scroll. The default PNG ceiling
-is 512 KiB. Image bytes are returned only in the MCP tool result, kept out of
+is 512 KiB. Image bytes are returned in the MCP tool result, kept out of
 ordinary model/history context, and never written to a caller-selected file.
-CODA's text console/chat currently reports capture metadata; it is not a general
-image viewer. A visual MCP client can consume the image content block. Persistent
-artifact storage is zero; retained in-memory results follow the existing tool
-result lifetime. This does not enable cloud image analysis.
+CODA's text console/chat reports the saved location; it is not a general image
+viewer. The host retains up to ten viewport PNGs in the user-local
+`CODA/captures` cache (`%LOCALAPPDATA%` on Windows, `~/.cache` elsewhere).
+Each saved PNG is at most 1 MiB, uses a host-generated filename, and replaces
+only older CODA capture files when the cache fills. Say “show tool output” for
+the path or ask “Is the tool result saved anywhere?” A visual MCP client can
+also consume the image content block. Images stay out of model/history context;
+this does not enable cloud image analysis. Failed local saving is reported.
 
 ## Confirmed native forms
 

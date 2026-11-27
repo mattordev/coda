@@ -20,7 +20,8 @@ class NativeCommandAdapter:
         """Execute a native command and normalize its outcomes."""
         try:
             report_tool('action', request.intent.name)
-            success = bool(self._command.run(request))
+            outcome = self._command.run(request)
+            result = outcome if isinstance(outcome, ToolResult) else ToolResult(success=bool(outcome))
         except Exception:
             return ToolResult(
                 success=False,
@@ -30,7 +31,6 @@ class NativeCommandAdapter:
                 ),
             )
 
-        result = ToolResult(success=success)
-        if success:
+        if result.success:
             report_tool('completed', request.intent.name, result=result)
         return result
