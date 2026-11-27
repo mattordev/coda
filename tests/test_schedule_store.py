@@ -1,12 +1,28 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import subprocess
+import sys
 import unittest
 
 from runtime.schedule_store import ScheduleStore
 
 
 class ScheduleStoreTests(unittest.TestCase):
+    def test_headless_inspection_reports_only_public_task_fields(self):
+        task = self.store.create("probe", "private-binding", "UTC", 100)
+        command = [sys.executable, "-m", "runtime.schedule_inspect"]
+        report = subprocess.run([*command, str(self.path), "tasks"],
+                                capture_output=True, text=True, timeout=10, check=True)
+        self.assertEqual(json.loads(report.stdout)[0]["id"], task)
+        self.assertNotIn("private-binding", report.stdout)
+        missing = self.path.with_name("missing.sqlite")
+        error = subprocess.run([*command, str(missing), "tasks"],
+                               capture_output=True, text=True, timeout=10)
+        self.assertEqual(error.returncode, 1)
+        self.assertFalse(missing.exists())
+
     def test_attention_survives_restart_and_acknowledgement_does_not_replay(self):
         task = self.store.create("probe", "binding", "UTC", 100)
         self.store.claim(100, grace=0)

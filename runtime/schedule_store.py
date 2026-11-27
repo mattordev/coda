@@ -1,6 +1,7 @@
 """Durable schedule state. All times are integer UTC epoch seconds."""
 
 from contextlib import contextmanager
+from pathlib import Path
 import sqlite3
 from uuid import uuid4
 
@@ -42,6 +43,29 @@ class ScheduleStore:
             db.close()
 
     @staticmethod
+    @contextmanager
+    def _read(path):
+        uri = Path(path).resolve().as_uri() + "?mode=ro"
+        db = sqlite3.connect(uri, uri=True, timeout=1)
+        try:
+            db.row_factory = sqlite3.Row
+            yield db
+        finally:
+            db.close()
+
+    @classmethod
+    def inspect(cls, path, view):
+        """Read an existing schedule database without initializing or migrating it."""
+        queries = {
+            "tasks": "SELECT id, action, timezone, due, interval, status FROM tasks ORDER BY rowid",
+            "history": "SELECT task_id, due, state FROM runs ORDER BY rowid DESC",
+            "pending": """SELECT task_id, due, state FROM runs
+                WHERE state != 'claimed' AND acknowledged = 0 ORDER BY rowid LIMIT 25""",
+        }
+        with cls._read(path) as db:
+            return [dict(row) for row in db.execute(queries[view])]
+
+    @staticmethod
     def _validate_timing(due, interval):
         if type(due) is not int or not 0 <= due < 2**62:
             raise ValueError("Invalid schedule timestamp.")
@@ -76,10 +100,7 @@ class ScheduleStore:
 
     def list_tasks(self):
         """Read schedule definitions without exposing their approval bindings."""
-        with self._write() as db:
-            return [dict(row) for row in db.execute(
-                "SELECT id, action, timezone, due, interval, status FROM tasks ORDER BY rowid"
-            )]
+        return self.inspect(self.path, "tasks")
 
     def current_binding(self, task_id):
         """Read the revision privately for a conditional edit."""
@@ -145,17 +166,11 @@ class ScheduleStore:
 
     def history(self):
         """Read retained occurrence records, newest first."""
-        with self._write() as db:
-            return [dict(row) for row in db.execute(
-                "SELECT task_id, due, state FROM runs ORDER BY rowid DESC"
-            )]
+        return self.inspect(self.path, "history")
 
     def pending_attention(self):
         """Return a bounded batch of terminal occurrences awaiting acknowledgement."""
-        with self._write() as db:
-            return [dict(row) for row in db.execute("""SELECT task_id, due, state
-                FROM runs WHERE state != 'claimed' AND acknowledged = 0
-                ORDER BY rowid LIMIT 25""")]
+        return self.inspect(self.path, "pending")
 
     def acknowledge(self, task_id, due):
         """Mark a reported outcome as seen without changing its execution history."""
