@@ -3,6 +3,7 @@ import json
 import re
 from utils.console import print_line as print
 from copy import deepcopy
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event, Thread
 import time
@@ -29,6 +30,8 @@ from ai.tools.error_feedback import safe_diagnostic
 from ai.tools.result_summary import _presentation_style, _question_text
 from utils.web_requests import normalize_spoken, browser_request
 from ai.tools.captures import retain_capture
+from runtime.schedule_commands import schedule_command
+from runtime.action_commands import action_command
 
 
 _intent_router = None
@@ -36,6 +39,12 @@ _intent_registry = None
 _mcp_catalog = None
 _pending_confirmation = None
 _pending_source_read = None
+
+
+@dataclass(frozen=True)
+class _LocalConfirmation:
+    callback: Callable[[Event | None], str]
+    expires: float
 
 
 def _cancel_source_offer():
@@ -466,7 +475,7 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
     pending = _pending_confirmation
     _pending_confirmation = None
     if pending is not None:
-        request, executor, expires = pending
+        expires = pending.expires if isinstance(pending, _LocalConfirmation) else pending[2]
         answer = normalized_message.lower().rstrip(".!?")
         if answer in ("cancel", "no", "deny"):
             llm_service.clear_tool_focus()
@@ -474,7 +483,19 @@ def _on_command(msg, commands, debug=False, cancel_event: Event | None = None):
         if answer in ("confirm", "yes", "approve"):
             if time.monotonic() >= expires:
                 return CommandResult(handled=True, response_text="That confirmation expired. Please request the action again.")
-            return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+            if isinstance(pending, tuple):
+                request, executor = pending[0], pending[1]
+                return _tool_outcome(request, executor.execute(request, cancel_event=cancel_event, confirmed=True), cancel_event=cancel_event, debug=debug)
+            callback = pending.callback
+            if callable(callback):
+                return CommandResult(handled=True, response_text=callback(cancel_event))
+
+    local_reply = action_command(normalized_message.rstrip(".!?")) or schedule_command(msg.strip())
+    if local_reply is not None:
+        response, confirm = local_reply
+        if confirm is not None:
+            _pending_confirmation = _LocalConfirmation(confirm, time.monotonic() + 60)
+        return CommandResult(handled=True, response_text=response, open_follow_up=confirm is not None)
 
     answer = normalized_message.casefold().rstrip('.!?')
     answer = ' '.join(answer.replace(',', ' ').split())
