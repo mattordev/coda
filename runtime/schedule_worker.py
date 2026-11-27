@@ -1,5 +1,10 @@
 """Claim one scheduled occurrence and revalidate its grant before dispatch."""
 
+from contextlib import contextmanager
+from pathlib import Path
+import os
+from time import time
+
 from runtime.system_policy import load_system_policy
 
 
@@ -33,3 +38,38 @@ def run_due_schedule(store, policy_path, execute, *, now, grace):
             state = "interrupted"
     store.finish(occurrence["id"], occurrence["due"], state)
     return {"id": occurrence["id"], "due": occurrence["due"], "state": state}
+
+
+class SchedulerAlreadyRunning(RuntimeError):
+    """Another worker holds the schedule database's lifetime lock."""
+
+
+@contextmanager
+def scheduler_ownership(database_path):
+    """Hold an OS lock until exit or process death. Keep the lock file in place."""
+    path = Path(database_path).resolve()
+    with path.with_name(path.name + ".worker.lock").open("a+b") as lock:
+        lock.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise SchedulerAlreadyRunning("Could not acquire scheduler ownership.") from exc
+        yield
+
+
+def run_scheduler(store, policy_path, execute, stop, *, grace=30):
+    """Run on a service thread, recovering interrupted work once per ownership."""
+    with scheduler_ownership(store.path):
+        if stop.is_set():
+            return
+        store.recover_interrupted()
+        while not stop.is_set():
+            run_due_schedule(store, policy_path, execute, now=int(time()), grace=grace)
+            stop.wait(0.25)

@@ -2,12 +2,13 @@ import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+from threading import Event
 import unittest
 from unittest.mock import Mock, patch
 
 from runtime.schedule_approval import propose_schedule, save_confirmed_schedule
 from runtime.schedule_store import ScheduleStore
-from runtime.schedule_worker import run_due_schedule
+from runtime.schedule_worker import SchedulerAlreadyRunning, run_due_schedule, run_scheduler, scheduler_ownership
 from runtime.system_policy import SystemPolicyError
 
 
@@ -68,3 +69,18 @@ class ScheduleApprovalTests(unittest.TestCase):
         self.assertIsNone(run_due_schedule(self.store, self.policy, executor, now=proposal.due, grace=0))
         executor.assert_called_once()
         self.assertEqual(executor.call_args.args[0].argv, ("--version",))
+
+    def test_second_worker_cannot_recover_a_live_workers_claim(self):
+        proposal = self.propose()
+        save_confirmed_schedule(self.store, self.policy, proposal)
+        self.store.claim(proposal.due, grace=0)
+        stop = Event()
+        executor = Mock()
+        with scheduler_ownership(self.store.path):
+            with self.assertRaises(SchedulerAlreadyRunning):
+                run_scheduler(self.store, self.policy, executor, stop)
+            self.assertEqual(self.store.history()[0]["state"], "claimed")
+        with patch("runtime.schedule_worker.run_due_schedule", side_effect=lambda *a, **kw: stop.set()):
+            run_scheduler(self.store, self.policy, executor, stop)
+        self.assertEqual(self.store.history()[0]["state"], "interrupted")
+        executor.assert_not_called()
