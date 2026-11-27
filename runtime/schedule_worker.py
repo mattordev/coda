@@ -3,8 +3,11 @@
 from contextlib import contextmanager
 from pathlib import Path
 import os
+from threading import Event, Thread
 from time import time
+import sqlite3
 
+from runtime.schedule_store import ScheduleStore
 from runtime.system_policy import load_system_policy
 
 
@@ -73,3 +76,38 @@ def run_scheduler(store, policy_path, execute, stop, *, grace=30):
         while not stop.is_set():
             run_due_schedule(store, policy_path, execute, now=int(time()), grace=grace)
             stop.wait(0.25)
+
+
+class SchedulerService:
+    """Own the scheduler thread and its shutdown signal."""
+
+    def __init__(self, database_path, policy_path, execute):
+        self._stop = Event()
+        self._thread = Thread(
+            target=self._run, args=(database_path, policy_path, execute),
+            name="coda-scheduler", daemon=True,
+        )
+        self.failure = None
+
+    def _run(self, database_path, policy_path, execute):
+        try:
+            store = ScheduleStore(database_path)
+            run_scheduler(
+                store, policy_path,
+                lambda action, secrets: execute(action, secrets, self._stop),
+                self._stop,
+            )
+        except SchedulerAlreadyRunning:
+            self.failure = "Scheduler ownership is unavailable."
+        except (sqlite3.Error, OSError, ValueError):
+            self.failure = "Schedule storage is unavailable."
+
+    def start(self):
+        self._thread.start()
+
+    def close(self, timeout=5):
+        """Signal the executor as well as the idle loop and wait for ownership release."""
+        self._stop.set()
+        if self._thread.ident is not None:
+            self._thread.join(timeout)
+        return not self._thread.is_alive()

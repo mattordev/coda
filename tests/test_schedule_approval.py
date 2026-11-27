@@ -8,7 +8,9 @@ from unittest.mock import Mock, patch
 
 from runtime.schedule_approval import propose_schedule, save_confirmed_schedule
 from runtime.schedule_store import ScheduleStore
-from runtime.schedule_worker import SchedulerAlreadyRunning, run_due_schedule, run_scheduler, scheduler_ownership
+from runtime.schedule_worker import (
+    SchedulerAlreadyRunning, SchedulerService, run_due_schedule, run_scheduler, scheduler_ownership,
+)
 from runtime.system_policy import SystemPolicyError
 
 
@@ -84,3 +86,22 @@ class ScheduleApprovalTests(unittest.TestCase):
             run_scheduler(self.store, self.policy, executor, stop)
         self.assertEqual(self.store.history()[0]["state"], "interrupted")
         executor.assert_not_called()
+
+    def test_service_shutdown_signals_the_active_executor_and_releases_ownership(self):
+        proposal = self.propose()
+        save_confirmed_schedule(self.store, self.policy, proposal)
+        started = Event()
+
+        def execute(_action, _secrets, stop):
+            started.set()
+            return "cancelled" if stop.wait(5) else "failed"
+
+        service = SchedulerService(self.store.path, self.policy, execute)
+        self.addCleanup(service.close)
+        with patch("runtime.schedule_worker.time", return_value=proposal.due):
+            service.start()
+            self.assertTrue(started.wait(5))
+            self.assertTrue(service.close())
+        with scheduler_ownership(self.store.path):
+            self.assertIsNone(service.failure)
+            self.assertEqual(self.store.history()[0]["state"], "cancelled")
