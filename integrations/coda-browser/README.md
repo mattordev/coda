@@ -97,6 +97,8 @@ response, bound to this instance, arguments, configuration and a 60-second expir
 It consumes that candidate once, including on failure. Changing tools, fields,
 URL, selector, grants or configuration cannot transfer approval. A new inspection
 is necessary after expiry, retirement or an attempted action.
+The copied fingerprint includes a bound expiry. CODA checks it during re-inspection
+and the final network operation as well as when accepting the confirmation.
 
 After confirmation a new disposable browser re-inspects the form. Its observed
 DOM, controls, hidden values, destination, requested values and policy must match

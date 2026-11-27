@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -51,8 +52,9 @@ class BrowserHostApprovalTests(unittest.TestCase):
             allowed_tools=frozenset(('prepare_action','execute_action')),
             settings_json=json.dumps({'config_file':str(self.config)}))
         self.args={'url':'https://example.com/form','form_selector':'form','fields':{'message':'hello'}}
-        self.action={**self.args,'expected_fingerprint':'a'*64}
-        self.candidate={'kind':'browser_proposal','fingerprint':'a'*64,'selector':'form',
+        fingerprint='a'*64+'.'+str(int(time.time()*1000)+60000)
+        self.action={**self.args,'expected_fingerprint':fingerprint}
+        self.candidate={'kind':'browser_proposal','fingerprint':fingerprint,'selector':'form',
                         'fields':{'message':'hello'},'destination':'https://example.com/submit','body':'message=hello'}
         props={'url':{'type':'string'},'form_selector':{'type':'string'},'fields':{'type':'object'}}
         self.transport=Mock()

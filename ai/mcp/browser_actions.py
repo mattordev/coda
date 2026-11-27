@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 from threading import Lock
-from time import monotonic
+from time import monotonic, time
 
 from ai.mcp.bundled import INSTALL_ROOT
 
@@ -51,7 +51,9 @@ class BrowserApprovals:
         if token is None or not isinstance(data,dict) or data.get('kind') != 'browser_proposal':
             return
         fingerprint = data.get('fingerprint')
-        if not isinstance(fingerprint,str) or not re.fullmatch('[a-f0-9]{64}',fingerprint):
+        if not isinstance(fingerprint,str) or not re.fullmatch(r'[a-f0-9]{64}\.[0-9]{13}',fingerprint):
+            return
+        if not time()*1000 < int(fingerprint.split('.')[1]) <= time()*1000+60000:
             return
         expected = {'url':arguments.get('url'), 'form_selector':arguments.get('form_selector'),
                     'fields':arguments.get('fields',{}), 'expected_fingerprint':fingerprint}
@@ -76,7 +78,8 @@ class BrowserApprovals:
             if stored is None:
                 return None
             expires, previous_token, expected, data = stored
-            if expires < monotonic() or token is None or token != previous_token:
+            if (expires < monotonic() or time()*1000 >= int(fingerprint.split('.')[1])
+                    or token is None or token != previous_token):
                 self._pending.pop(key,None)
                 return None
             if arguments != expected:

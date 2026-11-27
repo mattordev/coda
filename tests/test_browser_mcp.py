@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -123,6 +124,23 @@ class BrowserMCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.data['structuredContent']['error']['code'],'browser_disabled')
             finally:
                 await asyncio.to_thread(transport.retire,'browser')
+
+    async def test_approval_expiring_during_reinspection_never_submits(self):
+        self.configure(actions_enabled=True)
+        now=[time.time()]
+        candidate={'kind':'browser_proposal','fingerprint':'a'*64,'destination':'https://example.com/submit',
+                   'body':'message=hello','fields':{'message':'hello'},'selector':'form'}
+        async def observed(*_,**__):
+            return {'proposal':deepcopy(candidate)},None
+        with patch.object(self.server.time,'time',side_effect=lambda:now[0]),patch.object(self.server,'render',side_effect=observed):
+            prepared=await self.server.prepare_action('https://example.com','form',{'message':'hello'})
+            async def slow_inspection(*_,**__):
+                now[0]+=61
+                return {'proposal':deepcopy(candidate)},None
+            with patch.object(self.server,'render',side_effect=slow_inspection),patch.object(self.server,'post_form') as post:
+                result=await self.server.execute_action('https://example.com','form',{'message':'hello'},prepared.structured_content['fingerprint'])
+            self.assertTrue(result.is_error)
+            post.assert_not_called()
 
 
 if __name__ == '__main__':

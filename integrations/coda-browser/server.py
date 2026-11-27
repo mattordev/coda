@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 from threading import Event
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -77,9 +78,12 @@ async def inspect_page(url: str, selectors: dict[str, str] | None = None,
         return failure('browser_error', 'The optional browser could not complete this operation. Ordinary web reading remains available.')
 
 
-def _bound_proposal(page, snapshot):
+def _bound_proposal(page, snapshot, expires=None):
     candidate = page['proposal']
-    candidate['fingerprint'] = hashlib.sha256((candidate['fingerprint'] + repr(snapshot)).encode()).hexdigest()
+    expires = int(time.time()*1000)+60000 if expires is None else expires
+    candidate['expires_at_ms'] = expires
+    digest = hashlib.sha256((candidate['fingerprint'] + repr(snapshot) + str(expires)).encode()).hexdigest()
+    candidate['fingerprint'] = digest + '.' + str(expires)
     return candidate
 
 
@@ -90,13 +94,22 @@ async def _form(url, form_selector, fields, expected_fingerprint=None):
         enabled, policy, limits, actions = snapshot
         if not enabled or not actions:
             return failure('action_denied','Browser form actions are disabled in the operator configuration.')
+        expires = None
+        if expected_fingerprint is not None:
+            try:
+                digest, expiry = expected_fingerprint.split('.')
+                expires = int(expiry)
+                if len(digest) != 64 or len(expiry) != 13 or time.time()*1000 >= expires:
+                    raise ValueError('Invalid or expired form fingerprint.')
+            except (ValueError,AttributeError):
+                return failure('form_changed','The form proposal is invalid or expired. Inspect it again.')
         def current():
             try:
-                return load_config() == snapshot
+                return load_config() == snapshot and (expires is None or time.time()*1000 < expires)
             except (OSError,ValueError,TypeError):
                 return False
         page, _ = await render(url,policy,limits,form_selector=form_selector,fields=fields,validate=current)
-        candidate = _bound_proposal(page,snapshot)
+        candidate = _bound_proposal(page,snapshot,expires)
         if not current():
             return failure('permission_denied','Browser permissions changed while inspecting the form.')
         if expected_fingerprint is None:
